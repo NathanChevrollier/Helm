@@ -83,6 +83,7 @@ pub fn run() {
             terminal::term_write,
             terminal::term_resize,
             terminal::term_close,
+            terminal::shell_history,
             files::fs_home,
             files::fs_list,
             files::fs_read,

@@ -1,6 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Circle, Search, Square, X } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -9,7 +12,7 @@ import { ensureConnected, useApp } from "../lib/store";
 import { broadcastInput, isBroadcasting, useBroadcast } from "../lib/broadcast";
 
 /** Terminal actuellement focalisé : cible des snippets. */
-export const focusedTerminal: { id: number | null } = { id: null };
+export const focusedTerminal: { id: number | null; focus?: () => void } = { id: null };
 
 const THEME = {
   background: "#0d1117",
@@ -111,18 +114,34 @@ export default function TerminalPane({
   visibleRef.current = visible;
   const broadcasting = useBroadcast((s) => s.active && s.targets.includes(paneId));
   const broadcastCount = useBroadcast((s) => s.targets.length);
+  const fontSize = useApp((s) => s.settings.terminalFontSize);
+  const searchRef = useRef<SearchAddon | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const openSearchRef = useRef<() => void>(() => {});
+  openSearchRef.current = () => {
+    setSearching(true);
+    requestAnimationFrame(() => searchInput.current?.select());
+  };
+  /** Enregistrement asciicast v2 : [secondes depuis le début, "o", texte]. */
+  const recording = useRef<{ start: number; cols: number; rows: number; events: [number, "o", string][]; decoder: TextDecoder } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   useEffect(() => {
     const term = new Terminal({
       theme: THEME,
       fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
-      fontSize: 14,
+      fontSize: useApp.getState().settings.terminalFontSize,
       cursorBlink: true,
       scrollback: 10000,
       allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const search = new SearchAddon();
+    term.loadAddon(search);
+    searchRef.current = search;
     // Seuls les liens web s'ouvrent : une sortie de commande ne doit pas pouvoir lancer autre chose.
     term.loadAddon(new WebLinksAddon((_e, url) => /^https?:\/\//i.test(url) && void openUrl(url)));
     term.open(host.current!);
@@ -176,7 +195,10 @@ export default function TerminalPane({
           term.rows,
           (e: TermEvent) => {
             if (e.type === "data") {
-              term.write(decode(e.data));
+              const bytes = decode(e.data);
+              term.write(bytes);
+              const rec = recording.current;
+              if (rec) rec.events.push([(performance.now() - rec.start) / 1000, "o", rec.decoder.decode(bytes, { stream: true })]);
               return;
             }
             setTerm(null);
@@ -236,6 +258,7 @@ export default function TerminalPane({
     term.onTitleChange((t) => onTitle?.(t));
     term.textarea?.addEventListener("focus", () => {
       focusedTerminal.id = idRef.current;
+      focusedTerminal.focus = () => term.focus();
     });
 
     // Collage : un bloc de plusieurs lignes s'exécuterait ligne par ligne dès le collage ; on
@@ -270,9 +293,33 @@ export default function TerminalPane({
     const hostEl = host.current!;
     hostEl.addEventListener("paste", onPaste, true);
 
+    // Taille de police : Ctrl+= / Ctrl+- / Ctrl+0 et Ctrl+molette, partagée par tous les terminaux.
+    const zoom = (delta: number | null) => {
+      const { settings, setSettings } = useApp.getState();
+      const size = delta === null ? 14 : Math.min(28, Math.max(9, settings.terminalFontSize + delta));
+      setSettings({ terminalFontSize: size });
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      zoom(e.deltaY < 0 ? 1 : -1);
+    };
+    hostEl.addEventListener("wheel", onWheel, { passive: false });
+
     // Ctrl+Shift+C / Ctrl+Shift+V, comme dans les terminaux Linux ; Ctrl+C reste SIGINT.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey) return true;
+      if (e.type !== "keydown" || !e.ctrlKey) return true;
+      if (!e.shiftKey && !e.altKey) {
+        if (e.code === "Equal" || e.code === "NumpadAdd") return (zoom(1), false);
+        if (e.code === "Minus" || e.code === "NumpadSubtract") return (zoom(-1), false);
+        if (e.code === "Digit0" || e.code === "Numpad0") return (zoom(null), false);
+        return true;
+      }
+      if (!e.shiftKey) return true;
+      if (e.code === "KeyF") {
+        openSearchRef.current();
+        return false;
+      }
       if (e.code === "KeyC") {
         const sel = term.getSelection();
         if (sel) void navigator.clipboard.writeText(sel);
@@ -311,6 +358,7 @@ export default function TerminalPane({
       clearTimeout(retryTimer);
       observer.disconnect();
       hostEl.removeEventListener("paste", onPaste, true);
+      hostEl.removeEventListener("wheel", onWheel);
       useBroadcast.getState().unregister(paneId);
       // Fermer le canal détache simplement la session tmux : elle continue sur le serveur.
       if (idRef.current != null) void api.termClose(idRef.current);
@@ -331,9 +379,94 @@ export default function TerminalPane({
     }
   }, [visible]);
 
+  // Changement de taille de police (depuis n'importe quel terminal) : appliqué à celui-ci.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || term.options.fontSize === fontSize) return;
+    term.options.fontSize = fontSize;
+    fitRef.current?.fit();
+  }, [fontSize]);
+
+  const find = (backwards = false) => {
+    if (!query) return;
+    const opts = { caseSensitive: false, decorations: { matchOverviewRuler: "#d29922", activeMatchColorOverviewRuler: "#3b82f6", matchBackground: "#d2992255", activeMatchBackground: "#3b82f6aa" } };
+    if (backwards) searchRef.current?.findPrevious(query, opts);
+    else searchRef.current?.findNext(query, opts);
+  };
+  const closeSearch = () => {
+    setSearching(false);
+    searchRef.current?.clearDecorations();
+    termRef.current?.focus();
+  };
+
+  const toggleRecording = async () => {
+    const term = termRef.current;
+    if (!term) return;
+    if (!recording.current) {
+      recording.current = { start: performance.now(), cols: term.cols, rows: term.rows, events: [], decoder: new TextDecoder() };
+      setIsRecording(true);
+      return;
+    }
+    const rec = recording.current;
+    recording.current = null;
+    setIsRecording(false);
+    const { notify } = useApp.getState();
+    if (rec.events.length === 0) return notify("Rien à enregistrer : aucune sortie pendant l'enregistrement.", "info");
+    const path = await save({
+      title: "Enregistrer la session",
+      defaultPath: `session-${label.replace(/[^\w.-]+/g, "_")}-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.cast`,
+      filters: [{ name: "Enregistrement asciicast", extensions: ["cast"] }],
+    });
+    if (!path) return;
+    const header = { version: 2, width: rec.cols, height: rec.rows, timestamp: Math.floor(Date.now() / 1000 - (performance.now() - rec.start) / 1000), title: label };
+    const content = [JSON.stringify(header), ...rec.events.map((e) => JSON.stringify([Number(e[0].toFixed(4)), e[1], e[2]]))].join("\n") + "\n";
+    try {
+      await api.saveTextFile(path, content);
+      notify(`Session enregistrée : ${path} (lecture avec asciinema play)`, "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
   return (
-    <div className="relative h-full w-full">
+    <div className="group/term relative h-full w-full">
       <div ref={host} className="h-full w-full overflow-hidden bg-bg" />
+      <div className={`absolute top-1 right-3 z-10 flex items-center gap-1 ${searching || isRecording ? "" : "opacity-0 group-hover/term:opacity-100"}`}>
+        {isRecording && (
+          <span className="flex items-center gap-1 rounded bg-danger/85 px-1.5 py-0.5 text-[10px] font-medium text-white">
+            <Circle size={8} fill="currentColor" /> REC
+          </span>
+        )}
+        {searching ? (
+          <span className="flex items-center gap-1 rounded-md border border-border bg-panel px-1.5 py-1 shadow-lg">
+            <input
+              ref={searchInput}
+              className="w-48 bg-transparent text-xs outline-none placeholder:text-muted/60"
+              placeholder="Rechercher (Entrée, Maj+Entrée)"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") find(e.shiftKey);
+                if (e.key === "Escape") closeSearch();
+              }}
+            />
+            <button className="text-muted hover:text-fg" title="Fermer (Échap)" onClick={closeSearch}>
+              <X size={12} />
+            </button>
+          </span>
+        ) : (
+          <button className="rounded bg-panel/90 p-1 text-muted hover:text-fg" title="Rechercher dans le terminal (Ctrl+Maj+F)" onClick={() => openSearchRef.current()}>
+            <Search size={13} />
+          </button>
+        )}
+        <button
+          className={`rounded bg-panel/90 p-1 hover:text-fg ${isRecording ? "text-danger" : "text-muted"}`}
+          title={isRecording ? "Arrêter et enregistrer la session" : "Enregistrer la session (asciicast)"}
+          onClick={() => void toggleRecording()}
+        >
+          {isRecording ? <Square size={13} fill="currentColor" /> : <Circle size={13} />}
+        </button>
+      </div>
       {broadcasting && (
         <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 bg-danger/85 px-3 py-0.5 text-center text-[11px] font-medium text-white">
           Saisie diffusée à {broadcastCount} terminaux

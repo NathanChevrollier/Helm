@@ -495,6 +495,7 @@ export const api = {
   settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),
   settingsImport: (path: string, password: string) =>
     invoke<{ servers: number; snippets: number; tunnels: number; secrets: number }>("settings_import", { path, password }),
+  shellHistory: (serverId: string) => invoke<string[]>("shell_history", { serverId }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
   appLockGet: () => invoke<string | null>("app_lock_get"),
   /** Chaîne vide : supprime le mot de passe (verrouillage désactivé). */

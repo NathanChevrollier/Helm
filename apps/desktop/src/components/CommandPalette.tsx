@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Box, Cable, FolderOpen, Globe, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
+import { Box, Cable, FolderOpen, Globe, History, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
 import { useDoctor } from "./ConnectionDoctor";
+import { focusedTerminal } from "./TerminalPane";
 import { api, errorMessage, shellQuote, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
 import { SECTIONS } from "../sections";
 import { ensureConnected, useApp } from "../lib/store";
@@ -41,6 +42,12 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [tunnels, setTunnels] = useState<TunnelView[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
+  // Historique du shell du serveur de l'onglet actif, quand on vient d'un terminal.
+  const termServer = app.section === "terminal" ? app.tabs.find((t) => t.key === app.activeTab)?.serverId : undefined;
+  const [history, setHistory] = useState<string[]>([]);
+  useEffect(() => {
+    if (termServer) void api.shellHistory(termServer).then(setHistory).catch(() => {});
+  }, [termServer]);
   const input = useRef<HTMLInputElement>(null);
   const server = servers.find((s) => s.id === activeServerId);
 
@@ -161,6 +168,21 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
         run: () => void (t.running ? api.tunnelStop(t.id) : api.tunnelStart(t.id)).catch((e) => notify(errorMessage(e), "error")),
       });
     }
+    // Commandes déjà tapées : insérées dans le terminal actif, sans être exécutées.
+    if (query && focusedTerminal.id != null) {
+      history.forEach((cmd, i) =>
+        list.push({
+          id: `history:${i}`,
+          label: cmd,
+          hint: "historique · insérer dans le terminal",
+          icon: <History size={15} />,
+          run: () => {
+            if (focusedTerminal.id != null) void api.termWrite(focusedTerminal.id, cmd);
+            focusedTerminal.focus?.();
+          },
+        }),
+      );
+    }
     if (server) {
       for (const b of useApp.getState().bookmarks[server.id] ?? []) {
         list.push({
@@ -188,7 +210,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
       });
     }
     return list;
-  }, [servers, server, docker, snippets, tunnels, domains, query, setSection, setActiveServer, openTab, ask, notify, setFilesPath]);
+  }, [servers, server, docker, snippets, tunnels, domains, history, query, setSection, setActiveServer, openTab, ask, notify, setFilesPath]);
 
   const results = useMemo(() => {
     if (!query) {
@@ -210,7 +232,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const execute = (a: Action | undefined) => {
     if (!a) return;
-    if (a.id !== "path") pushRecent(a.id);
+    if (a.id !== "path" && !a.id.startsWith("history:")) pushRecent(a.id);
     onClose();
     void a.run();
   };
