@@ -146,7 +146,7 @@ impl Connection {
     /// Exécute une commande et attend sa fin. `stdin` est envoyé puis fermé s'il est fourni.
     pub async fn exec(&self, command: &str, stdin: Option<&[u8]>) -> Result<ExecOutput> {
         let mut channel = self.handle.channel_open_session().await?;
-        channel.exec(true, command).await?;
+        channel.exec(true, with_admin_path(command)).await?;
         if let Some(input) = stdin {
             channel.data(input).await?;
         }
@@ -220,7 +220,7 @@ impl Connection {
         if let Some((cols, rows)) = pty {
             channel.request_pty(true, "xterm-256color", cols, rows, 0, 0, &[]).await?;
         }
-        channel.exec(true, command).await?;
+        channel.exec(true, with_admin_path(command)).await?;
         Ok(channel)
     }
 
@@ -414,6 +414,15 @@ fn expand_home(path: &str) -> String {
 }
 
 /// Entoure une chaîne de quotes simples pour un shell POSIX.
+/// Ajoute les dossiers `sbin` au PATH : sur Debian, nginx, ufw ou sshd y sont installés et
+/// restent invisibles pour un utilisateur non root, qui conclurait à tort qu'ils sont absents.
+fn with_admin_path(command: &str) -> String {
+    format!(
+        "PATH=\"$PATH:/usr/local/sbin:/usr/sbin:/sbin\"; export PATH
+{command}"
+    )
+}
+
 pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
