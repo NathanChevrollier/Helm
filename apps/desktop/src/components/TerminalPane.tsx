@@ -153,7 +153,7 @@ export default function TerminalPane({
 
     const start = async (interactive = true): Promise<void> => {
       term.write("\x1b[2mConnexion…\x1b[0m\r\n");
-      if (!(await ensureConnected(serverId, { interactive }))) {
+      if (!(await ensureConnected(serverId, { interactive, force: interactive }))) {
         if (!interactive && tmux) return scheduleRetry();
         term.write("\x1b[31mConnexion annulée ou impossible.\x1b[0m Appuie sur Entrée pour réessayer.\r\n");
         waitingReconnect = true;

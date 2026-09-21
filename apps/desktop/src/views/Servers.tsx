@@ -67,7 +67,7 @@ function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void
   const connect = async () => {
     setBusy(true);
     setActiveServer(server.id);
-    if (await ensureConnected(server.id)) notify(`Connecté à ${server.name}`, "success");
+    if (await ensureConnected(server.id, { force: true })) notify(`Connecté à ${server.name}`, "success");
     setBusy(false);
   };
 
@@ -120,7 +120,7 @@ function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void
             e.stopPropagation();
             setActiveServer(server.id);
             setBusy(true);
-            const ok = await ensureConnected(server.id);
+            const ok = await ensureConnected(server.id, { force: true });
             setBusy(false);
             if (ok) openTab(server.id);
           }}

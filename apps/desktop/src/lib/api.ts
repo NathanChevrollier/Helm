@@ -457,7 +457,7 @@ export const api = {
     invoke<string>("server_save", { profile, secretsInput }),
   deleteServer: (id: string) => invoke<void>("server_delete", { id }),
   trustHost: (id: string, fingerprint: string) => invoke<void>("host_trust", { id, fingerprint }),
-  connect: (id: string) => invoke<ConnectInfo>("ssh_connect", { id }),
+  connect: (id: string, userInitiated = false) => invoke<ConnectInfo>("ssh_connect", { id, userInitiated }),
   disconnect: (id: string) => invoke<void>("ssh_disconnect", { id }),
   puttySessions: () => invoke<ServerProfile[]>("putty_sessions"),
   setAiAccess: (id: string, enabled: boolean) => invoke<void>("server_set_ai_access", { id, enabled }),

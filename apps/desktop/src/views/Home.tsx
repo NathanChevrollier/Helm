@@ -129,19 +129,26 @@ function ServerCard({
 
   if (!result.connected) {
     const needsUser = /NEED_PASSWORD|UNKNOWN_HOST_KEY|HOST_KEY_MISMATCH/.test(result.error ?? "");
+    const authFailed = /AUTH_BLOCKED|Authentification échouée/.test(result.error ?? "");
     return (
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
         {header}
         <div className="flex items-start gap-2 text-sm">
           <Server size={15} className="mt-0.5 shrink-0 text-muted" />
-          <span className="text-muted">{needsUser ? "Connexion à valider (mot de passe ou clé du serveur)." : `Injoignable : ${result.error}`}</span>
+          <span className="text-muted">
+            {needsUser
+              ? "Connexion à valider (mot de passe ou clé du serveur)."
+              : authFailed
+                ? `Authentification refusée : Helm ne réessaie plus tout seul, pour ne pas déclencher fail2ban. ${result.error?.replace(/^(AUTH_BLOCKED|Authentification échouée) ?: ?/, "")}`
+                : `Injoignable : ${result.error}`}
+          </span>
         </div>
         <Button
           size="sm"
           className="self-start"
           icon={<Plug size={13} />}
           onClick={async () => {
-            if (await ensureConnected(server.id)) onRetry();
+            if (await ensureConnected(server.id, { force: true })) onRetry();
           }}
         >
           Se connecter

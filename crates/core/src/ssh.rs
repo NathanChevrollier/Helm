@@ -22,7 +22,11 @@ pub enum Auth {
         passphrase: Option<String>,
     },
     /// Agent SSH du système : Pageant ou OpenSSH sous Windows, `SSH_AUTH_SOCK` ailleurs.
-    Agent,
+    /// Si `key_path` est indiqué, seule cette clé est présentée au serveur.
+    Agent {
+        #[serde(default)]
+        key_path: Option<String>,
+    },
 }
 
 /// Paramètres d'une connexion.
@@ -272,7 +276,15 @@ async fn authenticate(handle: &mut Handle<HostKeyCheck>, user: &str, auth: &Auth
             let hash = handle.best_supported_rsa_hash().await?.flatten();
             handle.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await?.success()
         }
-        Auth::Agent => authenticate_with_agent(handle, user).await?,
+        Auth::Agent { key_path } => {
+            let wanted = match key_path.as_deref().filter(|p| !p.is_empty()) {
+                Some(p) => {
+                    Some(public_key_from_file(&expand_home(p)).ok_or_else(|| Error::Auth(format!("clé publique illisible dans {p}")))?)
+                }
+                None => None,
+            };
+            authenticate_with_agent(handle, user, wanted.as_ref()).await?
+        }
     };
     if ok {
         Ok(())
@@ -297,29 +309,60 @@ async fn keyboard_interactive(handle: &mut Handle<HostKeyCheck>, user: &str, pas
     Ok(false)
 }
 
-async fn authenticate_with_agent(handle: &mut Handle<HostKeyCheck>, user: &str) -> Result<bool> {
+/// Sans clé ciblée, au plus 3 clés de l'agent sont présentées : chaque refus est un échec
+/// d'authentification aux yeux du serveur (et de fail2ban).
+const MAX_AGENT_KEYS: usize = 3;
+
+async fn authenticate_with_agent(handle: &mut Handle<HostKeyCheck>, user: &str, wanted: Option<&keys::PublicKey>) -> Result<bool> {
     use keys::agent::client::AgentClient;
+    let mut budget = MAX_AGENT_KEYS;
+    let mut agent_found = false;
     #[cfg(windows)]
     {
         // OpenSSH pour Windows d'abord, puis Pageant (l'agent de PuTTY).
         if let Ok(agent) = AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent").await {
-            if try_agent(handle, user, agent).await? {
+            agent_found = true;
+            if try_agent(handle, user, agent, wanted, &mut budget).await? {
                 return Ok(true);
             }
         }
-        match AgentClient::connect_pageant().await {
-            Ok(agent) => try_agent(handle, user, agent).await,
-            Err(_) => Err(Error::Auth("aucun agent SSH trouvé (Pageant ou OpenSSH Agent)".into())),
+        if let Ok(agent) = AgentClient::connect_pageant().await {
+            agent_found = true;
+            if try_agent(handle, user, agent, wanted, &mut budget).await? {
+                return Ok(true);
+            }
         }
     }
     #[cfg(not(windows))]
     {
-        let agent = AgentClient::connect_env().await.map_err(|e| Error::Auth(format!("agent SSH indisponible : {e}")))?;
-        try_agent(handle, user, agent).await
+        if let Ok(agent) = AgentClient::connect_env().await {
+            agent_found = true;
+            if try_agent(handle, user, agent, wanted, &mut budget).await? {
+                return Ok(true);
+            }
+        }
     }
+    if !agent_found {
+        return Err(Error::Auth(
+            "aucun agent SSH trouvé : lance Pageant (ou l'agent OpenSSH) et ajoutes-y ta clé, ou choisis « Clé privée » dans le profil"
+                .into(),
+        ));
+    }
+    if wanted.is_some() && budget == MAX_AGENT_KEYS {
+        // Rien n'a été envoyé au serveur : aucun échec comptabilisé par fail2ban.
+        return Err(Error::Auth("la clé du profil n'est chargée ni dans Pageant ni dans l'agent OpenSSH : ajoute-la à l'agent, ou choisis « Clé privée » dans le profil".into()));
+    }
+    Ok(false)
 }
 
-async fn try_agent<S>(handle: &mut Handle<HostKeyCheck>, user: &str, mut agent: keys::agent::client::AgentClient<S>) -> Result<bool>
+/// Présente les clés de l'agent (seulement `wanted` si indiquée), dans la limite de `budget` tentatives.
+async fn try_agent<S>(
+    handle: &mut Handle<HostKeyCheck>,
+    user: &str,
+    mut agent: keys::agent::client::AgentClient<S>,
+    wanted: Option<&keys::PublicKey>,
+    budget: &mut usize,
+) -> Result<bool>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -327,6 +370,13 @@ where
     let hash = handle.best_supported_rsa_hash().await?.flatten();
     for identity in identities {
         let keys::agent::AgentIdentity::PublicKey { key, .. } = identity else { continue };
+        if wanted.is_some_and(|w| w.key_data() != key.key_data()) {
+            continue;
+        }
+        if *budget == 0 {
+            break;
+        }
+        *budget -= 1;
         if let Ok(res) = handle.authenticate_publickey_with(user, key, hash, &mut agent).await {
             if res.success() {
                 return Ok(true);
@@ -334,6 +384,23 @@ where
         }
     }
     Ok(false)
+}
+
+/// Partie publique d'une clé : `.ppk` (lisible sans passphrase), fichier `.pub` voisin, ou clé non chiffrée.
+pub fn public_key_from_file(path: &str) -> Option<keys::PublicKey> {
+    use base64::Engine;
+    let text = std::fs::read_to_string(path).ok()?;
+    if text.starts_with("PuTTY-User-Key-File") {
+        let mut lines = text.lines();
+        let count: usize = lines.by_ref().find_map(|l| l.strip_prefix("Public-Lines:"))?.trim().parse().ok()?;
+        let b64: String = lines.take(count).collect();
+        let blob = base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok()?;
+        return keys::PublicKey::from_bytes(&blob).ok();
+    }
+    if let Ok(k) = keys::load_public_key(format!("{path}.pub")) {
+        return Some(k);
+    }
+    keys::decode_secret_key(&text, None).ok().map(|k| k.public_key().clone())
 }
 
 fn expand_home(path: &str) -> String {

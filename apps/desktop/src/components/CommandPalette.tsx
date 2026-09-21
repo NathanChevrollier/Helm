@@ -68,7 +68,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
           label: `Se connecter à ${s.name}`,
           icon: <Plug size={15} />,
           run: async () => {
-            if (await ensureConnected(s.id)) notify(`Connecté à ${s.name}`, "success");
+            if (await ensureConnected(s.id, { force: true })) notify(`Connecté à ${s.name}`, "success");
           },
         });
       }

@@ -35,6 +35,9 @@ pub struct Sessions {
     next_term: AtomicU64,
     /// Noms d'utilisateurs et de groupes par serveur (uid/gid → nom), pour l'explorateur.
     id_names: Mutex<HashMap<String, Arc<IdNames>>>,
+    /// Serveurs dont l'authentification a échoué : plus aucune tentative automatique tant que
+    /// l'utilisateur n'a pas relancé la connexion lui-même (sinon fail2ban bannit son IP).
+    auth_blocked: std::sync::Mutex<HashMap<String, String>>,
 }
 
 #[derive(Default)]
@@ -51,6 +54,7 @@ impl Sessions {
             terminals: Mutex::new(HashMap::new()),
             next_term: AtomicU64::new(1),
             id_names: Mutex::new(HashMap::new()),
+            auth_blocked: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -101,10 +105,25 @@ impl Sessions {
                 return Ok(c.clone());
             }
         }
+        if let Some(reason) = self.auth_blocked.lock().unwrap().get(server_id) {
+            return Err(format!("AUTH_BLOCKED: {reason} — reconnexion automatique suspendue, clique « Connecter » pour réessayer"));
+        }
         let params = store.connect_params(server_id)?;
-        let conn = Connection::connect(params).await.map_err(|e| e.to_string())?;
+        let conn = match Connection::connect(params).await {
+            Ok(c) => c,
+            Err(helm_core::Error::Auth(reason)) => {
+                self.auth_blocked.lock().unwrap().insert(server_id.to_string(), reason.clone());
+                return Err(format!("Authentification échouée : {reason}"));
+            }
+            Err(e) => return Err(e.to_string()),
+        };
         conns.insert(server_id.to_string(), conn.clone());
         Ok(conn)
+    }
+
+    /// Autorise de nouveau les tentatives (action explicite de l'utilisateur, ou profil modifié).
+    pub fn unblock(&self, server_id: &str) {
+        self.auth_blocked.lock().unwrap().remove(server_id);
     }
 
     pub async fn is_connected(&self, server_id: &str) -> bool {

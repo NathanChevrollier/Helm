@@ -224,14 +224,19 @@ useApp.subscribe((s) => {
  * Connecte le serveur en gérant les cas qui demandent l'avis de l'utilisateur :
  * clé d'hôte inconnue ou modifiée, mot de passe absent.
  */
-export async function ensureConnected(serverId: string, opts: { interactive?: boolean } = {}): Promise<boolean> {
+/**
+ * `force` : action explicite de l'utilisateur (clic sur Connecter…) ; seule elle relance une
+ * connexion suspendue après un échec d'authentification.
+ */
+export async function ensureConnected(serverId: string, opts: { interactive?: boolean; force?: boolean } = {}): Promise<boolean> {
   const interactive = opts.interactive ?? true;
   const { ask, notify, refreshServers } = useApp.getState();
   const server = () => useApp.getState().servers.find((s) => s.id === serverId);
 
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      await api.connect(serverId);
+      // Une tentative interactive (clic de l'utilisateur) lève la suspension après un échec d'authentification.
+      await api.connect(serverId, opts.force ?? false);
       void refreshServers();
       return true;
     } catch (e) {

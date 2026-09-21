@@ -73,6 +73,7 @@ pub async fn server_save(
     })?;
     // Les paramètres ont pu changer : la prochaine action se reconnectera avec les nouveaux.
     sessions.disconnect(&id).await;
+    sessions.unblock(&id);
     Ok(id)
 }
 
@@ -102,7 +103,16 @@ pub struct ConnectInfo {
 }
 
 #[tauri::command]
-pub async fn ssh_connect(store: State<'_, Store>, sessions: State<'_, Sessions>, id: String) -> Result<ConnectInfo, String> {
+pub async fn ssh_connect(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    id: String,
+    user_initiated: Option<bool>,
+) -> Result<ConnectInfo, String> {
+    // Seule une action de l'utilisateur lève la suspension après un échec d'authentification.
+    if user_initiated.unwrap_or(false) {
+        sessions.unblock(&id);
+    }
     let conn = sessions.get(&store, &id).await?;
     let out = conn
         .exec("hostname; . /etc/os-release 2>/dev/null && echo \"$PRETTY_NAME\" || uname -sr", None)

@@ -137,7 +137,7 @@ impl Store {
                 path: profile.key_path.clone().ok_or("aucune clé privée configurée")?,
                 passphrase: secrets::get(server_id, "passphrase"),
             },
-            AuthKind::Agent => Auth::Agent,
+            AuthKind::Agent => Auth::Agent { key_path: profile.key_path.clone() },
         };
         let host_key = format!("{}:{}", profile.host, profile.port);
         Ok(ConnectParams {
