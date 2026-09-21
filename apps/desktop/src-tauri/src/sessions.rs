@@ -117,7 +117,16 @@ impl Sessions {
         }
         let params = store.connect_params(server_id)?;
         let target = format!("{}@{}:{}", params.username, params.host, params.port);
-        let conn = match Connection::connect(params).await {
+        let result = match store.jump_chain(server_id)?.first() {
+            None => Connection::connect(params).await,
+            Some(jump) => {
+                // Le bastion est connecté (ou réutilisé) d'abord ; la cible passe par un de ses canaux.
+                let name = store.server(jump).map(|s| s.name).unwrap_or_default();
+                let bastion = Box::pin(self.get(store, jump)).await.map_err(|e| format!("JUMP: serveur de rebond « {name} » : {e}"))?;
+                Connection::connect_via(&bastion, params).await
+            }
+        };
+        let conn = match result {
             Ok(c) => c,
             Err(helm_core::Error::Auth(reason)) => {
                 log::warn!("{target} : authentification refusée ({reason}), reconnexions automatiques suspendues");

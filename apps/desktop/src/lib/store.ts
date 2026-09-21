@@ -272,6 +272,11 @@ export async function ensureConnected(serverId: string, opts: { interactive?: bo
   const { ask, notify, refreshServers } = useApp.getState();
   const server = () => useApp.getState().servers.find((s) => s.id === serverId);
 
+  // Serveur de rebond : on le connecte d'abord, avec ses propres dialogues (clé d'hôte, mot de
+  // passe), pour qu'une approbation porte toujours sur le bon serveur.
+  const jump = server()?.jumpId;
+  if (jump && jump !== serverId && !(await ensureConnected(jump, opts))) return false;
+
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       // Une tentative interactive (clic de l'utilisateur) lève la suspension après un échec d'authentification.

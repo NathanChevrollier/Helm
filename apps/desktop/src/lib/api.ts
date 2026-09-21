@@ -14,6 +14,8 @@ export interface ServerProfile {
   group?: string | null;
   /** Accessible au serveur MCP (lecture seule). */
   aiAccess?: boolean;
+  /** Serveur de rebond (bastion) à traverser pour joindre celui-ci. */
+  jumpId?: string | null;
 }
 
 export interface ServerView extends ServerProfile {
@@ -615,6 +617,7 @@ export const api = {
   connect: (id: string, userInitiated = false) => invoke<ConnectInfo>("ssh_connect", { id, userInitiated }),
   disconnect: (id: string) => invoke<void>("ssh_disconnect", { id }),
   puttySessions: () => invoke<ServerProfile[]>("putty_sessions"),
+  sshConfigSessions: () => invoke<ServerProfile[]>("ssh_config_sessions"),
   setAiAccess: (id: string, enabled: boolean) => invoke<void>("server_set_ai_access", { id, enabled }),
 
   snippets: () => invoke<Snippet[]>("snippets_list"),

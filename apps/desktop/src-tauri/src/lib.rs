@@ -79,6 +79,7 @@ pub fn run() {
             servers::snippet_save,
             servers::snippet_delete,
             servers::putty_sessions,
+            servers::ssh_config_sessions,
             servers::server_set_ai_access,
             terminal::term_open,
             terminal::term_write,

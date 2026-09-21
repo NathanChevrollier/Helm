@@ -114,6 +114,17 @@ pub struct Connection {
 
 impl Connection {
     pub async fn connect(params: ConnectParams) -> Result<Self> {
+        Self::connect_inner(params, None).await
+    }
+
+    /// Connexion à travers un serveur de rebond déjà connecté (équivalent de `ssh -J`) : le flux
+    /// SSH passe dans un canal `direct-tcpip` du bastion. La clé d'hôte de la cible est vérifiée
+    /// comme pour une connexion directe.
+    pub async fn connect_via(jump: &Connection, params: ConnectParams) -> Result<Self> {
+        Self::connect_inner(params, Some(jump)).await
+    }
+
+    async fn connect_inner(params: ConnectParams, jump: Option<&Connection>) -> Result<Self> {
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
             keepalive_interval: Some(Duration::from_secs(15)),
@@ -123,10 +134,22 @@ impl Connection {
         let seen = Arc::new(Mutex::new(None));
         let handler = HostKeyCheck { expected: params.known_fingerprint.clone(), seen: seen.clone() };
 
-        let addr = (params.host.as_str(), params.port);
-        let result = tokio::time::timeout(Duration::from_secs(15), client::connect(config, addr, handler))
-            .await
-            .map_err(|_| Error::Connection(format!("délai dépassé en se connectant à {}:{}", params.host, params.port)))?;
+        let timeout = || Error::Connection(format!("délai dépassé en se connectant à {}:{}", params.host, params.port));
+        let result = match jump {
+            None => {
+                let addr = (params.host.as_str(), params.port);
+                tokio::time::timeout(Duration::from_secs(15), client::connect(config, addr, handler)).await.map_err(|_| timeout())?
+            }
+            Some(j) => {
+                let channel =
+                    j.handle.channel_open_direct_tcpip(params.host.as_str(), params.port as u32, "127.0.0.1", 0).await.map_err(|e| {
+                        Error::Connection(format!("le serveur de rebond ne joint pas {}:{} ({e})", params.host, params.port))
+                    })?;
+                tokio::time::timeout(Duration::from_secs(15), client::connect_stream(config, channel.into_stream(), handler))
+                    .await
+                    .map_err(|_| timeout())?
+            }
+        };
 
         let seen_fp = seen.lock().unwrap().clone();
         let mut handle = match result {
@@ -308,8 +331,14 @@ async fn authenticate(handle: &mut Handle<HostKeyCheck>, user: &str, auth: &Auth
                     Error::Auth(format!("clé illisible ({path}) : {raw}"))
                 }
             })?;
-            let hash = handle.best_supported_rsa_hash().await?.flatten();
-            handle.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await?.success()
+            // Certificat SSH signé par une autorité (`cle-cert.pub` à côté de la clé) : présenté s'il existe.
+            let cert_path = format!("{}-cert.pub", expand_home(path).trim_end_matches(".ppk"));
+            if let Ok(cert) = keys::Certificate::read_file(std::path::Path::new(&cert_path)) {
+                handle.authenticate_openssh_cert(user, Arc::new(key), cert).await?.success()
+            } else {
+                let hash = handle.best_supported_rsa_hash().await?.flatten();
+                handle.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await?.success()
+            }
         }
         Auth::Agent { key_path } => {
             let wanted = match key_path.as_deref().filter(|p| !p.is_empty()) {

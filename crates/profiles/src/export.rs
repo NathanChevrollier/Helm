@@ -198,6 +198,7 @@ mod tests {
                 color: None,
                 group: None,
                 ai_access: false,
+                jump_id: None,
             });
             d.known_hosts.insert("h:22".into(), "SHA256:x".into());
         })

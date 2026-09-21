@@ -5,6 +5,7 @@
 pub mod audit;
 pub mod export;
 pub mod secrets;
+pub mod ssh_config;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -47,6 +48,9 @@ pub struct ServerProfile {
     /// Le serveur MCP (lecture seule) peut-il interroger ce serveur ? Désactivé par défaut.
     #[serde(default)]
     pub ai_access: bool,
+    /// Serveur de rebond (bastion) par lequel passer pour joindre celui-ci (`ssh -J`).
+    #[serde(default)]
+    pub jump_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +171,22 @@ impl Store {
         self.read(|d| d.servers.iter().find(|s| s.id == id).cloned()).ok_or_else(|| "serveur introuvable".to_string())
     }
 
+    /// Chaîne des serveurs de rebond de `id` (le premier est celui à joindre d'abord). Refuse une
+    /// boucle (A passe par B qui passe par A) ou un rebond vers un serveur supprimé.
+    pub fn jump_chain(&self, id: &str) -> Result<Vec<String>, String> {
+        let mut chain: Vec<String> = Vec::new();
+        let mut current = self.server(id)?.jump_id.filter(|j| !j.is_empty());
+        while let Some(j) = current {
+            if j == id || chain.contains(&j) {
+                return Err("les serveurs de rebond forment une boucle : corrige le profil".into());
+            }
+            let next = self.server(&j).map_err(|_| "le serveur de rebond de ce profil n'existe plus".to_string())?;
+            chain.push(j);
+            current = next.jump_id.filter(|j| !j.is_empty());
+        }
+        Ok(chain)
+    }
+
     /// Paramètres de connexion SSH d'un serveur, secrets lus dans le keyring.
     pub fn connect_params(&self, server_id: &str) -> Result<ConnectParams, String> {
         let profile = self.server(server_id)?;
@@ -222,6 +242,29 @@ mod tests {
         let aside =
             std::fs::read_dir(dir.path()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("helm.json.corrompu-"));
         assert!(aside, "le fichier illisible est conservé");
+    }
+
+    #[test]
+    fn jump_chains() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path());
+        let p = |id: &str, jump: Option<&str>| ServerProfile {
+            id: id.into(),
+            name: id.into(),
+            host: "h".into(),
+            port: 22,
+            username: "u".into(),
+            auth_kind: AuthKind::Agent,
+            key_path: None,
+            color: None,
+            group: None,
+            ai_access: false,
+            jump_id: jump.map(str::to_string),
+        };
+        s.write(|d| d.servers.extend([p("a", Some("b")), p("b", Some("c")), p("c", None), p("x", Some("y")), p("y", Some("x"))])).unwrap();
+        assert_eq!(s.jump_chain("a").unwrap(), vec!["b", "c"]);
+        assert!(s.jump_chain("c").unwrap().is_empty());
+        assert!(s.jump_chain("x").is_err(), "boucle détectée");
     }
 
     #[test]

@@ -5,6 +5,11 @@ import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView }
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 
+const SOURCES = [
+  ["putty", "PuTTY"],
+  ["openssh", "OpenSSH (~/.ssh/config)"],
+] as const;
+
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6"];
 
 export default function ServersView() {
@@ -22,7 +27,7 @@ export default function ServersView() {
         </div>
         <div className="flex gap-2">
           <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
-            Importer depuis PuTTY
+            Importer (PuTTY, OpenSSH)
           </Button>
           <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
             Ajouter un serveur
@@ -54,7 +59,7 @@ export default function ServersView() {
           }}
         />
       )}
-      {importing && <PuttyImport onClose={() => setImporting(false)} onDone={() => void refresh()} />}
+      {importing && <Import onClose={() => setImporting(false)} onDone={() => void refresh()} />}
     </div>
   );
 }
@@ -161,6 +166,7 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
   const [sudo, setSudo] = useState("");
   const [saving, setSaving] = useState(false);
   const set = <K extends keyof ServerProfile>(k: K, v: ServerProfile[K]) => setP((prev) => ({ ...prev, [k]: v }));
+  const others = useApp((s) => s.servers).filter((s) => s.id !== server?.id);
 
   const save = async () => {
     setSaving(true);
@@ -238,6 +244,24 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
             <Input value={p.group ?? ""} placeholder="prod, perso…" onChange={(e) => set("group", e.target.value || null)} />
           </Field>
         </div>
+        {others.length > 0 && (
+          <div className="col-span-6">
+            <Field label="Serveur de rebond (optionnel)" hint="Pour un serveur joignable seulement à travers un autre (bastion, réseau privé) : équivalent de ssh -J.">
+              <select
+                className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm"
+                value={p.jumpId ?? ""}
+                onChange={(e) => set("jumpId", e.target.value || null)}
+              >
+                <option value="">Aucun : connexion directe</option>
+                {others.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.username}@{s.host})
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        )}
 
         <div className="col-span-6 flex flex-col gap-1.5">
           <span className="text-xs font-medium text-muted">Authentification</span>
@@ -315,30 +339,52 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
   );
 }
 
-function PuttyImport({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+/** Import des sessions PuTTY (registre Windows) et des hôtes de ~/.ssh/config (OpenSSH). */
+function Import({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const notify = useApp((s) => s.notify);
+  const [source, setSource] = useState<"putty" | "openssh">("putty");
   const [sessions, setSessions] = useState<ServerProfile[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    api.puttySessions().then((list) => {
+    setSessions(null);
+    (source === "putty" ? api.puttySessions() : api.sshConfigSessions()).then((list) => {
       setSessions(list);
       setSelected(new Set(list.map((_, i) => i)));
     });
-  }, []);
+  }, [source]);
 
   const doImport = async () => {
     if (!sessions) return;
     const chosen = sessions.filter((_, i) => selected.has(i));
-    for (const s of chosen) await api.saveServer({ ...s, color: COLORS[0] }, {});
-    notify(`${chosen.length} serveur(s) importé(s). Le mot de passe sera demandé à la première connexion.`, "success");
+    // Les rebonds OpenSSH (ProxyJump) désignent un hôte par son alias : on les relie une fois
+    // tous les profils créés (importés maintenant ou déjà présents, par nom).
+    const ids = new Map<string, string>(useApp.getState().servers.map((s) => [s.name, s.id]));
+    const pending: { id: string; profile: ServerProfile; alias: string }[] = [];
+    for (const s of chosen) {
+      const alias = s.jumpId?.startsWith("alias:") ? s.jumpId.slice("alias:".length) : null;
+      const profile = { ...s, color: COLORS[0], jumpId: null };
+      const id = await api.saveServer(profile, {});
+      ids.set(s.name, id);
+      if (alias) pending.push({ id, profile: { ...profile, id }, alias });
+    }
+    const unresolved: string[] = [];
+    for (const { id, profile, alias } of pending) {
+      const jump = ids.get(alias);
+      if (jump && jump !== id) await api.saveServer({ ...profile, jumpId: jump }, {});
+      else unresolved.push(`${profile.name} → ${alias}`);
+    }
+    notify(
+      `${chosen.length} serveur(s) importé(s).${unresolved.length ? ` Rebond introuvable pour : ${unresolved.join(", ")} (à régler dans le profil).` : ""}`,
+      unresolved.length ? "info" : "success",
+    );
     onDone();
     onClose();
   };
 
   return (
     <Modal
-      title="Importer depuis PuTTY"
+      title="Importer des serveurs"
       onClose={onClose}
       footer={
         <>
@@ -351,10 +397,22 @@ function PuttyImport({ onClose, onDone }: { onClose: () => void; onDone: () => v
         </>
       }
     >
+      <div className="mb-3 flex gap-1 rounded-md border border-border bg-bg p-1">
+        {SOURCES.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSource(id)}
+            className={`flex-1 rounded px-2 py-1 text-xs ${source === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {sessions === null ? (
-        <p className="text-sm text-muted">Lecture des sessions PuTTY…</p>
+        <p className="text-sm text-muted">Lecture…</p>
       ) : sessions.length === 0 ? (
-        <p className="text-sm text-muted">Aucune session SSH enregistrée dans PuTTY n'a été trouvée.</p>
+        <p className="text-sm text-muted">{source === "putty" ? "Aucune session SSH enregistrée dans PuTTY n'a été trouvée." : "Aucun hôte trouvé dans ~/.ssh/config."}</p>
       ) : (
         <ul className="flex flex-col gap-1">
           {sessions.map((s, i) => (
@@ -373,6 +431,7 @@ function PuttyImport({ onClose, onDone }: { onClose: () => void; onDone: () => v
                 <span className="flex-1 text-sm">{s.name}</span>
                 <span className="font-mono text-xs text-muted">
                   {s.username}@{s.host}:{s.port}
+                  {s.jumpId?.startsWith("alias:") && ` via ${s.jumpId.slice(6)}`}
                 </span>
               </label>
             </li>

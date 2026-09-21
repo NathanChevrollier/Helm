@@ -60,6 +60,18 @@ pub async fn server_save(
         profile.id = uuid::Uuid::new_v4().to_string();
     }
     let id = profile.id.clone();
+    if profile.jump_id.as_deref() == Some("") {
+        profile.jump_id = None;
+    }
+    if let Some(j) = &profile.jump_id {
+        if *j == id {
+            return Err("un serveur ne peut pas être son propre serveur de rebond".into());
+        }
+        // Le bastion ne doit pas lui-même passer par ce serveur.
+        if store.jump_chain(j).map_err(|e| format!("serveur de rebond : {e}"))?.contains(&id) {
+            return Err("les serveurs de rebond formeraient une boucle".into());
+        }
+    }
     for (kind, value) in
         [("password", &secrets_input.password), ("passphrase", &secrets_input.passphrase), ("sudo", &secrets_input.sudo_password)]
     {
@@ -162,6 +174,12 @@ pub fn snippet_delete(store: State<'_, Store>, id: String) -> Result<(), String>
     store.write(|d| d.snippets.retain(|s| s.id != id))
 }
 
+/// Serveurs déclarés dans `~/.ssh/config` (OpenSSH), prêts à être importés.
+#[tauri::command]
+pub fn ssh_config_sessions() -> Vec<ServerProfile> {
+    helm_profiles::ssh_config::read_user_config()
+}
+
 /// Sessions SSH enregistrées dans PuTTY (Windows uniquement), prêtes à être importées.
 #[tauri::command]
 pub fn putty_sessions() -> Vec<ServerProfile> {
@@ -208,6 +226,7 @@ fn read_putty_sessions() -> Option<Vec<ServerProfile>> {
             color: None,
             group: None,
             ai_access: false,
+            jump_id: None,
         });
     }
     Some(out)
