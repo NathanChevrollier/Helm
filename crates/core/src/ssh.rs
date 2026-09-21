@@ -237,17 +237,21 @@ impl Connection {
     /// Le mot de passe sudo est transmis sur stdin, jamais dans la ligne de commande.
     pub async fn exec_sudo(&self, command: &str, sudo_password: Option<&str>, stdin: Option<&[u8]>) -> Result<ExecOutput> {
         let q = shell_quote(command);
-        match sudo_password {
+        let out = match sudo_password {
             Some(pw) => {
                 let mut input = format!("{pw}\n").into_bytes();
                 input.extend_from_slice(stdin.unwrap_or_default());
                 let cmd = format!("if [ \"$(id -u)\" = 0 ]; then read -r _; sh -c {q}; else sudo -S -p '' sh -c {q}; fi");
-                self.exec(&cmd, Some(&input)).await
+                self.exec(&cmd, Some(&input)).await?
             }
             None => {
                 let cmd = format!("if [ \"$(id -u)\" = 0 ]; then sh -c {q}; else sudo -n sh -c {q}; fi");
-                self.exec(&cmd, stdin).await
+                self.exec(&cmd, stdin).await?
             }
+        };
+        match (!out.success()).then(|| sudo_failure(&out.stderr)).flatten() {
+            Some(reason) => Err(Error::Remote(reason)),
+            None => Ok(out),
         }
     }
 
@@ -487,6 +491,22 @@ fn with_admin_path(command: &str) -> String {
     )
 }
 
+/// Refus de sudo lui-même (et non échec de la commande), traduit en explication utile.
+pub fn sudo_failure(stderr: &str) -> Option<String> {
+    let e = stderr.to_lowercase();
+    if e.contains("must have a tty") || e.contains("a terminal is required") {
+        Some("sudo exige un terminal sur ce serveur (option « requiretty ») : ajoute « Defaults:TON_UTILISATEUR !requiretty » avec visudo pour que Helm puisse administrer ce serveur.".into())
+    } else if e.contains("incorrect password") || e.contains("sorry, try again") {
+        Some("mot de passe sudo incorrect : corrige-le dans le profil du serveur.".into())
+    } else if e.contains("a password is required") {
+        Some("sudo demande un mot de passe : renseigne « Mot de passe sudo » dans le profil du serveur.".into())
+    } else if e.contains("not in the sudoers") || e.contains("is not allowed to") || e.contains("may not run sudo") {
+        Some("ton utilisateur n'a pas les droits sudo sur ce serveur (il doit faire partie du groupe sudo ou wheel).".into())
+    } else {
+        None
+    }
+}
+
 pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
@@ -494,6 +514,20 @@ pub fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sudo_failures() {
+        assert!(sudo_failure("sudo: sorry, you must have a tty to run sudo").unwrap().contains("requiretty"));
+        assert!(sudo_failure(
+            "Sorry, try again.
+sudo: 3 incorrect password attempts"
+        )
+        .unwrap()
+        .contains("incorrect"));
+        assert!(sudo_failure("sudo: a password is required").is_some());
+        assert!(sudo_failure("admin is not in the sudoers file.").unwrap().contains("droits sudo"));
+        assert!(sudo_failure("cat: /x: No such file or directory").is_none());
+    }
 
     #[test]
     fn quote_escapes_single_quotes() {

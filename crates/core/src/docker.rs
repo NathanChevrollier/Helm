@@ -33,7 +33,12 @@ pub async fn access(conn: &Connection, sudo: Option<&str>) -> Result<(Access, St
         return Ok((Access::Direct, direct.stdout.trim().to_string()));
     }
     if conn.exec("command -v docker || command -v podman", None).await?.success() {
-        let via_sudo = conn.exec_sudo(VERSION_COMMAND, sudo, None).await?;
+        // Refus de sudo (pas de mot de passe, pas de droits) : Docker est alors simplement inaccessible.
+        let via_sudo = match conn.exec_sudo(VERSION_COMMAND, sudo, None).await {
+            Ok(o) => o,
+            Err(Error::Remote(reason)) => return Ok((Access::Unavailable, reason)),
+            Err(e) => return Err(e),
+        };
         if via_sudo.success() {
             return Ok((Access::Sudo, via_sudo.stdout.trim().to_string()));
         }

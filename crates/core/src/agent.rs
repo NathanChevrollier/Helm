@@ -187,8 +187,20 @@ pub async fn save_config(conn: &Connection, cfg: &AgentConfig, sudo: Option<&str
 /// Envoie le binaire adapté à l'architecture du serveur et l'installe comme service.
 /// `binary_for` renvoie le chemin local du binaire pour une architecture (`x86_64`, `aarch64`).
 pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(&str) -> Option<std::path::PathBuf>) -> Result<String> {
-    let arch = conn.run("uname -m").await?;
-    let target = target_for_arch(&arch).ok_or_else(|| Error::Other(format!("architecture non prise en charge : {}", arch.trim())))?;
+    // Conditions de l'agent : Linux, processeur x86_64 ou ARM 64 bits (sans systemd, il tourne en arrière-plan).
+    let env = conn.run("uname -s; uname -m").await?;
+    let mut lines = env.lines().map(str::trim);
+    let (os, arch) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+    if os != "Linux" {
+        return Err(Error::Other(format!(
+            "l'agent helmd ne fonctionne que sous Linux (ce serveur : {os}). Le monitoring direct reste disponible."
+        )));
+    }
+    let target = target_for_arch(arch).ok_or_else(|| {
+        Error::Other(format!(
+            "processeur {arch} non pris en charge par l'agent (x86_64 et ARM 64 bits seulement). Le monitoring direct reste disponible."
+        ))
+    })?;
     let local = binary_for(target).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
     let remote = upload_binary(conn, &local).await?;
     // Le script lit l'unité systemd sur stdin.
