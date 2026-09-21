@@ -10,9 +10,11 @@ use crate::{Connection, Error, Result};
 
 const AUDIT_SCRIPT: &str = r#"echo @@sshd; sshd -T 2>/dev/null | grep -Ei '^(port|permitrootlogin|passwordauthentication|kbdinteractiveauthentication|x11forwarding) '
 echo @@ufw; if command -v ufw >/dev/null; then ufw status 2>/dev/null | head -n1; else echo absent; fi
-echo @@f2b; if command -v fail2ban-client >/dev/null; then systemctl is-active fail2ban 2>/dev/null || echo inactive; else echo absent; fi
-echo @@apt; if command -v apt-get >/dev/null; then apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' > /tmp/.helm-upg; wc -l < /tmp/.helm-upg; grep -ci security /tmp/.helm-upg; rm -f /tmp/.helm-upg; else echo -1; echo -1; fi
-echo @@unattended; if dpkg -s unattended-upgrades >/dev/null 2>&1; then echo yes; else echo no; fi
+echo @@firewalld; if command -v firewall-cmd >/dev/null; then firewall-cmd --state 2>&1 | head -n1; else echo absent; fi
+echo @@f2b; if command -v fail2ban-client >/dev/null; then if fail2ban-client ping >/dev/null 2>&1; then echo active; else echo inactive; fi; else echo absent; fi
+echo @@f2bport; if fail2ban-client ping >/dev/null 2>&1; then for a in $(fail2ban-client get sshd actions 2>/dev/null | tail -n +2 | sed 's/^[|` -]*//' | tr ',' ' '); do fail2ban-client get sshd action "$a" port 2>/dev/null; done; fi
+echo @@apt; if command -v apt-get >/dev/null; then apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' > /tmp/.helm-upg; wc -l < /tmp/.helm-upg; grep -ci security /tmp/.helm-upg; rm -f /tmp/.helm-upg; elif command -v dnf >/dev/null; then dnf -q check-update 2>/dev/null | grep -cE '^[A-Za-z0-9_.+-]+\.[A-Za-z0-9_]+[[:space:]]'; dnf -q updateinfo list --security 2>/dev/null | wc -l; else echo -1; echo -1; fi
+echo @@unattended; if command -v apt-get >/dev/null; then if dpkg -s unattended-upgrades >/dev/null 2>&1; then echo yes; else echo no; fi; elif command -v dnf >/dev/null; then if systemctl is-enabled dnf-automatic.timer dnf-automatic-install.timer 2>/dev/null | grep -q '^enabled'; then echo yes; else echo no; fi; else echo na; fi
 echo @@reboot; if [ -f /var/run/reboot-required ]; then echo yes; else echo no; fi
 echo @@uid0; awk -F: '$3==0{print $1}' /etc/passwd
 echo @@listen; ss -ltnpH 2>/dev/null
@@ -116,7 +118,17 @@ pub fn parse_report(out: &str) -> Report {
         }
     }
 
+    let firewalld = section(out, "firewalld").trim().to_string();
     match section(out, "ufw").trim() {
+        // Distributions Red Hat (Rocky, Alma, Fedora…) : firewalld plutôt qu'ufw.
+        "absent" if firewalld == "running" => f.push(finding("firewall", Severity::Ok, "Pare-feu firewalld actif", "", None)),
+        "absent" if firewalld != "absent" && !firewalld.is_empty() => f.push(finding(
+            "firewall",
+            Severity::Medium,
+            "Pare-feu firewalld inactif",
+            "firewalld est installé mais arrêté. Note : les ports publiés par Docker contournent le pare-feu.",
+            Some(("enable-ufw", "Activer firewalld (SSH, HTTP, HTTPS autorisés)")),
+        )),
         "absent" => f.push(finding(
             "firewall",
             Severity::Medium,
@@ -135,7 +147,34 @@ pub fn parse_report(out: &str) -> Report {
     }
 
     match section(out, "f2b").trim() {
-        "active" => f.push(finding("fail2ban", Severity::Ok, "fail2ban actif", "", None)),
+        "active" => {
+            // Le jail SSH bloque-t-il le bon port ? (« ssh » = 22 ; la plage 0:65535 couvre tout.)
+            let watched: Vec<String> = section(out, "f2bport").lines().map(|l| l.trim().to_lowercase()).filter(|l| !l.is_empty()).collect();
+            let covers = |port: u16| {
+                watched.iter().any(|w| {
+                    w.split(',').any(|p| match p.trim().split_once(':') {
+                        Some((a, b)) => a.parse::<u16>().is_ok_and(|a| a <= port) && b.parse::<u16>().is_ok_and(|b| port <= b),
+                        None => p.trim() == port.to_string() || (port == 22 && p.trim() == "ssh"),
+                    })
+                })
+            };
+            let unprotected: Vec<u16> = ssh_ports.iter().copied().filter(|p| !covers(*p)).collect();
+            if !watched.is_empty() && !unprotected.is_empty() {
+                f.push(finding(
+                    "fail2ban",
+                    Severity::Medium,
+                    "fail2ban ne protège pas le port SSH réel",
+                    &format!(
+                        "SSH écoute sur le port {} mais le jail sshd bloque le port {} : les attaques sont détectées, mais leur bannissement ne les arrête pas.",
+                        unprotected.iter().map(u16::to_string).collect::<Vec<_>>().join(", "),
+                        watched.join(", ")
+                    ),
+                    Some(("install-fail2ban", "Régler fail2ban sur le port SSH")),
+                ));
+            } else {
+                f.push(finding("fail2ban", Severity::Ok, "fail2ban actif", "", None));
+            }
+        }
         "absent" => f.push(finding(
             "fail2ban",
             Severity::Medium,
@@ -179,7 +218,7 @@ pub fn parse_report(out: &str) -> Report {
             "unattended",
             Severity::Medium,
             "Mises à jour de sécurité automatiques désactivées",
-            "unattended-upgrades installe chaque nuit les correctifs de sécurité.",
+            "unattended-upgrades (Debian, Ubuntu) ou dnf-automatic (Rocky, Alma, Fedora) installe chaque nuit les correctifs de sécurité.",
             Some(("enable-unattended", "Activer les mises à jour de sécurité automatiques")),
         ));
     }
@@ -283,21 +322,61 @@ sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/nu
 echo "@@ROLLEDBACK"
 "#;
 
+/// Pare-feu : ufw (Debian, Ubuntu) ou firewalld (Rocky, Alma, Fedora). Les ports SSH actuels sont
+/// autorisés AVANT l'activation, pour ne jamais couper la connexion en cours.
 const UFW_SCRIPT: &str = r#"set -e
-command -v ufw >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
-for p in $(sshd -T 2>/dev/null | awk '/^port /{print $2}'); do ufw allow "$p/tcp"; done
-ufw allow 22/tcp >/dev/null 2>&1 || true
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw --force enable
-echo "@@OK ufw"
+SSH_PORTS=$(sshd -T 2>/dev/null | awk '/^port /{print $2}')
+if command -v apt-get >/dev/null; then
+  command -v ufw >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
+  for p in $SSH_PORTS; do ufw allow "$p/tcp"; done
+  ufw allow 22/tcp >/dev/null 2>&1 || true
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+  ufw --force enable
+  echo "@@OK ufw"
+else
+  command -v firewall-cmd >/dev/null || dnf install -y firewalld || yum install -y firewalld
+  if firewall-cmd --state >/dev/null 2>&1; then
+    for p in $SSH_PORTS; do firewall-cmd --permanent --add-port="$p/tcp"; done
+    firewall-cmd --permanent --add-service=ssh --add-service=http --add-service=https
+    firewall-cmd --reload
+  else
+    # Règles écrites hors ligne, puis démarrage : aucun instant où le port SSH serait fermé.
+    for p in $SSH_PORTS; do firewall-offline-cmd --add-port="$p/tcp"; done
+    firewall-offline-cmd --add-service=ssh --add-service=http --add-service=https
+    systemctl enable --now firewalld
+  fi
+  echo "@@OK firewalld"
+fi
 "#;
 
-const FAIL2BAN_SCRIPT: &str = "set -e\ncommand -v fail2ban-client >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban\nsystemctl enable --now fail2ban\necho '@@OK fail2ban'\n";
+/// fail2ban, avec un jail SSH qui surveille le VRAI port SSH (sur Debian, le jail par défaut ne
+/// protège que le port 22 : inefficace si SSH écoute ailleurs).
+const FAIL2BAN_SCRIPT: &str = r#"set -e
+if ! command -v fail2ban-client >/dev/null; then
+  if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban
+  else dnf install -y epel-release || true; dnf install -y fail2ban || yum install -y fail2ban; fi
+fi
+PORTS=$(sshd -T 2>/dev/null | awk '/^port /{print $2}' | paste -sd, -)
+# jail.d/*.local est lu après jail.local : seuls « enabled » et « port » sont redéfinis.
+printf '# Géré par Helm : protection SSH sur le port réellement utilisé.\n[sshd]\nenabled = true\nport = %s\n' "${PORTS:-ssh}" > /etc/fail2ban/jail.d/helm-sshd.local
+systemctl enable --now fail2ban 2>/dev/null || fail2ban-client ping >/dev/null 2>&1 || fail2ban-client start
+fail2ban-client reload >/dev/null 2>&1 || true
+echo '@@OK fail2ban'
+"#;
 
-const UNATTENDED_SCRIPT: &str = "set -e\nDEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades\n\
-echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | debconf-set-selections\n\
-DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive unattended-upgrades\necho '@@OK unattended'\n";
+const UNATTENDED_SCRIPT: &str = r#"set -e
+if command -v apt-get >/dev/null; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades
+  echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | debconf-set-selections
+  DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive unattended-upgrades
+else
+  dnf install -y dnf-automatic
+  sed -i 's/^apply_updates.*/apply_updates = yes/; s/^upgrade_type.*/upgrade_type = security/' /etc/dnf/automatic.conf
+  systemctl enable --now dnf-automatic.timer
+fi
+echo '@@OK unattended'
+"#;
 
 /// Ce qu'une correction va faire, pour l'afficher avant exécution.
 #[derive(Debug, Clone, Serialize)]
@@ -329,12 +408,20 @@ pub fn fix_plan(id: &str) -> Result<FixPlan> {
             true,
         ),
         "enable-ufw" => plan(
-            "Installe/active ufw en autorisant SSH (ton port actuel), HTTP et HTTPS ; tout le reste entrant est bloqué. Une nouvelle connexion est testée ; en cas d'échec, ufw est désactivé.",
+            "Installe/active le pare-feu (ufw sur Debian/Ubuntu, firewalld sur Rocky/Alma/Fedora) en autorisant SSH (ton port actuel), HTTP et HTTPS ; tout le reste entrant est bloqué. Une nouvelle connexion est testée ; en cas d'échec, le pare-feu est désactivé.",
             UFW_SCRIPT.to_string(),
             true,
         ),
-        "install-fail2ban" => plan("Installe fail2ban avec sa protection SSH par défaut et l'active au démarrage.", FAIL2BAN_SCRIPT.to_string(), false),
-        "enable-unattended" => plan("Installe unattended-upgrades et active l'installation automatique des correctifs de sécurité.", UNATTENDED_SCRIPT.to_string(), false),
+        "install-fail2ban" => plan(
+            "Installe fail2ban et l'active au démarrage, avec une protection SSH réglée sur ton port SSH réel.",
+            FAIL2BAN_SCRIPT.to_string(),
+            false,
+        ),
+        "enable-unattended" => plan(
+            "Active l'installation automatique des correctifs de sécurité (unattended-upgrades ou dnf-automatic).",
+            UNATTENDED_SCRIPT.to_string(),
+            false,
+        ),
         _ => return Err(Error::Other(format!("correction inconnue : {id}"))),
     })
 }
@@ -368,6 +455,8 @@ pub async fn apply_fix(conn: &Connection, sudo: Option<&str>, id: &str) -> Resul
 pub async fn rollback(conn: &Connection, sudo: Option<&str>, token: &str) -> Result<String> {
     let cmd = if token == "ufw" {
         "ufw --force disable && echo @@ROLLEDBACK".to_string()
+    } else if token == "firewalld" {
+        "systemctl disable --now firewalld && echo @@ROLLEDBACK".to_string()
     } else if token.starts_with("/var/backups/helm/sshd_config.") && !token.contains("..") && !token.contains(' ') {
         format!("bash -c {} helm-rollback {}", crate::ssh::shell_quote(SSHD_ROLLBACK), crate::ssh::shell_quote(token))
     } else {
@@ -379,6 +468,46 @@ pub async fn rollback(conn: &Connection, sudo: Option<&str>, token: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fail2ban_wrong_port() {
+        let out = "@@sshd
+port 6666
+@@ufw
+Status: active
+@@f2b
+active
+@@f2bport
+ssh
+@@os
+Debian
+";
+        let r = parse_report(out);
+        let f = r.findings.iter().find(|f| f.id == "fail2ban").unwrap();
+        assert_eq!(f.severity, Severity::Medium);
+        assert!(f.detail.contains("6666"));
+        let ok = parse_report(&out.replace(
+            "@@f2bport
+ssh",
+            "@@f2bport
+6666",
+        ));
+        assert_eq!(ok.findings.iter().find(|f| f.id == "fail2ban").unwrap().severity, Severity::Ok);
+        let rhel = parse_report(
+            "@@sshd
+port 22
+@@ufw
+absent
+@@firewalld
+running
+@@f2b
+absent
+@@os
+Rocky
+",
+        );
+        assert_eq!(rhel.findings.iter().find(|f| f.id == "firewall").unwrap().severity, Severity::Ok);
+    }
 
     const SAMPLE: &str = "@@sshd\nport 6666\npermitrootlogin yes\npasswordauthentication yes\nx11forwarding yes\n@@ufw\nStatus: inactive\n@@f2b\nabsent\n@@apt\n12\n3\n@@unattended\nno\n@@reboot\nyes\n@@uid0\nroot\ntoor\n@@listen\nLISTEN 0 4096 0.0.0.0:6666 0.0.0.0:* users:((\"sshd\",pid=1,fd=3))\nLISTEN 0 4096 0.0.0.0:3307 0.0.0.0:* users:((\"docker-proxy\",pid=2,fd=4))\nLISTEN 0 4096 127.0.0.1:8081 0.0.0.0:* users:((\"docker-proxy\",pid=3,fd=4))\nLISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=4,fd=6))\n@@os\nUbuntu 24.04 LTS\n";
 
