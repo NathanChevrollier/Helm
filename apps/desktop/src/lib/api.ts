@@ -660,6 +660,7 @@ export function formatDuration(secs: number): string {
   const m = Math.floor((secs % 3600) / 60);
   if (d) return `${d} j ${h} h`;
   if (h) return `${h} h ${m} min`;
+  if (secs < 60) return `${Math.max(0, Math.round(secs))} s`;
   return `${m} min`;
 }
 

@@ -6,7 +6,7 @@
     "build": "pnpm --filter helm-desktop tauri build",
     "build:agent": "cargo zigbuild -p helmd --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl",
     "typecheck": "pnpm --filter helm-desktop exec tsc --noEmit",
-    "test": "cargo test --workspace",
+    "test": "cargo test --workspace && pnpm --filter helm-desktop test",
     "testenv": "docker compose -f testenv/docker-compose.yml up -d --build"
   },
   "packageManager": "pnpm@12.5.1"
