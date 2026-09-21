@@ -82,7 +82,7 @@ export default function Firewall({ serverId }: { serverId: string }) {
                 <td className="w-24 px-2 py-2">
                   <Badge tone={STATUS[e.status].tone}>{STATUS[e.status].label}</Badge>
                 </td>
-                <td className="w-44 px-2 py-2 text-xs">{e.owner || "?"}</td>
+                <td className="w-44 px-2 py-2 text-xs">{e.owner || <span className="text-muted">inconnu</span>}</td>
                 <td className={`px-2 py-2 text-xs ${e.docker && e.status === "open" && state.active ? "text-warn" : "text-muted"}`}>{e.note}</td>
               </tr>
             ))}

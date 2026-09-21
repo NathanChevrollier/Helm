@@ -73,4 +73,10 @@ body {
 .xterm {
   padding: 6px 0 0 8px;
   height: 100%;
+  background: var(--color-bg);
+}
+
+/* Le rendu WebGL ne repeint pas le fond du viewport quand le thème change : on le suit ici. */
+.xterm .xterm-viewport {
+  background-color: var(--color-bg) !important;
 }

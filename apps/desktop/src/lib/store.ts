@@ -164,8 +164,9 @@ export const useApp = create<State>((set, get) => ({
     set((s) => ({
       servers,
       activeServerId: active && servers.some((x) => x.id === active) ? active : (servers[0]?.id ?? null),
-      // Les onglets d'un serveur supprimé disparaissent.
+      // Les onglets et raccourcis d'un serveur supprimé disparaissent.
       tabs: s.tabs.filter((t) => servers.some((x) => x.id === t.serverId)),
+      bookmarks: Object.fromEntries(Object.entries(s.bookmarks).filter(([id]) => servers.some((x) => x.id === id))),
     }));
   },
   activeServerId: readActiveServer(),

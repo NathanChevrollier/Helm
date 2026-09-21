@@ -148,7 +148,8 @@ export default function TerminalPane({
   const openSearchRef = useRef<() => void>(() => {});
   openSearchRef.current = () => {
     setSearching(true);
-    requestAnimationFrame(() => searchInput.current?.select());
+    // Déjà ouverte : on resélectionne le texte ; sinon autoFocus prend le relais au montage.
+    searchInput.current?.select();
   };
   /** Enregistrement asciicast v2 : [secondes depuis le début, "o", texte]. */
   const recording = useRef<{ start: number; cols: number; rows: number; events: [number, "o", string][]; decoder: TextDecoder } | null>(null);
@@ -472,6 +473,7 @@ export default function TerminalPane({
           <span className="flex items-center gap-1 rounded-md border border-border bg-panel px-1.5 py-1 shadow-lg">
             <input
               ref={searchInput}
+              autoFocus
               className="w-48 bg-transparent text-xs outline-none placeholder:text-muted/60"
               placeholder="Rechercher (Entrée, Maj+Entrée)"
               value={query}
