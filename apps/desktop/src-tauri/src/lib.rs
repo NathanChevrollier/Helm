@@ -7,6 +7,7 @@ mod store;
 
 use commands::{backups, dashboard, deploy, docker, files, logs, monitoring, security, servers, sites, terminal, tunnels, workspace};
 use tauri::Manager;
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 /// Renvoie la version de l'app, utilisée par l'UI pour vérifier que le pont Rust fonctionne.
 #[tauri::command]
@@ -26,11 +27,30 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
+        // Journal local de l'app (dossier de logs, 5 fichiers de 2 Mo), sans aucun secret.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .target(Target::new(TargetKind::LogDir { file_name: Some("helm".into()) }))
+                .target(Target::new(TargetKind::Stdout))
+                .level(log::LevelFilter::Info)
+                .level_for("russh", log::LevelFilter::Warn)
+                .level_for("russh_sftp", log::LevelFilter::Warn)
+                .max_file_size(2_000_000)
+                .rotation_strategy(RotationStrategy::KeepSome(5))
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
-            app.manage(store::Store::open(&dir));
+            let store = store::Store::open(&dir);
+            if let Some(w) = store.warning() {
+                log::warn!("{w}");
+            }
+            log::info!("Helm {} démarré", env!("CARGO_PKG_VERSION"));
+            app.manage(store);
             app.manage(store::AuditLog::new(&dir, "app"));
             app.manage(sessions::Sessions::new());
             app.manage(monitoring::Monitor::default());
@@ -119,6 +139,7 @@ pub fn run() {
             workspace::store_warning,
             workspace::app_lock_get,
             workspace::app_lock_set,
+            workspace::logs_open_dir,
             workspace::audit_list,
             workspace::tmux_check,
             workspace::tmux_install,

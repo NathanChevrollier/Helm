@@ -187,7 +187,7 @@ function AiAccess() {
 }
 
 function Preferences() {
-  const { settings, setSettings, servers } = useApp();
+  const { settings, setSettings, servers, notify } = useApp();
   const declined = Object.keys(settings.tmuxDeclined).filter((id) => settings.tmuxDeclined[id]);
   return (
     <div className="flex max-w-2xl flex-col gap-4">
@@ -201,6 +201,15 @@ function Preferences() {
         </span>
       </label>
       <AppLock />
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
+        <span className="flex-1">
+          <span className="font-medium">Journaux de Helm</span>
+          <span className="block text-sm text-muted">Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.</span>
+        </span>
+        <Button size="sm" onClick={() => void api.logsOpenDir().catch((e) => notify(errorMessage(e), "error"))}>
+          Ouvrir le dossier
+        </Button>
+      </div>
       {declined.length > 0 && (
         <div className="rounded-lg border border-border bg-panel p-4 text-sm">
           <p className="text-muted">

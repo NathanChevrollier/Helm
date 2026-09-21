@@ -19,6 +19,16 @@ pub fn ui_state_get(store: State<'_, Store>) -> serde_json::Value {
 
 /// Empreinte du mot de passe de verrouillage de l'app (PBKDF2, calculée par l'interface),
 /// conservée dans le coffre de l'OS. `None` : verrouillage désactivé.
+/// Ouvre le dossier des journaux de Helm dans l'explorateur.
+#[tauri::command]
+pub fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener().open_path(dir.to_string_lossy(), None::<String>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn app_lock_get() -> Option<String> {
     crate::store::secrets::get("app", "lock")

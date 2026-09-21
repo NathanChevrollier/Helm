@@ -28,6 +28,10 @@ use crate::store::AuditLog;
 /// Inscrit le résultat d'une action dans le journal puis le renvoie tel quel.
 pub fn track<T>(audit: &AuditLog, store: &Store, server_id: &str, action: &str, detail: &str, r: Result<T, String>) -> Result<T, String> {
     let name = store.server(server_id).map(|s| s.name).unwrap_or_default();
+    match &r {
+        Ok(_) => log::info!("[{name}] {action} {detail}"),
+        Err(e) => log::warn!("[{name}] {action} {detail} : échec ({e})"),
+    }
     audit.record(server_id, &name, action, detail, r.as_ref().map(|_| ()).map_err(|e| e.as_str()));
     r
 }

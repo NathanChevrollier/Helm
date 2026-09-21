@@ -116,14 +116,20 @@ impl Sessions {
             return Err(format!("AUTH_BLOCKED: {reason} — reconnexion automatique suspendue, clique « Connecter » pour réessayer"));
         }
         let params = store.connect_params(server_id)?;
+        let target = format!("{}@{}:{}", params.username, params.host, params.port);
         let conn = match Connection::connect(params).await {
             Ok(c) => c,
             Err(helm_core::Error::Auth(reason)) => {
+                log::warn!("{target} : authentification refusée ({reason}), reconnexions automatiques suspendues");
                 self.auth_blocked.lock().unwrap().insert(server_id.to_string(), reason.clone());
                 return Err(format!("Authentification échouée : {reason}"));
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => {
+                log::warn!("{target} : connexion impossible ({e})");
+                return Err(e.to_string());
+            }
         };
+        log::info!("{target} : connecté");
         // Nouvelle connexion : les noms d'utilisateurs ont pu changer depuis la précédente.
         self.id_names.lock().await.remove(server_id);
         self.connections.lock().await.insert(server_id.to_string(), conn.clone());
