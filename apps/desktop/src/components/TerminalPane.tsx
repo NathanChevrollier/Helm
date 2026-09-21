@@ -278,6 +278,8 @@ export default function TerminalPane({
         if (sel) void navigator.clipboard.writeText(sel);
         return false;
       }
+      // Ctrl+Maj+L verrouille Helm : ne pas l'envoyer au shell (il effacerait l'écran).
+      if (e.code === "KeyL") return false;
       if (e.code === "KeyV") {
         void navigator.clipboard.readText().then(safePaste);
         return false;

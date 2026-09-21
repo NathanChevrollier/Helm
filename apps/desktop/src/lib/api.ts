@@ -452,6 +452,9 @@ export const api = {
 
   uiStateGet: () => invoke<unknown>("ui_state_get"),
   storeWarning: () => invoke<string | null>("store_warning"),
+  appLockGet: () => invoke<string | null>("app_lock_get"),
+  /** Chaîne vide : supprime le mot de passe (verrouillage désactivé). */
+  appLockSet: (hash: string) => invoke<void>("app_lock_set", { hash }),
   uiStateSet: (state: unknown) => invoke<void>("ui_state_set", { state }),
   auditList: (limit = 500) => invoke<AuditEntry[]>("audit_list", { limit }),
   tmuxCheck: (serverId: string) => invoke<string | null>("tmux_check", { serverId }),

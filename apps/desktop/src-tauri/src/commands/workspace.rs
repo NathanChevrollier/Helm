@@ -17,6 +17,18 @@ pub fn ui_state_get(store: State<'_, Store>) -> serde_json::Value {
     store.read(|d| d.ui_state.clone())
 }
 
+/// Empreinte du mot de passe de verrouillage de l'app (PBKDF2, calculée par l'interface),
+/// conservée dans le coffre de l'OS. `None` : verrouillage désactivé.
+#[tauri::command]
+pub fn app_lock_get() -> Option<String> {
+    crate::store::secrets::get("app", "lock")
+}
+
+#[tauri::command]
+pub fn app_lock_set(hash: String) -> Result<(), String> {
+    crate::store::secrets::set("app", "lock", &hash)
+}
+
 /// Problème rencontré au chargement de la configuration, à afficher au démarrage.
 #[tauri::command]
 pub fn store_warning(store: State<'_, Store>) -> Option<String> {

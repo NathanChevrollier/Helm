@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, CheckCircle2, Copy, History, SlidersHorizontal, XCircle } from "lucide-react";
+import { Bot, CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } from "lucide-react";
 import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useApp } from "../lib/store";
+import { hashPassword, useLock } from "../lib/lock";
 import { Badge, Button, Input } from "../components/ui";
 
 const TABS = [
@@ -199,6 +200,7 @@ function Preferences() {
           </span>
         </span>
       </label>
+      <AppLock />
       {declined.length > 0 && (
         <div className="rounded-lg border border-border bg-panel p-4 text-sm">
           <p className="text-muted">
@@ -208,6 +210,107 @@ function Preferences() {
             Reproposer l'installation
           </Button>
         </div>
+      )}
+    </div>
+  );
+}
+
+const LOCK_DELAYS = [
+  { minutes: 0, label: "Jamais (verrouillage manuel uniquement)" },
+  { minutes: 5, label: "Après 5 minutes d'inactivité" },
+  { minutes: 15, label: "Après 15 minutes d'inactivité" },
+  { minutes: 30, label: "Après 30 minutes d'inactivité" },
+  { minutes: 60, label: "Après 1 heure d'inactivité" },
+];
+
+/** Mot de passe de verrouillage de Helm et délai de verrouillage automatique. */
+function AppLock() {
+  const { settings, setSettings, notify, ask } = useApp();
+  const configured = useLock((s) => s.configured);
+  const [editing, setEditing] = useState(false);
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (pw.length < 6) return notify("Choisis au moins 6 caractères.", "error");
+    if (pw !== confirm) return notify("Les deux mots de passe ne correspondent pas.", "error");
+    setBusy(true);
+    try {
+      await api.appLockSet(await hashPassword(pw));
+      await useLock.getState().refresh();
+      setEditing(false);
+      setPw("");
+      setConfirm("");
+      notify("Mot de passe de verrouillage enregistré (Ctrl+Maj+L pour verrouiller)", "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!(await ask({ title: "Désactiver le verrouillage ?", body: "Helm ne sera plus protégé par un mot de passe.", confirmLabel: "Désactiver", danger: true }))) return;
+    await api.appLockSet("");
+    setSettings({ lockMinutes: 0 });
+    await useLock.getState().refresh();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
+      <div>
+        <span className="flex items-center gap-2 font-medium">
+          <Lock size={14} /> Verrouillage de Helm {configured && <Badge tone="ok">activé</Badge>}
+        </span>
+        <span className="block text-sm text-muted">
+          Helm ouvert donne accès à tous tes serveurs. Un mot de passe masque l'interface quand tu t'absentes ; connexions et terminaux continuent en arrière-plan. Seule son empreinte est conservée, dans le coffre de Windows.
+        </span>
+      </div>
+      {configured && !editing && (
+        <>
+          <select
+            className="h-8 w-80 rounded-md border border-border bg-bg px-2 text-sm"
+            value={settings.lockMinutes}
+            onChange={(e) => setSettings({ lockMinutes: Number(e.target.value) })}
+          >
+            {LOCK_DELAYS.map((d) => (
+              <option key={d.minutes} value={d.minutes}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => setEditing(true)}>
+              Changer le mot de passe
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => void remove()}>
+              Désactiver
+            </Button>
+          </div>
+        </>
+      )}
+      {(!configured || editing) && (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <Input className="!w-80" type="password" placeholder="Nouveau mot de passe (6 caractères min.)" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <Input className="!w-80" type="password" placeholder="Confirmation" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" type="submit" loading={busy}>
+              {configured ? "Enregistrer" : "Activer le verrouillage"}
+            </Button>
+            {editing && (
+              <Button size="sm" onClick={() => setEditing(false)}>
+                Annuler
+              </Button>
+            )}
+          </div>
+        </form>
       )}
     </div>
   );

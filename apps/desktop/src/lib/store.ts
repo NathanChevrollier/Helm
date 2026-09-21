@@ -38,6 +38,8 @@ export interface Settings {
   persistentSessions: boolean;
   /** Serveurs pour lesquels l'installation de tmux a été refusée. */
   tmuxDeclined: Record<string, boolean>;
+  /** Verrouillage automatique après N minutes d'inactivité (0 : jamais). */
+  lockMinutes: number;
 }
 
 /** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
@@ -167,7 +169,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {} },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0 },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],

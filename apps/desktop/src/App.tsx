@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
-import { Search, ShipWheel } from "lucide-react";
+import { Lock, Search, ShipWheel } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
 import CommandPalette from "./components/CommandPalette";
+import LockScreen from "./components/LockScreen";
+import { useLock, watchInactivity } from "./lib/lock";
 import HomeView from "./views/Home";
 import TerminalView from "./views/Terminal";
 
@@ -38,9 +40,23 @@ export default function App() {
     });
   }, [refreshServers, hydrate]);
 
+  // Verrouillage : état initial, puis surveillance de l'inactivité.
+  const locked = useLock((s) => s.locked);
+  const lockConfigured = useLock((s) => s.configured);
+  useEffect(() => {
+    void useLock.getState().refresh();
+    return watchInactivity(() => useApp.getState().settings.lockMinutes);
+  }, []);
+
   // Ctrl+K : palette de commandes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useLock.getState().locked) return;
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyL") {
+        e.preventDefault();
+        useLock.getState().lock();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === "KeyK") {
         e.preventDefault();
         setPalette((v) => !v);
@@ -135,12 +151,20 @@ export default function App() {
             "Aucun serveur sélectionné"
           )}
         </span>
-        <span>{version ? `Helm v${version}` : ""}</span>
+        <span className="flex items-center gap-3">
+          {lockConfigured && (
+            <button className="flex items-center gap-1 hover:text-fg" title="Verrouiller Helm (Ctrl+Maj+L)" onClick={() => useLock.getState().lock()}>
+              <Lock size={11} /> Verrouiller
+            </button>
+          )}
+          {version ? `Helm v${version}` : ""}
+        </span>
       </footer>
 
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
       <DialogHost />
       <Toasts />
+      {locked && <LockScreen />}
     </div>
   );
 }

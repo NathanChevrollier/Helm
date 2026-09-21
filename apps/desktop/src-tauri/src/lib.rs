@@ -117,6 +117,8 @@ pub fn run() {
             workspace::ui_state_get,
             workspace::ui_state_set,
             workspace::store_warning,
+            workspace::app_lock_get,
+            workspace::app_lock_set,
             workspace::audit_list,
             workspace::tmux_check,
             workspace::tmux_install,
