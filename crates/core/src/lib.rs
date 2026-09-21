@@ -9,6 +9,7 @@ pub mod docker;
 pub mod fail2ban;
 pub mod firewall;
 pub mod nginx;
+pub mod schedule;
 pub mod security;
 pub mod sftp;
 pub mod ssh;

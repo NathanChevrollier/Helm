@@ -7,12 +7,14 @@ import Overview from "./monitoring/Overview";
 import Processes from "./monitoring/Processes";
 import Services from "./monitoring/Services";
 import Agent from "./monitoring/Agent";
+import ScheduleView from "./monitoring/Schedule";
 import { usePolling } from "../lib/poll";
 
 const TABS = [
   { id: "overview", label: "Vue d'ensemble" },
   { id: "processes", label: "Processus" },
   { id: "services", label: "Services" },
+  { id: "schedule", label: "Tâches planifiées" },
   { id: "agent", label: "Agent & alertes" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -80,6 +82,7 @@ function Monitoring({ serverId }: { serverId: string }) {
         </div>
         {tab === "processes" && <Processes serverId={serverId} visible />}
         {tab === "services" && <Services serverId={serverId} />}
+        {tab === "schedule" && <ScheduleView serverId={serverId} />}
         {tab === "agent" && <Agent serverId={serverId} agent={agent} reload={loadAgent} />}
       </div>
     </div>

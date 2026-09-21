@@ -128,6 +128,34 @@ export interface ServerUser {
   keys: AuthorizedKey[];
 }
 
+export interface CronJob {
+  schedule: string;
+  user: string | null;
+  command: string;
+  human: string | null;
+}
+
+export interface CronSource {
+  id: string;
+  label: string;
+  editable: boolean;
+  raw: string;
+  jobs: CronJob[];
+}
+
+export interface SystemdTimer {
+  unit: string;
+  activates: string;
+  next: string;
+  last: string;
+}
+
+export interface Schedule {
+  crontabs: CronSource[];
+  timers: SystemdTimer[];
+  systemd: boolean;
+}
+
 export interface DiagnosisCheck {
   label: string;
   ok: boolean;
@@ -545,6 +573,9 @@ export const api = {
   accessUsers: (serverId: string) => invoke<ServerUser[]>("access_users", { serverId }),
   accessAddKey: (serverId: string, user: string, key: string) => invoke<void>("access_add_key", { serverId, user, key }),
   accessRemoveKey: (serverId: string, user: string, line: string) => invoke<void>("access_remove_key", { serverId, user, line }),
+  scheduleList: (serverId: string) => invoke<Schedule>("schedule_list", { serverId }),
+  crontabSave: (serverId: string, user: string, content: string) => invoke<void>("crontab_save", { serverId, user, content }),
+  timerRun: (serverId: string, service: string) => invoke<void>("timer_run", { serverId, service }),
   diagnose: (id: string) => invoke<Diagnosis>("ssh_diagnose", { id }),
   settingsExport: (path: string, password: string, includeSecrets: boolean) => invoke<void>("settings_export", { path, password, includeSecrets }),
   settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),

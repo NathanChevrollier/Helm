@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use helm_core::agent::{self, AgentInfo};
+use helm_core::schedule;
 use helm_core::system::{self, Process, Service};
 use helm_protocol::proc::{parse_collect, COLLECT_SCRIPT};
 use helm_protocol::{AgentConfig, HistoryPoint, Metrics, RawSample};
@@ -198,4 +199,49 @@ pub async fn agent_save_config(
 pub async fn agent_test_notify(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<String, String> {
     let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
     agent::test_notify(&conn, sudo.as_deref()).await.map_err(err)
+}
+
+// ---------- Tâches planifiées ----------
+
+#[tauri::command]
+pub async fn schedule_list(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+) -> Result<schedule::Schedule, String> {
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    schedule::list(&conn, sudo.as_deref()).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn crontab_save(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    user: String,
+    content: String,
+) -> Result<(), String> {
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        schedule::save_crontab(&conn, sudo.as_deref(), &user, &content).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "crontab.save", &user, r)
+}
+
+#[tauri::command]
+pub async fn timer_run(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    service: String,
+) -> Result<(), String> {
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        schedule::run_timer_now(&conn, sudo.as_deref(), &service).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "timer.run", &service, r)
 }

@@ -8,7 +8,7 @@ FROM debian:12
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       openssh-server rsyslog nginx sudo ufw fail2ban iptables python3-systemd procps iproute2 ca-certificates curl \
+       openssh-server rsyslog cron nginx sudo ufw fail2ban iptables python3-systemd procps iproute2 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash -G sudo admin \
