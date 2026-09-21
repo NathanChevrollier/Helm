@@ -599,6 +599,9 @@ export const api = {
     invoke<{ servers: number; snippets: number; tunnels: number; secrets: number }>("settings_import", { path, password }),
   shellHistory: (serverId: string) => invoke<string[]>("shell_history", { serverId }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
+  appIsLocked: () => invoke<boolean>("app_is_locked"),
+  appLockEngage: () => invoke<void>("app_lock_engage"),
+  appUnlock: (password: string) => invoke<boolean>("app_unlock", { password }),
   appLockGet: () => invoke<string | null>("app_lock_get"),
   /** Chaîne vide : supprime le mot de passe (verrouillage désactivé). */
   appLockSet: (hash: string) => invoke<void>("app_lock_set", { hash }),

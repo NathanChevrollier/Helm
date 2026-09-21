@@ -17,8 +17,6 @@ pub fn ui_state_get(store: State<'_, Store>) -> serde_json::Value {
     store.read(|d| d.ui_state.clone())
 }
 
-/// Empreinte du mot de passe de verrouillage de l'app (PBKDF2, calculée par l'interface),
-/// conservée dans le coffre de l'OS. `None` : verrouillage désactivé.
 /// Ouvre le dossier des journaux de Helm dans l'explorateur.
 #[tauri::command]
 pub fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
@@ -29,6 +27,11 @@ pub fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
     app.opener().open_path(dir.to_string_lossy(), None::<String>).map_err(|e| e.to_string())
 }
 
+/// Helm est verrouillé. Gardé côté Rust : recharger l'interface (F5) ne déverrouille pas.
+static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Empreinte du mot de passe de verrouillage de l'app (PBKDF2, calculée par l'interface),
+/// conservée dans le coffre de l'OS. `None` : verrouillage désactivé.
 #[tauri::command]
 pub fn app_lock_get() -> Option<String> {
     crate::store::secrets::get("app", "lock")
@@ -36,7 +39,51 @@ pub fn app_lock_get() -> Option<String> {
 
 #[tauri::command]
 pub fn app_lock_set(hash: String) -> Result<(), String> {
+    if LOCKED.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Helm est verrouillé".into());
+    }
     crate::store::secrets::set("app", "lock", &hash)
+}
+
+/// État du verrouillage (relu au démarrage de l'interface).
+#[tauri::command]
+pub fn app_is_locked() -> bool {
+    LOCKED.load(std::sync::atomic::Ordering::SeqCst) && crate::store::secrets::get("app", "lock").is_some()
+}
+
+#[tauri::command]
+pub fn app_lock_engage() {
+    if crate::store::secrets::get("app", "lock").is_some() {
+        LOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Déverrouille si le mot de passe correspond à l'empreinte PBKDF2 enregistrée (format de
+/// l'interface : `pbkdf2$itérations$sel$empreinte`, en base64).
+#[tauri::command]
+pub async fn app_unlock(password: String) -> bool {
+    let Some(stored) = crate::store::secrets::get("app", "lock") else {
+        LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
+        return true;
+    };
+    let ok = verify_lock_password(&password, &stored);
+    if ok {
+        LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
+    } else {
+        // Freine les essais au hasard.
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    }
+    ok
+}
+
+fn verify_lock_password(password: &str, stored: &str) -> bool {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let parts: Vec<&str> = stored.split('$').collect();
+    let [kind, iter, salt, hash] = parts.as_slice() else { return false };
+    let (Ok(iter), Ok(salt), Ok(hash)) = (iter.parse::<u32>(), b64.decode(salt), b64.decode(hash)) else { return false };
+    let Some(iter) = std::num::NonZeroU32::new(iter) else { return false };
+    *kind == "pbkdf2" && ring::pbkdf2::verify(ring::pbkdf2::PBKDF2_HMAC_SHA256, iter, &salt, password.as_bytes(), &hash).is_ok()
 }
 
 /// Problème rencontré au chargement de la configuration, à afficher au démarrage.
@@ -146,4 +193,22 @@ pub fn settings_import(store: State<'_, Store>, path: String, password: String) 
     let summary = helm_profiles::export::import(&store, &text, &password)?;
     log::info!("réglages importés depuis {path} : {summary:?}");
     Ok(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine;
+
+    #[test]
+    fn lock_password_format() {
+        // Même format que lib/lock.ts : pbkdf2$itérations$sel$empreinte (base64).
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let salt = [7u8; 16];
+        let mut hash = [0u8; 32];
+        ring::pbkdf2::derive(ring::pbkdf2::PBKDF2_HMAC_SHA256, std::num::NonZeroU32::new(1000).unwrap(), &salt, b"secret", &mut hash);
+        let stored = format!("pbkdf2$1000${}${}", b64.encode(salt), b64.encode(hash));
+        assert!(super::verify_lock_password("secret", &stored));
+        assert!(!super::verify_lock_password("Secret", &stored));
+        assert!(!super::verify_lock_password("secret", "n'importe quoi"));
+    }
 }

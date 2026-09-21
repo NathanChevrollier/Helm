@@ -53,18 +53,18 @@ export const useLock = create<LockState>((set, get) => ({
   locked: false,
   refresh: async () => {
     const stored = await api.appLockGet().catch(() => null);
-    set({ configured: !!stored, locked: get().locked && !!stored });
+    // L'état « verrouillé » vit côté Rust : un rechargement de l'interface ne l'efface pas.
+    const locked = await api.appIsLocked().catch(() => false);
+    set({ configured: !!stored, locked: (get().locked || locked) && !!stored });
   },
   lock: () => {
-    if (get().configured) set({ locked: true });
+    if (!get().configured) return;
+    set({ locked: true });
+    void api.appLockEngage().catch(() => {});
   },
   unlock: async (password) => {
-    const stored = await api.appLockGet().catch(() => null);
-    if (!stored) {
-      set({ locked: false, configured: false });
-      return true;
-    }
-    const ok = await verifyPassword(password, stored);
+    // Vérification faite côté Rust, qui seul lève le verrou.
+    const ok = await api.appUnlock(password).catch(() => false);
     if (ok) set({ locked: false });
     return ok;
   },

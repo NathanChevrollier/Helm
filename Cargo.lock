@@ -2017,6 +2017,7 @@ dependencies = [
  "helm-profiles",
  "helm-protocol",
  "log",
+ "ring",
  "serde",
  "serde_json",
  "tauri",

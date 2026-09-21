@@ -58,6 +58,11 @@ export default function App() {
   // Ctrl+K : palette de commandes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Pas de rechargement de la fenêtre : il couperait les terminaux (et ne doit rien déverrouiller).
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.code === "KeyR")) {
+        e.preventDefault();
+        return;
+      }
       if (useLock.getState().locked) return;
       if (matches(e, "lock")) {
         e.preventDefault();
