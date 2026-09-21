@@ -109,7 +109,14 @@ function Sites({ serverId }: { serverId: string }) {
 
   if (error) return <EmptyState icon={<Globe size={40} />} title="Impossible de lire la configuration">{error}</EmptyState>;
   if (!state) return <EmptyState icon={<Globe size={40} />} title="Chargement…" />;
-  if (!state.installed) return <EmptyState icon={<Globe size={40} />} title="nginx n'est pas installé sur ce serveur" />;
+  if (!state.installed)
+    return (
+      <EmptyState icon={<Globe size={40} />} title="nginx n'est pas installé sur ce serveur">
+        {state.others.length > 0
+          ? `Serveur web détecté : ${state.others.join(", ")}. Helm gère uniquement nginx pour l'instant ; les autres onglets (Docker, Pare-feu, Journaux…) restent utilisables.`
+          : "Aucun serveur web détecté."}
+      </EmptyState>
+    );
 
   return (
     <div className="flex h-full flex-col">
@@ -120,6 +127,7 @@ function Sites({ serverId }: { serverId: string }) {
             <Badge>{state.version}</Badge>
             {state.running ? <Badge tone="ok">nginx actif</Badge> : <Badge tone="danger">nginx arrêté</Badge>}
             <Badge>{sites.length} site(s) actif(s)</Badge>
+            {state.others.length > 0 && <Badge tone="warn">aussi détecté : {state.others.join(", ")}</Badge>}
           </div>
         </div>
         <div className="ml-auto flex gap-2">

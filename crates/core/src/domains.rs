@@ -24,7 +24,10 @@ pub struct DomainInfo {
 }
 
 /// Suffixes publics à deux niveaux les plus courants (`co.uk`, `com.au`…).
-const TWO_LEVEL: &[&str] = &["co.uk", "org.uk", "me.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "com.br", "com.cn", "co.in", "gouv.fr", "asso.fr", "com.fr", "co.za", "com.mx", "com.tr"];
+const TWO_LEVEL: &[&str] = &[
+    "co.uk", "org.uk", "me.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "com.br", "com.cn", "co.in", "gouv.fr",
+    "asso.fr", "com.fr", "co.za", "com.mx", "com.tr",
+];
 
 pub fn registrable(domain: &str) -> String {
     let labels: Vec<&str> = domain.trim_end_matches('.').split('.').collect();
@@ -38,7 +41,13 @@ pub fn registrable(domain: &str) -> String {
 
 /// Date d'expiration dans une réponse RDAP (`events[].eventAction == "expiration"`).
 pub fn rdap_expiration(json: &serde_json::Value) -> Option<String> {
-    json.get("events")?.as_array()?.iter().find(|e| e.get("eventAction").and_then(|a| a.as_str()) == Some("expiration"))?.get("eventDate")?.as_str().map(str::to_string)
+    json.get("events")?
+        .as_array()?
+        .iter()
+        .find(|e| e.get("eventAction").and_then(|a| a.as_str()) == Some("expiration"))?
+        .get("eventDate")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// Expiration par domaine, avec l'heure de la requête (les annuaires limitent le nombre d'appels).

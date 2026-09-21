@@ -264,9 +264,13 @@ pub struct NginxState {
     pub disabled: Vec<SiteFile>,
     pub certificates: Vec<Certificate>,
     pub certbot: bool,
+    /// Autres serveurs web ou reverse proxies détectés (Caddy, Apache, Traefik…), non gérés par Helm.
+    pub others: Vec<String>,
 }
 
-const DISCOVER_SCRIPT: &str = r#"command -v nginx >/dev/null 2>&1 || { echo @@NONGINX; exit 0; }
+const DISCOVER_SCRIPT: &str = r#"for b in caddy apache2 httpd traefik lighttpd haproxy; do command -v "$b" >/dev/null 2>&1 && echo "@@OTHER $b"; done
+docker ps --format '{{.Image}}' 2>/dev/null | grep -Eio 'traefik|caddy|nginx-proxy-manager|nginx-proxy|haproxy' | sort -u | sed 's/^/@@OTHER docker:/'
+command -v nginx >/dev/null 2>&1 || { echo @@NONGINX; exit 0; }
 echo "@@VERSION $(nginx -v 2>&1)"
 if pgrep -x nginx >/dev/null 2>&1; then echo @@RUNNING; fi
 command -v certbot >/dev/null 2>&1 && echo @@CERTBOT
@@ -296,8 +300,29 @@ pub fn parse_discovery(out: &str) -> NginxState {
         disabled: vec![],
         certificates: vec![],
         certbot: false,
+        others: vec![],
     };
-    if out.trim_start().starts_with("@@NONGINX") {
+    for o in out.lines().filter_map(|l| l.strip_prefix("@@OTHER ")) {
+        let (name, docker) = match o.strip_prefix("docker:") {
+            Some(n) => (n.to_lowercase(), true),
+            None => (o.to_lowercase(), false),
+        };
+        let label = match name.as_str() {
+            "apache2" | "httpd" => "Apache",
+            "caddy" => "Caddy",
+            "traefik" => "Traefik",
+            "lighttpd" => "lighttpd",
+            "haproxy" => "HAProxy",
+            "nginx-proxy-manager" => "Nginx Proxy Manager",
+            "nginx-proxy" => "nginx-proxy",
+            _ => continue,
+        };
+        let label = if docker { format!("{label} (conteneur)") } else { label.to_string() };
+        if !state.others.contains(&label) {
+            state.others.push(label);
+        }
+    }
+    if out.contains("@@NONGINX") {
         state.installed = false;
         return state;
     }
@@ -755,6 +780,9 @@ server {
         assert_eq!(st.files[0].servers.len(), 2);
         assert_eq!(st.disabled[0].servers[0].server_names, vec!["old.example.com"]);
         assert!(!parse_discovery("@@NONGINX\n").installed);
+        let other = parse_discovery("@@OTHER caddy\n@@OTHER docker:traefik\n@@NONGINX\n");
+        assert!(!other.installed);
+        assert_eq!(other.others, vec!["Caddy", "Traefik (conteneur)"]);
     }
 
     #[test]

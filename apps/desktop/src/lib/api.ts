@@ -396,6 +396,8 @@ export interface NginxState {
   disabled: SiteFile[];
   certificates: Certificate[];
   certbot: boolean;
+  /** Autres serveurs web détectés (Caddy, Apache, Traefik…), non gérés par Helm. */
+  others: string[];
 }
 
 export interface ApplyResult {
