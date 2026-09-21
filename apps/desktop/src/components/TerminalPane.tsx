@@ -171,6 +171,8 @@ export default function TerminalPane({
     searchRef.current = search;
     // Seuls les liens web s'ouvrent : une sortie de commande ne doit pas pouvoir lancer autre chose.
     term.loadAddon(new WebLinksAddon((_e, url) => /^https?:\/\//i.test(url) && void openUrl(url)));
+    // Liens OSC 8 envoyés par le serveur lui-même : mêmes règles (web uniquement, sur clic).
+    term.options.linkHandler = { activate: (_e, url) => void (/^https?:\/\//i.test(url) && openUrl(url)), allowNonHttpProtocols: false };
     term.open(host.current!);
     try {
       term.loadAddon(new WebglAddon());

@@ -164,7 +164,7 @@ pub async fn set_ignore(conn: &Connection, sudo: Option<&str>, addresses: &[Stri
     let content = ignore_file(&list, &jails);
     let f = shell_quote(IGNORE_FILE);
     let script = format!(
-        "set -u\n[ -f {f} ] && cp -p {f} {f}.helm-avant\ncat > {f}\nchmod 644 {f}\nif fail2ban-client -t >/tmp/.helm-f2b-test 2>&1; then\n  rm -f {f}.helm-avant\n  fail2ban-client reload 2>&1\n  echo @@OK\nelse\n  cat /tmp/.helm-f2b-test\n  if [ -f {f}.helm-avant ]; then mv -f {f}.helm-avant {f}; else rm -f {f}; fi\n  echo @@FAILED\nfi\nrm -f /tmp/.helm-f2b-test\n"
+        "set -u\n[ -f {f} ] && cp -p {f} {f}.helm-avant\ncat > {f}\nchmod 644 {f}\nT=$(mktemp)\nif fail2ban-client -t >\"$T\" 2>&1; then\n  rm -f {f}.helm-avant\n  fail2ban-client reload 2>&1\n  echo @@OK\nelse\n  cat \"$T\"\n  if [ -f {f}.helm-avant ]; then mv -f {f}.helm-avant {f}; else rm -f {f}; fi\n  echo @@FAILED\nfi\nrm -f \"$T\"\n"
     );
     let out = conn.exec_sudo(&format!("sh -c {}", shell_quote(&script)), sudo, Some(content.as_bytes())).await?;
     let text = format!("{}{}", out.stdout, out.stderr);

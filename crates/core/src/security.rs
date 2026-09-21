@@ -13,7 +13,7 @@ echo @@ufw; if command -v ufw >/dev/null; then ufw status 2>/dev/null | head -n1
 echo @@firewalld; if command -v firewall-cmd >/dev/null; then firewall-cmd --state 2>&1 | head -n1; else echo absent; fi
 echo @@f2b; if command -v fail2ban-client >/dev/null; then if fail2ban-client ping >/dev/null 2>&1; then echo active; else echo inactive; fi; else echo absent; fi
 echo @@f2bport; if fail2ban-client ping >/dev/null 2>&1; then for a in $(fail2ban-client get sshd actions 2>/dev/null | tail -n +2 | sed 's/^[|` -]*//' | tr ',' ' '); do fail2ban-client get sshd action "$a" port 2>/dev/null; done; fi
-echo @@apt; if command -v apt-get >/dev/null; then apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' > /tmp/.helm-upg; wc -l < /tmp/.helm-upg; grep -ci security /tmp/.helm-upg; rm -f /tmp/.helm-upg; elif command -v dnf >/dev/null; then dnf -q check-update 2>/dev/null | grep -cE '^[A-Za-z0-9_.+-]+\.[A-Za-z0-9_]+[[:space:]]'; dnf -q updateinfo list --security 2>/dev/null | wc -l; else echo -1; echo -1; fi
+echo @@apt; if command -v apt-get >/dev/null; then U=$(mktemp); apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst' > "$U"; wc -l < "$U"; grep -ci security "$U"; rm -f "$U"; elif command -v dnf >/dev/null; then dnf -q check-update 2>/dev/null | grep -cE '^[A-Za-z0-9_.+-]+\.[A-Za-z0-9_]+[[:space:]]'; dnf -q updateinfo list --security 2>/dev/null | wc -l; else echo -1; echo -1; fi
 echo @@unattended; if command -v apt-get >/dev/null; then if dpkg -s unattended-upgrades >/dev/null 2>&1; then echo yes; else echo no; fi; elif command -v dnf >/dev/null; then if systemctl is-enabled dnf-automatic.timer dnf-automatic-install.timer 2>/dev/null | grep -q '^enabled'; then echo yes; else echo no; fi; else echo na; fi
 echo @@reboot; if [ -f /var/run/reboot-required ]; then echo yes; else echo no; fi
 echo @@uid0; awk -F: '$3==0{print $1}' /etc/passwd
@@ -306,10 +306,12 @@ else
     sed -i "1i $key $val" "$CONF"
   done
 fi
-if ! sshd -t 2>/tmp/.helm-sshd; then
+E=$(mktemp)
+if ! sshd -t 2>"$E"; then
   cp -a "$BK" "$CONF"; if [ -f "$BK.drop" ]; then cp -a "$BK.drop" "$DROP"; else rm -f "$DROP"; fi
-  echo "@@FAILED"; cat /tmp/.helm-sshd; exit 2
+  echo "@@FAILED"; cat "$E"; rm -f "$E"; exit 2
 fi
+rm -f "$E"
 systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || service ssh reload
 echo "@@OK $BK"
 "#;

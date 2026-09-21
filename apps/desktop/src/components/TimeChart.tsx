@@ -93,14 +93,23 @@ export default function TimeChart({
               return;
             }
             const when = new Date(u.data[0][idx] * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
-            const rows = u.series
-              .slice(1)
-              .map((s, i) => {
-                const v = u.data[i + 1][idx];
-                return `<div class="flex items-center gap-2"><span style="background:${SERIES_COLORS[i]}" class="inline-block size-2 rounded-full"></span><span class="text-muted">${s.label}</span><span class="ml-auto pl-3 tabular-nums">${v == null ? "—" : fmt.current(v)}</span></div>`;
-              })
-              .join("");
-            t.innerHTML = `<div class="mb-1 text-muted">${when}</div>${rows}`;
+            // Construit en DOM (textContent), jamais en HTML : aucune donnée ne peut y injecter de balise.
+            const el_ = (cls: string, text?: string) => {
+              const d = document.createElement(cls.startsWith("span") ? "span" : "div");
+              d.className = cls.replace(/^span /, "");
+              if (text !== undefined) d.textContent = text;
+              return d;
+            };
+            const head = el_("mb-1 text-muted", when);
+            const rows = u.series.slice(1).map((s, i) => {
+              const v = u.data[i + 1][idx];
+              const row = el_("flex items-center gap-2");
+              const dot = el_("span inline-block size-2 rounded-full");
+              dot.style.background = SERIES_COLORS[i];
+              row.append(dot, el_("span text-muted", String(s.label ?? "")), el_("span ml-auto pl-3 tabular-nums", v == null ? "—" : fmt.current(v)));
+              return row;
+            });
+            t.replaceChildren(head, ...rows);
             t.style.display = "block";
             const left = u.cursor.left + 60;
             t.style.left = `${Math.min(left, el.clientWidth - t.offsetWidth - 4)}px`;

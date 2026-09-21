@@ -9,6 +9,7 @@ description = "SSH, SFTP, tunnels, client Docker et parseur nginx"
 async-trait = "0.1.92"
 base64 = "0.23.1"
 helm-protocol.workspace = true
+ring = "0.17"
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "3.0.0"
 serde.workspace = true

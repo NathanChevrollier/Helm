@@ -37,12 +37,15 @@ MemoryMax=64M
 WantedBy=multi-user.target
 "#;
 
-/// Script d'installation exécuté en root. `$1` = binaire envoyé. Sans systemd (conteneur),
-/// l'agent est lancé en arrière-plan avec `nohup`.
+/// Script d'installation exécuté en root. `$1` = binaire envoyé (dans un dossier privé créé par
+/// `mktemp`), `$2` = son empreinte SHA-256 calculée sur le PC : le binaire n'est installé que s'il
+/// n'a pas été modifié entre l'envoi et l'installation. Sans systemd (conteneur), l'agent est
+/// lancé en arrière-plan avec `nohup`.
 pub const INSTALL_SCRIPT: &str = r#"set -e
 BIN="$1"
+[ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$2" ] || { echo "binaire modifié depuis l'envoi : installation annulée" >&2; rm -rf "$(dirname "$BIN")"; exit 1; }
 install -m 0755 "$BIN" /usr/local/bin/helmd
-rm -f "$BIN"
+rm -rf "$(dirname "$BIN")"
 id helmd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin helmd 2>/dev/null || adduser -S -H -s /sbin/nologin helmd
 install -d -m 0755 /etc/helmd
 [ -f /etc/helmd/config.json ] || /usr/local/bin/helmd default-config > /etc/helmd/config.json
@@ -202,23 +205,31 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
         ))
     })?;
     let local = binary_for(target).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
+    let bytes = std::fs::read(&local).map_err(|e| Error::Other(format!("{} : {e}", local.display())))?;
+    let sha256: String = ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect();
     let remote = upload_binary(conn, &local).await?;
     // Le script lit l'unité systemd sur stdin.
-    let cmd = format!("sh -c {} helmd-install {}", shell_quote(INSTALL_SCRIPT), shell_quote(&remote));
+    let cmd = format!("sh -c {} helmd-install {} {sha256}", shell_quote(INSTALL_SCRIPT), shell_quote(&remote));
     let out = conn.exec_sudo(&cmd, sudo, Some(SYSTEMD_UNIT.as_bytes())).await?.into_result()?;
     Ok(out.stdout)
 }
 
+/// Envoie le binaire dans un dossier temporaire privé (0700, nom imprévisible) : aucun autre
+/// compte du serveur ne peut le créer à l'avance ni le remplacer avant son installation.
 async fn upload_binary(conn: &Connection, local: &Path) -> Result<String> {
+    let private = conn.run("mktemp -d /tmp/helmd-upload.XXXXXXXXXX").await?.trim().to_string();
+    if !private.starts_with("/tmp/helmd-upload.") || !private[5..].chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return Err(Error::Other(format!("dossier temporaire inattendu : {private}")));
+    }
     let sftp = conn.sftp().await?;
-    let remote = format!("/tmp/helmd-upload-{}", std::process::id());
+    let remote = format!("{private}/helmd");
     let noop = |_p: crate::sftp::Progress| true;
     let dir = std::env::temp_dir().join(format!("helm-agent-{}", std::process::id()));
     // `upload` conserve le nom du fichier : on passe par une copie nommée comme la cible.
     std::fs::create_dir_all(&dir).map_err(|e| Error::Other(e.to_string()))?;
-    let staged = dir.join(remote.trim_start_matches("/tmp/"));
+    let staged = dir.join("helmd");
     std::fs::copy(local, &staged).map_err(|e| Error::Other(format!("{} : {e}", local.display())))?;
-    let res = crate::sftp::upload(&sftp, &staged, "/tmp", &noop).await;
+    let res = crate::sftp::upload(&sftp, &staged, &private, &noop).await;
     let _ = std::fs::remove_dir_all(&dir);
     res?;
     Ok(remote)

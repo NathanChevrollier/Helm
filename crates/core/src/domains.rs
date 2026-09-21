@@ -74,10 +74,19 @@ async fn expiration(domain: &str) -> Option<String> {
     value
 }
 
+/// Nom de domaine plausible : lettres, chiffres, tirets et points uniquement. Les noms viennent
+/// des configurations nginx du serveur : ils servent à bâtir une URL et ne doivent rien y injecter.
+pub fn valid_domain(d: &str) -> bool {
+    d.len() <= 253
+        && d.contains('.')
+        && d.split('.')
+            .all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
 pub async fn check(domains: &[String], server_ips: &[IpAddr]) -> Vec<DomainInfo> {
     let mut out = Vec::new();
     let mut expiries: HashMap<String, Option<String>> = HashMap::new();
-    for d in domains {
+    for d in domains.iter().filter(|d| valid_domain(d)) {
         let reg = registrable(d);
         if !expiries.contains_key(&reg) {
             let e = expiration(&reg).await;
@@ -121,6 +130,14 @@ mod tests {
         assert_eq!(registrable("app.exemple.fr"), "exemple.fr");
         assert_eq!(registrable("exemple.fr"), "exemple.fr");
         assert_eq!(registrable("a.b.site.co.uk"), "site.co.uk");
+    }
+
+    #[test]
+    fn domain_validation() {
+        assert!(valid_domain("app.exemple.fr") && valid_domain("xn--caf-dma.fr"));
+        assert!(
+            !valid_domain("exemple.fr/../x") && !valid_domain("a.fr?x=1") && !valid_domain("*.exemple.fr") && !valid_domain("localhost")
+        );
     }
 
     #[test]
