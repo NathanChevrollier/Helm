@@ -26,6 +26,7 @@ tokio = { workspace = true, features = ["full"] }
 base64 = "0.23.1"
 tauri-plugin-dialog = "2.7.3"
 helm-protocol.workspace = true
+tauri-plugin-single-instance = "2"
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

@@ -17,11 +17,20 @@ fn app_version() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Une seule instance : une deuxième fenêtre se disputerait les ports des tunnels et
+        // écraserait les réglages de la première. Relancer Helm ramène la fenêtre existante.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
-            app.manage(store::Store::load(&dir));
+            app.manage(store::Store::open(&dir));
             app.manage(store::AuditLog::new(&dir, "app"));
             app.manage(sessions::Sessions::new());
             app.manage(monitoring::Monitor::default());
@@ -57,6 +66,7 @@ pub fn run() {
             files::fs_list,
             files::fs_read,
             files::fs_write,
+            files::fs_stat,
             files::fs_mkdir,
             files::fs_create,
             files::fs_rename,
@@ -106,6 +116,7 @@ pub fn run() {
             sites::sites_preview,
             workspace::ui_state_get,
             workspace::ui_state_set,
+            workspace::store_warning,
             workspace::audit_list,
             workspace::tmux_check,
             workspace::tmux_install,
