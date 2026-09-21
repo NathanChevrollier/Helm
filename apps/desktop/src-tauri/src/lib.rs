@@ -2,7 +2,7 @@ mod commands;
 mod sessions;
 mod store;
 
-use commands::{servers, terminal};
+use commands::{files, servers, terminal};
 use tauri::Manager;
 
 /// Renvoie la version de l'app, utilisée par l'UI pour vérifier que le pont Rust fonctionne.
@@ -38,6 +38,17 @@ pub fn run() {
             terminal::term_write,
             terminal::term_resize,
             terminal::term_close,
+            files::fs_home,
+            files::fs_list,
+            files::fs_read,
+            files::fs_write,
+            files::fs_mkdir,
+            files::fs_create,
+            files::fs_rename,
+            files::fs_remove,
+            files::fs_chmod,
+            files::fs_download,
+            files::fs_upload,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Tauri");

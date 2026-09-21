@@ -128,6 +128,11 @@ impl Connection {
         Ok(Self { handle: Arc::new(handle), fingerprint })
     }
 
+    /// Vrai si les deux valeurs désignent la même connexion SSH.
+    pub fn same_as(&self, other: &Connection) -> bool {
+        Arc::ptr_eq(&self.handle, &other.handle)
+    }
+
     pub fn is_closed(&self) -> bool {
         self.handle.is_closed()
     }
@@ -191,6 +196,21 @@ impl Connection {
                 self.exec(&cmd, stdin).await
             }
         }
+    }
+
+    /// Lit un fichier en root (fichiers système non lisibles par l'utilisateur SSH).
+    pub async fn read_file_sudo(&self, path: &str, sudo_password: Option<&str>) -> Result<String> {
+        let out = self.exec_sudo(&format!("cat -- {}", shell_quote(path)), sudo_password, None).await?;
+        let out = out.into_result()?;
+        Ok(out.stdout)
+    }
+
+    /// Écrit un fichier en root. `cat >` conserve le propriétaire et les permissions du fichier existant.
+    pub async fn write_file_sudo(&self, path: &str, content: &str, sudo_password: Option<&str>) -> Result<()> {
+        self.exec_sudo(&format!("cat > {}", shell_quote(path)), sudo_password, Some(content.as_bytes()))
+            .await?
+            .into_result()?;
+        Ok(())
     }
 
     /// Ouvre un shell interactif avec pseudo-terminal.

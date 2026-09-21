@@ -59,6 +59,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(entries.iter().any(|n| n == "nginx.conf"));
     println!("✓ SFTP : {} entrées dans /etc/nginx", entries.len());
 
+    // 6b. Transferts : envoi d'un dossier local puis téléchargement et comparaison.
+    use helm_core::sftp as fs;
+    let tmp = std::env::temp_dir().join("helm-smoke");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("src/sub"))?;
+    let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(tmp.join("src/big.bin"), &big)?;
+    std::fs::write(tmp.join("src/sub/a.txt"), "hello")?;
+    let _ = fs::remove(&sftp, "/tmp/src").await;
+    let noop = |_p: fs::Progress| {};
+    fs::upload(&sftp, &tmp.join("src"), "/tmp", &noop).await?;
+    std::fs::create_dir_all(tmp.join("back"))?;
+    fs::download(&sftp, "/tmp/src", &tmp.join("back"), &noop).await?;
+    assert_eq!(std::fs::read(tmp.join("back/src/big.bin"))?, big);
+    assert_eq!(std::fs::read_to_string(tmp.join("back/src/sub/a.txt"))?, "hello");
+    fs::remove(&sftp, "/tmp/src").await?;
+    assert!(!sftp.try_exists("/tmp/src").await?);
+    println!("✓ envoi/téléchargement récursif (3 Mo) identiques, suppression récursive");
+
+    // 6c. Écriture atomique en conservant les permissions.
+    fs::write_text(&sftp, "/tmp/perm.txt", "v1").await?;
+    fs::chmod(&sftp, "/tmp/perm.txt", 0o640).await?;
+    fs::write_text(&sftp, "/tmp/perm.txt", "v2").await?;
+    assert_eq!(fs::read_text(&sftp, "/tmp/perm.txt").await?, "v2");
+    assert_eq!(sftp.metadata("/tmp/perm.txt").await?.permissions.unwrap() & 0o777, 0o640);
+    println!("✓ écriture atomique, permissions conservées");
+
+    // 6d. Lecture/écriture sudo d'un fichier root pour deploy.
+    root.run("printf secret > /root/only-root.txt && chmod 600 /root/only-root.txt").await?;
+    assert_eq!(deploy.read_file_sudo("/root/only-root.txt", Some("deploy")).await?, "secret");
+    deploy.write_file_sudo("/root/only-root.txt", "modifié", Some("deploy")).await?;
+    assert_eq!(root.run("cat /root/only-root.txt; stat -c %a /root/only-root.txt").await?, "modifié600\n");
+    println!("✓ lecture/écriture sudo, permissions conservées");
+
     // 7. Shell interactif.
     let mut shell = root.open_shell(80, 24).await?;
     shell.data(&b"echo HELM_OK; exit\n"[..]).await?;

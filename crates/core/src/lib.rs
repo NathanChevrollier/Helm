@@ -1,8 +1,10 @@
 //! Logique métier de Helm, indépendante de l'interface.
 
+pub mod sftp;
 pub mod ssh;
 
 pub use russh;
+pub use russh_sftp;
 
 pub use ssh::{Auth, ConnectParams, Connection, ExecOutput};
 

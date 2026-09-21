@@ -1,0 +1,373 @@
+//! Opérations de fichiers distants via SFTP : listing, lecture/écriture, suppression récursive, transferts.
+
+use std::path::{Path, PathBuf};
+
+use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags};
+use serde::Serialize;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::{Error, Result};
+
+const CHUNK: usize = 256 * 1024;
+/// Taille maximale d'un fichier ouvert dans l'éditeur.
+pub const MAX_EDIT_SIZE: u64 = 5 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EntryKind {
+    Dir,
+    File,
+    Symlink,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Entry {
+    pub name: String,
+    pub path: String,
+    pub kind: EntryKind,
+    /// Pour un lien symbolique : la cible est-elle un dossier ?
+    pub target_is_dir: bool,
+    pub size: u64,
+    pub modified: Option<u64>,
+    pub permissions: String,
+    pub mode: u32,
+    pub owner: Option<String>,
+    pub group: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listing {
+    pub path: String,
+    pub entries: Vec<Entry>,
+}
+
+/// Progression d'un transfert.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub file: String,
+    pub done: u64,
+    pub total: u64,
+}
+
+fn sftp_err(e: impl std::fmt::Display) -> Error {
+    Error::Sftp(e.to_string())
+}
+
+fn kind_of(t: FileType) -> EntryKind {
+    match t {
+        FileType::Dir => EntryKind::Dir,
+        FileType::File => EntryKind::File,
+        FileType::Symlink => EntryKind::Symlink,
+        FileType::Other => EntryKind::Other,
+    }
+}
+
+/// Représentation « rwxr-xr-x » des 9 bits de permission.
+pub fn permission_string(mode: u32) -> String {
+    let mut s = String::with_capacity(9);
+    for shift in [6, 3, 0] {
+        let bits = (mode >> shift) & 0o7;
+        s.push(if bits & 4 != 0 { 'r' } else { '-' });
+        s.push(if bits & 2 != 0 { 'w' } else { '-' });
+        s.push(if bits & 1 != 0 { 'x' } else { '-' });
+    }
+    s
+}
+
+/// Joint un dossier distant et un nom avec des séparateurs POSIX.
+pub fn join(dir: &str, name: &str) -> String {
+    if dir.ends_with('/') {
+        format!("{dir}{name}")
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+pub fn parent(path: &str) -> String {
+    match path.trim_end_matches('/').rsplit_once('/') {
+        Some(("", _)) | None => "/".into(),
+        Some((p, _)) => p.into(),
+    }
+}
+
+fn to_entry(name: String, path: String, meta: &FileAttributes, target_is_dir: bool) -> Entry {
+    let mode = meta.permissions.unwrap_or(0);
+    Entry {
+        name,
+        path,
+        kind: kind_of(meta.file_type()),
+        target_is_dir,
+        size: meta.size.unwrap_or(0),
+        modified: meta.mtime.map(u64::from),
+        permissions: permission_string(mode),
+        mode: mode & 0o7777,
+        owner: meta.user.clone().or_else(|| meta.uid.map(|u| u.to_string())),
+        group: meta.group.clone().or_else(|| meta.gid.map(|g| g.to_string())),
+    }
+}
+
+pub async fn home(sftp: &SftpSession) -> Result<String> {
+    sftp.canonicalize(".").await.map_err(sftp_err)
+}
+
+/// Liste un dossier : dossiers d'abord, puis tri alphabétique insensible à la casse.
+pub async fn list(sftp: &SftpSession, path: &str) -> Result<Listing> {
+    let path = sftp.canonicalize(path).await.map_err(sftp_err)?;
+    let mut entries = Vec::new();
+    for e in sftp.read_dir(&path).await.map_err(sftp_err)? {
+        let name = e.file_name();
+        if name == "." || name == ".." {
+            continue;
+        }
+        let meta = e.metadata();
+        let full = join(&path, &name);
+        let target_is_dir = if meta.file_type() == FileType::Symlink {
+            sftp.metadata(&full).await.map(|m| m.is_dir()).unwrap_or(false)
+        } else {
+            false
+        };
+        entries.push(to_entry(name, full, &meta, target_is_dir));
+    }
+    entries.sort_by(|a, b| {
+        let a_dir = a.kind == EntryKind::Dir || a.target_is_dir;
+        let b_dir = b.kind == EntryKind::Dir || b.target_is_dir;
+        b_dir.cmp(&a_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(Listing { path, entries })
+}
+
+/// Lit un fichier texte pour l'éditeur. Refuse les fichiers trop gros ou binaires.
+pub async fn read_text(sftp: &SftpSession, path: &str) -> Result<String> {
+    let meta = sftp.metadata(path).await.map_err(sftp_err)?;
+    if meta.size.unwrap_or(0) > MAX_EDIT_SIZE {
+        return Err(Error::Other("fichier trop volumineux pour l'éditeur (> 5 Mo)".into()));
+    }
+    let bytes = sftp.read(path).await.map_err(sftp_err)?;
+    decode_text(bytes)
+}
+
+pub fn decode_text(bytes: Vec<u8>) -> Result<String> {
+    if bytes.iter().take(8192).any(|&b| b == 0) {
+        return Err(Error::Other("fichier binaire : impossible de l'ouvrir dans l'éditeur".into()));
+    }
+    String::from_utf8(bytes).map_err(|_| Error::Other("fichier non UTF-8 : impossible de l'ouvrir dans l'éditeur".into()))
+}
+
+/// Écrit un fichier en conservant ses permissions : écriture dans un fichier temporaire
+/// voisin puis renommage, pour ne jamais laisser un fichier à moitié écrit.
+pub async fn write_text(sftp: &SftpSession, path: &str, content: &str) -> Result<()> {
+    let existing = sftp.metadata(path).await.ok();
+    let tmp = format!("{path}.helm-tmp");
+    {
+        let mut f = sftp
+            .open_with_flags(&tmp, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
+            .await
+            .map_err(sftp_err)?;
+        f.write_all(content.as_bytes()).await.map_err(sftp_err)?;
+        f.shutdown().await.map_err(sftp_err)?;
+    }
+    if let Some(meta) = existing {
+        let mut attrs = FileAttributes::empty();
+        attrs.permissions = meta.permissions.map(|p| p & 0o7777);
+        let _ = sftp.set_metadata(&tmp, attrs).await;
+        // SFTP v3 refuse de renommer par-dessus un fichier existant.
+        sftp.remove_file(path).await.map_err(sftp_err)?;
+    }
+    sftp.rename(&tmp, path).await.map_err(sftp_err)
+}
+
+pub async fn mkdir(sftp: &SftpSession, path: &str) -> Result<()> {
+    sftp.create_dir(path).await.map_err(sftp_err)
+}
+
+pub async fn create_file(sftp: &SftpSession, path: &str) -> Result<()> {
+    if sftp.try_exists(path).await.map_err(sftp_err)? {
+        return Err(Error::Other("un fichier porte déjà ce nom".into()));
+    }
+    sftp.create(path).await.map_err(sftp_err)?;
+    Ok(())
+}
+
+pub async fn rename(sftp: &SftpSession, from: &str, to: &str) -> Result<()> {
+    sftp.rename(from, to).await.map_err(sftp_err)
+}
+
+pub async fn chmod(sftp: &SftpSession, path: &str, mode: u32) -> Result<()> {
+    let mut attrs = FileAttributes::empty();
+    attrs.permissions = Some(mode & 0o7777);
+    sftp.set_metadata(path, attrs).await.map_err(sftp_err)
+}
+
+/// Supprime un fichier, un lien ou un dossier (récursivement).
+pub async fn remove(sftp: &SftpSession, path: &str) -> Result<()> {
+    let meta = sftp.symlink_metadata(path).await.map_err(sftp_err)?;
+    if !meta.is_dir() {
+        return sftp.remove_file(path).await.map_err(sftp_err);
+    }
+    // Parcours itératif en profondeur : on vide les dossiers avant de les supprimer.
+    let mut stack = vec![(path.to_string(), false)];
+    while let Some((dir, emptied)) = stack.pop() {
+        if emptied {
+            sftp.remove_dir(&dir).await.map_err(sftp_err)?;
+            continue;
+        }
+        stack.push((dir.clone(), true));
+        for e in sftp.read_dir(&dir).await.map_err(sftp_err)? {
+            let name = e.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let child = join(&dir, &name);
+            if e.metadata().is_dir() {
+                stack.push((child, false));
+            } else {
+                sftp.remove_file(&child).await.map_err(sftp_err)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Télécharge un fichier ou un dossier distant vers `local_dir`.
+pub async fn download(
+    sftp: &SftpSession,
+    remote: &str,
+    local_dir: &Path,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
+) -> Result<PathBuf> {
+    let name = remote.trim_end_matches('/').rsplit('/').next().unwrap_or("fichier");
+    let target = local_dir.join(name);
+    let meta = sftp.metadata(remote).await.map_err(sftp_err)?;
+    if meta.is_dir() {
+        let mut stack = vec![(remote.to_string(), target.clone())];
+        while let Some((rdir, ldir)) = stack.pop() {
+            tokio::fs::create_dir_all(&ldir).await.map_err(|e| Error::Other(e.to_string()))?;
+            for e in sftp.read_dir(&rdir).await.map_err(sftp_err)? {
+                let n = e.file_name();
+                if n == "." || n == ".." {
+                    continue;
+                }
+                let (r, l) = (join(&rdir, &n), ldir.join(&n));
+                match e.file_type() {
+                    FileType::Dir => stack.push((r, l)),
+                    FileType::File => download_file(sftp, &r, &l, e.metadata().size.unwrap_or(0), on_progress).await?,
+                    _ => {}
+                }
+            }
+        }
+    } else {
+        download_file(sftp, remote, &target, meta.size.unwrap_or(0), on_progress).await?;
+    }
+    Ok(target)
+}
+
+async fn download_file(
+    sftp: &SftpSession,
+    remote: &str,
+    local: &Path,
+    total: u64,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
+) -> Result<()> {
+    let mut src = sftp.open(remote).await.map_err(sftp_err)?;
+    let mut dst = tokio::fs::File::create(local).await.map_err(|e| Error::Other(e.to_string()))?;
+    let mut buf = vec![0u8; CHUNK];
+    let mut done = 0u64;
+    loop {
+        let n = src.read(&mut buf).await.map_err(sftp_err)?;
+        if n == 0 {
+            break;
+        }
+        dst.write_all(&buf[..n]).await.map_err(|e| Error::Other(e.to_string()))?;
+        done += n as u64;
+        on_progress(Progress { file: remote.to_string(), done, total });
+    }
+    dst.flush().await.map_err(|e| Error::Other(e.to_string()))?;
+    on_progress(Progress { file: remote.to_string(), done, total: total.max(done) });
+    Ok(())
+}
+
+/// Envoie un fichier ou un dossier local dans le dossier distant `remote_dir`.
+pub async fn upload(
+    sftp: &SftpSession,
+    local: &Path,
+    remote_dir: &str,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
+) -> Result<()> {
+    let name = local.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::Other("nom de fichier invalide".into()))?;
+    let target = join(remote_dir, name);
+    if local.is_dir() {
+        let mut stack = vec![(local.to_path_buf(), target)];
+        while let Some((ldir, rdir)) = stack.pop() {
+            if !sftp.try_exists(&rdir).await.map_err(sftp_err)? {
+                sftp.create_dir(&rdir).await.map_err(sftp_err)?;
+            }
+            let mut rd = tokio::fs::read_dir(&ldir).await.map_err(|e| Error::Other(e.to_string()))?;
+            while let Some(entry) = rd.next_entry().await.map_err(|e| Error::Other(e.to_string()))? {
+                let path = entry.path();
+                let n = entry.file_name().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    stack.push((path, join(&rdir, &n)));
+                } else {
+                    upload_file(sftp, &path, &join(&rdir, &n), on_progress).await?;
+                }
+            }
+        }
+        Ok(())
+    } else {
+        upload_file(sftp, local, &target, on_progress).await
+    }
+}
+
+async fn upload_file(
+    sftp: &SftpSession,
+    local: &Path,
+    remote: &str,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
+) -> Result<()> {
+    let mut src = tokio::fs::File::open(local).await.map_err(|e| Error::Other(e.to_string()))?;
+    let total = src.metadata().await.map(|m| m.len()).unwrap_or(0);
+    let mut dst = sftp
+        .open_with_flags(remote, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
+        .await
+        .map_err(sftp_err)?;
+    let mut buf = vec![0u8; CHUNK];
+    let mut done = 0u64;
+    let label = local.display().to_string();
+    loop {
+        let n = src.read(&mut buf).await.map_err(|e| Error::Other(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        dst.write_all(&buf[..n]).await.map_err(sftp_err)?;
+        done += n as u64;
+        on_progress(Progress { file: label.clone(), done, total });
+    }
+    dst.shutdown().await.map_err(sftp_err)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permissions() {
+        assert_eq!(permission_string(0o755), "rwxr-xr-x");
+        assert_eq!(permission_string(0o100644), "rw-r--r--");
+        assert_eq!(permission_string(0o600), "rw-------");
+    }
+
+    #[test]
+    fn paths() {
+        assert_eq!(join("/etc", "nginx"), "/etc/nginx");
+        assert_eq!(join("/", "etc"), "/etc");
+        assert_eq!(parent("/etc/nginx"), "/etc");
+        assert_eq!(parent("/etc"), "/");
+        assert_eq!(parent("/"), "/");
+    }
+}

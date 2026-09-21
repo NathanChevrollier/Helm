@@ -5,6 +5,7 @@ import { SECTIONS } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
 import ServersView from "./views/Servers";
 import TerminalView from "./views/Terminal";
+import FilesView from "./views/Files";
 
 export default function App() {
   const { section, setSection, servers, activeServerId, setActiveServer, refreshServers } = useApp();
@@ -63,6 +64,8 @@ export default function App() {
             <div className="absolute inset-0 bg-bg">
               {section === "servers" ? (
                 <ServersView />
+              ) : section === "files" ? (
+                <FilesView />
               ) : (
                 <EmptyState icon={<current.icon size={40} />} title={current.label}>
                   {current.description}

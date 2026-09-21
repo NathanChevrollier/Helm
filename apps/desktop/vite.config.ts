@@ -8,6 +8,8 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
+  // Monaco est chargé à la demande : on le pré-optimise pour éviter un rechargement de page en dev.
+  optimizeDeps: { include: ["monaco-editor", "@monaco-editor/react"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

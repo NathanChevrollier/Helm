@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use base64::Engine;
+use helm_core::russh_sftp::client::SftpSession;
 use helm_core::{Auth, ConnectParams, Connection};
 use helm_core::russh::client::Msg;
 use helm_core::russh::{ChannelMsg, ChannelWriteHalf};
@@ -24,17 +26,67 @@ pub enum TermEvent {
 
 pub struct Sessions {
     connections: Mutex<HashMap<String, Connection>>,
+    sftp: Mutex<HashMap<String, (Connection, Arc<SftpSession>)>>,
     terminals: Mutex<HashMap<u64, ChannelWriteHalf<Msg>>>,
     next_term: AtomicU64,
+    /// Noms d'utilisateurs et de groupes par serveur (uid/gid → nom), pour l'explorateur.
+    id_names: Mutex<HashMap<String, Arc<IdNames>>>,
+}
+
+#[derive(Default)]
+pub struct IdNames {
+    pub users: HashMap<u32, String>,
+    pub groups: HashMap<u32, String>,
 }
 
 impl Sessions {
     pub fn new() -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
+            sftp: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
             next_term: AtomicU64::new(1),
+            id_names: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Table uid/gid → nom du serveur, lue une fois via `getent`.
+    pub async fn id_names(&self, conn: &Connection, server_id: &str) -> Arc<IdNames> {
+        if let Some(n) = self.id_names.lock().await.get(server_id) {
+            return n.clone();
+        }
+        let mut names = IdNames::default();
+        if let Ok(out) = conn.exec("getent passwd; echo ---; getent group", None).await {
+            let mut in_groups = false;
+            for line in out.stdout.lines() {
+                if line == "---" {
+                    in_groups = true;
+                    continue;
+                }
+                let mut parts = line.split(':');
+                let (Some(name), _, Some(id)) = (parts.next(), parts.next(), parts.next()) else { continue };
+                let Ok(id) = id.parse() else { continue };
+                let map = if in_groups { &mut names.groups } else { &mut names.users };
+                map.insert(id, name.to_string());
+            }
+        }
+        let names = Arc::new(names);
+        self.id_names.lock().await.insert(server_id.to_string(), names.clone());
+        names
+    }
+
+    /// Session SFTP du serveur, réutilisée tant que la connexion SSH sous-jacente est vivante.
+    pub async fn sftp(&self, store: &Store, server_id: &str) -> Result<Arc<SftpSession>, String> {
+        let conn = self.get(store, server_id).await?;
+        let mut cache = self.sftp.lock().await;
+        if let Some((owner, s)) = cache.get(server_id) {
+            if owner.same_as(&conn) {
+                return Ok(s.clone());
+            }
+        }
+        let session = Arc::new(conn.sftp().await.map_err(|e| e.to_string())?);
+        cache.insert(server_id.to_string(), (conn, session.clone()));
+        Ok(session)
     }
 
     /// Renvoie la connexion du serveur, en la (re)créant si elle n'existe pas ou a été coupée.
@@ -75,6 +127,7 @@ impl Sessions {
     }
 
     pub async fn disconnect(&self, server_id: &str) {
+        self.sftp.lock().await.remove(server_id);
         if let Some(c) = self.connections.lock().await.remove(server_id) {
             c.disconnect().await;
         }
