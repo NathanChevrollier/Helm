@@ -10,6 +10,7 @@ import {
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
 import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../components/DockerExtras";
+import { usePolling } from "../lib/poll";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
@@ -116,20 +117,16 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
   const [inspect, setInspect] = useState<{ name: string; json: string } | null>(null);
   const [restrict, setRestrict] = useState<{ project: ComposeProject; port: number } | null>(null);
 
-  useEffect(() => {
-    let stop = false;
-    const load = () =>
+  // `docker stats` prend souvent 2 à 3 s : le hook évite d'empiler les appels.
+  usePolling(
+    () =>
       api
         .dockerStats(serverId)
-        .then((list) => !stop && setStats(Object.fromEntries(list.map((s) => [s.id, s]))))
-        .catch(() => {});
-    void load();
-    const id = setInterval(load, 5000);
-    return () => {
-      stop = true;
-      clearInterval(id);
-    };
-  }, [serverId]);
+        .then((list) => setStats(Object.fromEntries(list.map((s) => [s.id, s]))))
+        .catch(() => {}),
+    5000,
+    [serverId],
+  );
 
   const rows = useMemo(() => {
     const f = filter.toLowerCase();

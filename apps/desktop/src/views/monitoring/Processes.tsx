@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { RefreshCw, Skull, X } from "lucide-react";
 import { api, errorMessage, formatBytes, formatDuration, type Process } from "../../lib/api";
 import { useApp } from "../../lib/store";
+import { usePolling } from "../../lib/poll";
 import { IconButton, Input } from "../../components/ui";
 
 type SortKey = "cpu" | "mem" | "rss" | "pid" | "elapsed" | "name";
@@ -12,24 +13,22 @@ export default function Processes({ serverId, visible }: { serverId: string; vis
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("cpu");
   const [loading, setLoading] = useState(false);
+  // Affichée dans la vue (et non en notification, qui se répéterait à chaque actualisation).
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       setList(await api.processes(serverId));
+      setError(null);
     } catch (e) {
-      notify(errorMessage(e), "error");
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [serverId, notify]);
+  }, [serverId]);
 
-  useEffect(() => {
-    if (!visible) return;
-    void load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
-  }, [load, visible]);
+  usePolling(load, 5000, [serverId], visible);
 
   const rows = useMemo(() => {
     const f = filter.toLowerCase();
@@ -76,6 +75,7 @@ export default function Processes({ serverId, visible }: { serverId: string; vis
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
         </IconButton>
       </div>
+      {error && <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full text-sm">
           <thead className="bg-panel text-left text-xs text-muted">

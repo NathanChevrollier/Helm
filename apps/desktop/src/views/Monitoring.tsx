@@ -7,6 +7,7 @@ import Overview from "./monitoring/Overview";
 import Processes from "./monitoring/Processes";
 import Services from "./monitoring/Services";
 import Agent from "./monitoring/Agent";
+import { usePolling } from "../lib/poll";
 
 const TABS = [
   { id: "overview", label: "Vue d'ensemble" },
@@ -44,11 +45,7 @@ function Monitoring({ serverId }: { serverId: string }) {
   }, [serverId, loadAgent]);
 
   // Rafraîchit l'état des alertes toutes les 30 s.
-  useEffect(() => {
-    if (!ready) return;
-    const id = setInterval(loadAgent, 30_000);
-    return () => clearInterval(id);
-  }, [ready, loadAgent]);
+  usePolling(loadAgent, 30_000, [loadAgent], !!ready);
 
   if (ready === false) return <EmptyState icon={<Activity size={40} />} title="Non connecté">Connexion au serveur impossible.</EmptyState>;
   if (ready === null) return <EmptyState icon={<Activity size={40} />} title="Connexion…" />;

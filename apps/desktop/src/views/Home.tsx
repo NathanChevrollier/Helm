@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { AlertTriangle, Box, CheckCircle2, LayoutDashboard, Lock, OctagonAlert, Plug, RefreshCw, Server } from "lucide-react";
 import { api, formatBytes, formatDuration, type DashboardSummary, type ServerView } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
+import { usePolling } from "../lib/poll";
 import { Badge, Button, EmptyState, IconButton } from "../components/ui";
 
 const CONCURRENCY = 4;
@@ -34,12 +35,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
     running.current = false;
   }, [servers]);
 
-  useEffect(() => {
-    if (!visible) return;
-    void refresh();
-    const id = setInterval(refresh, REFRESH_MS);
-    return () => clearInterval(id);
-  }, [visible, refresh]);
+  usePolling(refresh, REFRESH_MS, [refresh], visible);
 
   if (servers.length === 0) {
     return (

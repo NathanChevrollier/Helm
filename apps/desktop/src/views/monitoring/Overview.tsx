@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, OctagonAlert } from "lucide-react";
 import { api, errorMessage, formatBytes, formatDuration, type AgentInfo, type HistoryPoint, type Metrics } from "../../lib/api";
 import TimeChart from "../../components/TimeChart";
+import { usePolling } from "../../lib/poll";
 
 const RANGES = [
   { id: "live", label: "Direct", secs: 0 },
@@ -58,35 +59,27 @@ export default function Overview({ serverId, agent, visible }: { serverId: strin
   const [range, setRange] = useState<RangeId>("live");
   const [history, setHistory] = useState<HistoryPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const busy = useRef(false);
+  const serverRef = useRef(serverId);
+  serverRef.current = serverId;
   const agentOk = !!agent?.running;
 
   // Relevés directs toutes les 2 s tant que la vue est affichée.
-  useEffect(() => {
-    if (!visible) return;
-    let stop = false;
-    const tick = async () => {
-      if (busy.current) return;
-      busy.current = true;
+  usePolling(
+    async () => {
+      const current = serverId;
       try {
         const m = await api.metrics(serverId);
-        if (!stop) {
-          setLive((prev) => [...prev, m].slice(-LIVE_POINTS));
-          setError(null);
-        }
+        if (current !== serverRef.current) return;
+        setLive((prev) => [...prev, m].slice(-LIVE_POINTS));
+        setError(null);
       } catch (e) {
-        if (!stop) setError(errorMessage(e));
-      } finally {
-        busy.current = false;
+        if (current === serverRef.current) setError(errorMessage(e));
       }
-    };
-    void tick();
-    const id = setInterval(tick, 2000);
-    return () => {
-      stop = true;
-      clearInterval(id);
-    };
-  }, [serverId, visible]);
+    },
+    2000,
+    [serverId],
+    visible,
+  );
 
   useEffect(() => {
     const r = RANGES.find((x) => x.id === range)!;

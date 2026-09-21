@@ -1,20 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Cable, Copy, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { api, errorMessage, type TunnelDef, type TunnelView } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import { usePolling } from "../lib/poll";
 
 export default function TunnelsView() {
   const { servers, notify, ask, activeServerId } = useApp();
   const [list, setList] = useState<TunnelView[]>([]);
   const [editing, setEditing] = useState<TunnelDef | null>(null);
 
-  const load = useCallback(() => void api.tunnels().then(setList), []);
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 3000);
-    return () => clearInterval(id);
-  }, [load]);
+  const load = useCallback(() => api.tunnels().then(setList), []);
+  usePolling(load, 3000, []);
 
   const run = async (fn: () => Promise<unknown>) => {
     try {
