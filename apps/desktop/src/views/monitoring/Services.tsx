@@ -90,7 +90,7 @@ export default function Services({ serverId }: { serverId: string }) {
           </thead>
           <tbody>
             {rows.map((s) => (
-              <tr key={s.unit} className="group border-t border-border/50 hover:bg-white/[0.03]">
+              <tr key={s.unit} className="group border-t border-border/50 hover:bg-hover-soft">
                 <td className="px-3 py-1.5 font-mono text-xs">{s.unit.replace(/\.service$/, "")}</td>
                 <td className="px-3 py-1.5">
                   <Badge tone={tone(s)}>

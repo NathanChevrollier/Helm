@@ -3,6 +3,7 @@ import { Bot, CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } fr
 import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useApp } from "../lib/store";
 import { hashPassword, useLock } from "../lib/lock";
+import type { ThemeSetting } from "../lib/theme";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Badge, Button, Input } from "../components/ui";
 
@@ -138,7 +139,7 @@ function AiAccess() {
         <p className="text-xs text-muted">Désactivé par défaut. Les données lues sont envoyées au fournisseur du modèle que tu utilises.</p>
         <div className="flex flex-col gap-1 rounded-lg border border-border bg-panel p-2">
           {servers.map((s) => (
-            <label key={s.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-white/5">
+            <label key={s.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
               <input
                 type="checkbox"
                 checked={!!s.aiAccess}
@@ -201,6 +202,17 @@ function Preferences() {
           </span>
         </span>
       </label>
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
+        <span className="flex-1">
+          <span className="font-medium">Thème</span>
+          <span className="block text-sm text-muted">« Système » suit le thème de Windows.</span>
+        </span>
+        <select className="h-8 rounded-md border border-border bg-bg px-2 text-sm" value={settings.theme} onChange={(e) => setSettings({ theme: e.target.value as ThemeSetting })}>
+          <option value="dark">Sombre</option>
+          <option value="light">Clair</option>
+          <option value="system">Système</option>
+        </select>
+      </div>
       <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
         <input type="checkbox" className="mt-1" checked={settings.alertNotifications} onChange={(e) => setSettings({ alertNotifications: e.target.checked })} />
         <span>

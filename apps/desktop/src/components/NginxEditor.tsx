@@ -5,6 +5,7 @@ import "../lib/monaco";
 import { api, errorMessage, type ApplyResult } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Badge, Button, Modal } from "./ui";
+import { useMonacoTheme } from "../lib/theme";
 
 /**
  * Éditeur de configuration nginx avec application sûre :
@@ -27,6 +28,7 @@ export default function NginxEditor({
   onApplied: () => void;
 }) {
   const ask = useApp((s) => s.ask);
+  const monacoTheme = useMonacoTheme();
   const [original, setOriginal] = useState<string | null>(initial !== undefined ? "" : null);
   const [value, setValue] = useState(initial ?? "");
   const [view, setView] = useState<"edit" | "diff">("edit");
@@ -123,13 +125,13 @@ export default function NginxEditor({
           ) : original === null ? (
             <p className="text-sm text-muted">Chargement…</p>
           ) : view === "diff" ? (
-            <DiffEditor keepCurrentOriginalModel keepCurrentModifiedModel original={original} modified={value} language="nginx" theme="helm-dark" options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13 }} />
+            <DiffEditor keepCurrentOriginalModel keepCurrentModifiedModel original={original} modified={value} language="nginx" theme={monacoTheme} options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13 }} />
           ) : (
             <Editor
               value={value}
               onChange={(v) => setValue(v ?? "")}
               language="nginx"
-              theme="helm-dark"
+              theme={monacoTheme}
               options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false }}
             />
           )}

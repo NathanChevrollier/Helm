@@ -5,6 +5,7 @@ import "../lib/monaco";
 import { api, errorMessage, type ComposeProject, type Container, type DeployKey } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Button, Field, IconButton, Input, Modal } from "./ui";
+import { useMonacoTheme } from "../lib/theme";
 
 /** Crée et démarre un tunnel vers un port publié (ou un port de conteneur) du serveur. */
 export async function tunnelTo(serverId: string, c: Container, remotePort: number) {
@@ -35,6 +36,7 @@ export function RestrictPortDialog({
   onDone: () => void;
 }) {
   const notify = useApp((s) => s.notify);
+  const monacoTheme = useMonacoTheme();
   const [preview, setPreview] = useState<{ file: string; before: string; after: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
@@ -86,7 +88,7 @@ export function RestrictPortDialog({
                 original={preview.before}
                 modified={preview.after}
                 language="yaml"
-                theme="helm-dark"
+                theme={monacoTheme}
                 options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12 }}
               />
             </div>

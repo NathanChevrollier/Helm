@@ -139,7 +139,7 @@ function Logs({ serverId }: { serverId: string }) {
         {names.map((n) => {
           const on = chosen.some((c) => c.kind === kind && c.name === n);
           return (
-            <label key={n} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-white/5">
+            <label key={n} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-hover">
               <input type="checkbox" checked={on} disabled={running} onChange={() => toggle({ kind, name: n })} />
               <span className="truncate" title={n}>{label({ kind, name: n })}</span>
             </label>

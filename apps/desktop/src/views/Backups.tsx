@@ -178,7 +178,7 @@ function SnapshotsBrowser({ serverId, databases, notify }: { serverId: string; d
                 setCurrent(s);
                 setPath("/");
               }}
-              className={`block w-full border-b border-border/50 px-3 py-2 text-left text-sm hover:bg-white/5 ${current?.short_id === s.short_id ? "bg-accent/15" : ""}`}
+              className={`block w-full border-b border-border/50 px-3 py-2 text-left text-sm hover:bg-hover ${current?.short_id === s.short_id ? "bg-accent/15" : ""}`}
             >
               {new Date(s.time).toLocaleString("fr-FR")}
               <span className="block font-mono text-[11px] text-muted">{s.short_id}</span>

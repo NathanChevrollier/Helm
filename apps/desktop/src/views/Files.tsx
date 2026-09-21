@@ -444,10 +444,10 @@ function Explorer({
 
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5">
         <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden font-mono text-xs text-muted">
-          <button className="rounded px-1 hover:bg-white/5 hover:text-fg" onClick={() => void load("/")}>/</button>
+          <button className="rounded px-1 hover:bg-hover hover:text-fg" onClick={() => void load("/")}>/</button>
           {crumbs.map((c, i) => (
             <span key={i} className="flex items-center gap-0.5">
-              <button className="truncate rounded px-1 hover:bg-white/5 hover:text-fg" onClick={() => void load("/" + crumbs.slice(0, i + 1).join("/"))}>
+              <button className="truncate rounded px-1 hover:bg-hover hover:text-fg" onClick={() => void load("/" + crumbs.slice(0, i + 1).join("/"))}>
                 {c}
               </button>
               {i < crumbs.length - 1 && <span>/</span>}
@@ -528,7 +528,7 @@ function Explorer({
                   onMouseDown={(ev) => onRowMouseDown(ev, e)}
                   onClick={(ev) => onRowClick(ev, e)}
                   onDoubleClick={() => activate(e)}
-                  className={`cursor-default border-b border-border/40 ${selected.has(e.path) ? "bg-accent/15" : "hover:bg-white/[0.03]"}`}
+                  className={`cursor-default border-b border-border/40 ${selected.has(e.path) ? "bg-accent/15" : "hover:bg-hover-soft"}`}
                 >
                   <td className="px-3 py-1">
                     <span className="flex items-center gap-2">

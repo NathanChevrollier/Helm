@@ -9,6 +9,7 @@ import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
+import { applyTheme } from "./lib/theme";
 import HomeView from "./views/Home";
 import TerminalView from "./views/Terminal";
 
@@ -50,6 +51,8 @@ export default function App() {
     return watchInactivity(() => useApp.getState().settings.lockMinutes);
   }, []);
   useEffect(() => watchAlerts(), []);
+  const themeSetting = useApp((s) => s.settings.theme);
+  useEffect(() => applyTheme(themeSetting), [themeSetting]);
 
   // Ctrl+K : palette de commandes.
   useEffect(() => {
@@ -109,7 +112,7 @@ export default function App() {
                 key={id}
                 onClick={() => setSection(id)}
                 className={`flex items-center gap-3 rounded-md px-2 py-1.5 text-sm transition-colors ${
-                  id === section ? "bg-accent/15 text-fg" : "text-muted hover:bg-white/5 hover:text-fg"
+                  id === section ? "bg-accent/15 text-fg" : "text-muted hover:bg-hover hover:text-fg"
                 }`}
               >
                 <Icon size={16} className={id === section ? "text-accent" : undefined} />

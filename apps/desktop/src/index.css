@@ -11,8 +11,34 @@
   --color-ok: #3fb950;
   --color-warn: #d29922;
   --color-danger: #f85149;
+  --color-hover: rgb(255 255 255 / 0.05);
+  --color-hover-strong: rgb(255 255 255 / 0.1);
+  --color-hover-soft: rgb(255 255 255 / 0.03);
+  --color-scrollbar: #30363d;
   --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* Thème clair : mêmes jetons, autres valeurs (contrastes vérifiés sur fond blanc). */
+:root[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-panel: #f6f8fa;
+  --color-border: #d0d7de;
+  --color-fg: #1f2328;
+  --color-muted: #59636e;
+  --color-accent: #0969da;
+  --color-ok: #1a7f37;
+  --color-warn: #9a6700;
+  --color-danger: #cf222e;
+  --color-hover: rgb(0 0 0 / 0.05);
+  --color-hover-strong: rgb(0 0 0 / 0.08);
+  --color-hover-soft: rgb(0 0 0 / 0.03);
+  --color-scrollbar: #c3cad1;
+  color-scheme: light;
+}
+
+:root:not([data-theme="light"]) {
+  color-scheme: dark;
 }
 
 html,
@@ -35,7 +61,7 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #30363d;
+  background: var(--color-scrollbar);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;

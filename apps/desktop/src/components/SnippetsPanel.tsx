@@ -33,7 +33,7 @@ export default function SnippetsPanel() {
           <p className="p-2 text-xs text-muted">Enregistre ici les commandes que tu tapes souvent. Un clic les envoie au terminal actif.</p>
         )}
         {snippets.map((s) => (
-          <div key={s.id} className="group flex items-center rounded-md hover:bg-white/5">
+          <div key={s.id} className="group flex items-center rounded-md hover:bg-hover">
             <button className="min-w-0 flex-1 px-2 py-1.5 text-left" onClick={() => run(s)} title={s.command}>
               <div className="truncate text-sm">{s.name}</div>
               <div className="truncate font-mono text-[11px] text-muted">{s.command}</div>

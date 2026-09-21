@@ -34,6 +34,13 @@ monaco.editor.defineTheme("helm-dark", {
   colors: { "editor.background": "#0d1117", "editor.lineHighlightBackground": "#161b22" },
 });
 
+monaco.editor.defineTheme("helm-light", {
+  base: "vs",
+  inherit: true,
+  rules: [],
+  colors: { "editor.background": "#ffffff", "editor.lineHighlightBackground": "#f6f8fa" },
+});
+
 /** Devine le langage Monaco d'après le nom de fichier. */
 export function languageFor(path: string): string {
   const name = path.split("/").pop()!.toLowerCase();

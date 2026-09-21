@@ -6,9 +6,9 @@ type Variant = "primary" | "ghost" | "danger" | "outline";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent text-white hover:bg-accent/90",
-  ghost: "text-muted hover:bg-white/5 hover:text-fg",
+  ghost: "text-muted hover:bg-hover hover:text-fg",
   danger: "bg-danger/15 text-danger hover:bg-danger/25",
-  outline: "border border-border text-fg hover:bg-white/5",
+  outline: "border border-border text-fg hover:bg-hover",
 };
 
 export function Button({
@@ -44,7 +44,7 @@ export function IconButton({ title, children, className = "", ...rest }: ButtonH
       {...rest}
       title={title}
       aria-label={title}
-      className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-white/10 hover:text-fg disabled:opacity-40 ${className}`}
+      className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover-strong hover:text-fg disabled:opacity-40 ${className}`}
     >
       {children}
     </button>

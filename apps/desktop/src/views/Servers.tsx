@@ -359,7 +359,7 @@ function PuttyImport({ onClose, onDone }: { onClose: () => void; onDone: () => v
         <ul className="flex flex-col gap-1">
           {sessions.map((s, i) => (
             <li key={i}>
-              <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-white/5">
+              <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-hover">
                 <input
                   type="checkbox"
                   checked={selected.has(i)}

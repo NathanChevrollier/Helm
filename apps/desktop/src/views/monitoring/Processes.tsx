@@ -92,7 +92,7 @@ export default function Processes({ serverId, visible }: { serverId: string; vis
           </thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.pid} className="group border-t border-border/50 hover:bg-white/[0.03]">
+              <tr key={p.pid} className="group border-t border-border/50 hover:bg-hover-soft">
                 <td className="px-3 py-1.5 font-mono text-xs text-muted tabular-nums">{p.pid}</td>
                 <td className="px-3 py-1.5 text-xs">{p.user}</td>
                 <td className={`px-3 py-1.5 text-right text-xs tabular-nums ${p.cpu >= 50 ? "text-warn" : ""}`}>{p.cpu.toFixed(1)} %</td>

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import { useTheme } from "../lib/theme";
 
 /** Couleurs catégorielles validées (dataviz) sur le fond sombre #0d1117. */
 export const SERIES_COLORS = ["#3987e5", "#d95926"];
@@ -32,14 +33,22 @@ export default function TimeChart({
   const tip = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
   const fmt = useRef(format);
+  // Dernières données, pour les réafficher quand le graphique est recréé (changement de thème).
+  const timesRef = useRef(times);
+  timesRef.current = times;
+  const seriesRef = useRef(series);
+  seriesRef.current = series;
   fmt.current = format;
   const labels = series.map((s) => s.label).join("|");
+  const theme = useTheme((s) => s.theme);
 
   useEffect(() => {
     const el = host.current!;
+    // Couleurs des axes prises dans le thème courant (le graphique est recréé s'il change).
+    const css = getComputedStyle(document.documentElement);
     const axis = {
-      stroke: "#8b949e",
-      grid: { stroke: "#262c3680", width: 1 },
+      stroke: css.getPropertyValue("--color-muted").trim() || "#8b949e",
+      grid: { stroke: `${css.getPropertyValue("--color-border").trim() || "#262c36"}80`, width: 1 },
       ticks: { show: false },
       font: "11px Inter, 'Segoe UI', sans-serif",
     };
@@ -101,6 +110,7 @@ export default function TimeChart({
       },
     };
     plot.current = new uPlot(opts, [[], ...series.map(() => [])], el);
+    plot.current.setData([timesRef.current.map((t) => t / 1000), ...seriesRef.current.map((s) => s.values)] as uPlot.AlignedData);
     const ro = new ResizeObserver(() => plot.current?.setSize({ width: el.clientWidth, height }));
     ro.observe(el);
     return () => {
@@ -110,7 +120,7 @@ export default function TimeChart({
     };
     // Le graphique est recréé si la structure des séries change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, height, max]);
+  }, [labels, height, max, theme]);
 
   useEffect(() => {
     plot.current?.setData([times.map((t) => t / 1000), ...series.map((s) => s.values)] as uPlot.AlignedData);

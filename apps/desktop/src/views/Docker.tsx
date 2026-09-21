@@ -171,7 +171,7 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
               const s = stats[c.id];
               const isRunning = c.state === "running";
               return (
-                <tr key={c.id} className="group border-t border-border/50 hover:bg-white/[0.03]">
+                <tr key={c.id} className="group border-t border-border/50 hover:bg-hover-soft">
                   <td className="px-3 py-2">
                     <div className="font-medium">{c.name}</div>
                     {c.composeProject && <div className="text-xs text-muted">{c.composeProject} · {c.composeService}</div>}
@@ -450,7 +450,7 @@ function Storage({ serverId, notify }: { serverId: string; notify: (m: string, k
           </thead>
           <tbody>
             {images.map((i) => (
-              <tr key={i.id + i.tag} className="group border-t border-border/50 hover:bg-white/[0.03]">
+              <tr key={i.id + i.tag} className="group border-t border-border/50 hover:bg-hover-soft">
                 <td className="px-3 py-1.5">
                   <span className="flex items-center gap-2"><Box size={14} className="text-muted" />{i.repository}</span>
                 </td>

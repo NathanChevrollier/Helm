@@ -6,10 +6,12 @@ import { languageFor } from "../lib/monaco";
 import { api, errorMessage, type FileStamp } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Badge, Button, Modal } from "./ui";
+import { useMonacoTheme } from "../lib/theme";
 
 /** Éditeur de fichier distant en fenêtre modale, avec aperçu des modifications avant enregistrement. */
 export default function FileEditor({ serverId, path, onClose }: { serverId: string; path: string; onClose: () => void }) {
   const notify = useApp((s) => s.notify);
+  const monacoTheme = useMonacoTheme();
   const ask = useApp((s) => s.ask);
   const [original, setOriginal] = useState<string | null>(null);
   const [value, setValue] = useState("");
@@ -154,7 +156,7 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
             original={original}
             modified={value}
             language={languageFor(path)}
-            theme="helm-dark"
+            theme={monacoTheme}
             options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: 13 }}
           />
         ) : (
@@ -162,7 +164,7 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
             value={value}
             onChange={(v) => setValue(v ?? "")}
             language={languageFor(path)}
-            theme="helm-dark"
+            theme={monacoTheme}
             onMount={onMount}
             options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace' }}
           />

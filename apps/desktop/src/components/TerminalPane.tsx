@@ -10,6 +10,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorMessage, type TermEvent } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { broadcastInput, isBroadcasting, useBroadcast } from "../lib/broadcast";
+import { useTheme } from "../lib/theme";
 
 /** Terminal actuellement focalisé : cible des snippets. */
 export const focusedTerminal: { id: number | null; focus?: () => void } = { id: null };
@@ -35,6 +36,29 @@ const THEME = {
   brightMagenta: "#d2a8ff",
   brightCyan: "#56d4dd",
   brightWhite: "#f0f6fc",
+};
+
+const LIGHT_THEME = {
+  background: "#ffffff",
+  foreground: "#1f2328",
+  cursor: "#0969da",
+  selectionBackground: "#0969da33",
+  black: "#24292f",
+  red: "#cf222e",
+  green: "#116329",
+  yellow: "#4d2d00",
+  blue: "#0969da",
+  magenta: "#8250df",
+  cyan: "#1b7c83",
+  white: "#6e7781",
+  brightBlack: "#57606a",
+  brightRed: "#a40e26",
+  brightGreen: "#1a7f37",
+  brightYellow: "#633c01",
+  brightBlue: "#218bff",
+  brightMagenta: "#a475f9",
+  brightCyan: "#3192aa",
+  brightWhite: "#8c959f",
 };
 
 function decode(b64: string): Uint8Array {
@@ -115,6 +139,7 @@ export default function TerminalPane({
   const broadcasting = useBroadcast((s) => s.active && s.targets.includes(paneId));
   const broadcastCount = useBroadcast((s) => s.targets.length);
   const fontSize = useApp((s) => s.settings.terminalFontSize);
+  const theme = useTheme((s) => s.theme);
   const searchRef = useRef<SearchAddon | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const [searching, setSearching] = useState(false);
@@ -130,7 +155,7 @@ export default function TerminalPane({
 
   useEffect(() => {
     const term = new Terminal({
-      theme: THEME,
+      theme: useTheme.getState().theme === "light" ? LIGHT_THEME : THEME,
       fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
       fontSize: useApp.getState().settings.terminalFontSize,
       cursorBlink: true,
@@ -378,6 +403,10 @@ export default function TerminalPane({
       });
     }
   }, [visible]);
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = theme === "light" ? LIGHT_THEME : THEME;
+  }, [theme]);
 
   // Changement de taille de police (depuis n'importe quel terminal) : appliqué à celui-ci.
   useEffect(() => {

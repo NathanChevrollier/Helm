@@ -103,7 +103,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                 </span>
                 {t.tmux && <span title="Session persistante (tmux)" className="text-[9px] text-muted">●</span>}
                 <button
-                  className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-white/10"
+                  className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-hover-strong"
                   onClick={(e) => {
                     e.stopPropagation();
                     void close(t);
@@ -233,7 +233,7 @@ function BroadcastPicker({ onClose }: { onClose: () => void }) {
       <ul className="flex flex-col gap-1">
         {ids.map((id) => (
           <li key={id}>
-            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-white/5">
+            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
               <input
                 type="checkbox"
                 checked={selected.has(id)}

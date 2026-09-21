@@ -86,7 +86,7 @@ export default function NginxHistory({ serverId, onClose, onRestored }: { server
           {list === null && <p className="p-3 text-sm text-muted">Chargement…</p>}
           {list?.length === 0 && <p className="p-3 text-sm text-muted">Aucune sauvegarde : elles sont créées à chaque modification faite avec Helm.</p>}
           {list?.map((n) => (
-            <button key={n} onClick={() => setSelected(n)} className={`block w-full border-b border-border/50 px-3 py-2 text-left text-sm hover:bg-white/5 ${selected === n ? "bg-accent/15" : ""}`}>
+            <button key={n} onClick={() => setSelected(n)} className={`block w-full border-b border-border/50 px-3 py-2 text-left text-sm hover:bg-hover ${selected === n ? "bg-accent/15" : ""}`}>
               <span className="flex items-center gap-2">
                 <History size={13} className="text-muted" /> {when(n)}
               </span>

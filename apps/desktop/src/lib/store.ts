@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api, errorMessage, type ServerView } from "./api";
 import type { SectionId } from "../sections";
+import type { ThemeSetting } from "./theme";
 
 export interface DialogRequest {
   title: string;
@@ -50,6 +51,8 @@ export interface Settings {
   terminalFontSize: number;
   /** Notifications Windows pour les nouvelles alertes, tant que Helm est ouvert. */
   alertNotifications: boolean;
+  /** Thème de l'interface. */
+  theme: ThemeSetting;
 }
 
 /** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
@@ -187,7 +190,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark" },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],
