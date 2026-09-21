@@ -1,6 +1,10 @@
 packages:
   - "apps/*"
 
+# Scripts d'installation autorisés (esbuild télécharge son binaire, indispensable à Vite).
+allowBuilds:
+  esbuild: true
+
 # Correctifs de sécurité de dépendances indirectes (Monaco embarque DOMPurify).
 overrides:
   dompurify: ">=3.4.13"
