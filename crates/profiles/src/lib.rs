@@ -90,14 +90,45 @@ pub struct Data {
 pub struct Store {
     path: PathBuf,
     data: Mutex<Data>,
+    /// Problème rencontré au chargement (fichier illisible), à signaler à l'utilisateur.
+    warning: Option<String>,
 }
 
 impl Store {
+    /// Lecture seule, sans jamais toucher au fichier (serveur MCP).
     pub fn load(dir: &Path) -> Self {
-        let _ = std::fs::create_dir_all(dir);
         let path = dir.join("helm.json");
         let data = read_json(&path).unwrap_or_default();
-        Self { path, data: Mutex::new(data) }
+        Self { path, data: Mutex::new(data), warning: None }
+    }
+
+    /// Chargement par l'app. Un fichier illisible n'est jamais écrasé : il est mis de côté et
+    /// la copie de secours (`helm.json.bak`, version précédente) est utilisée si elle est valide.
+    pub fn open(dir: &Path) -> Self {
+        let _ = std::fs::create_dir_all(dir);
+        let path = dir.join("helm.json");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return Self { path, data: Mutex::default(), warning: None };
+        };
+        if let Ok(data) = serde_json::from_slice(&bytes) {
+            return Self { path, data: Mutex::new(data), warning: None };
+        }
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let aside = dir.join(format!("helm.json.corrompu-{stamp}"));
+        let moved = std::fs::rename(&path, &aside).is_ok();
+        let kept = if moved { format!("Il a été conservé sous {}.", aside.display()) } else { String::new() };
+        let (data, warning) = match read_json::<Data>(&path.with_extension("json.bak")) {
+            Some(d) => (d, format!("Le fichier de configuration de Helm était illisible : la version précédente a été restaurée. {kept}")),
+            None => (
+                Data::default(),
+                format!("Le fichier de configuration de Helm était illisible et aucune copie de secours n'est valide. {kept}"),
+            ),
+        };
+        Self { path, data: Mutex::new(data), warning: Some(warning) }
+    }
+
+    pub fn warning(&self) -> Option<String> {
+        self.warning.clone()
     }
 
     /// Relit le fichier (le serveur MCP tourne dans un autre processus que l'app).
@@ -117,7 +148,16 @@ impl Store {
         let out = f(&mut data);
         let json = serde_json::to_vec_pretty(&*data).map_err(|e| e.to_string())?;
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            f.write_all(&json).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
+        // La version précédente, valide, sert de copie de secours.
+        if read_json::<Data>(&self.path).is_some() {
+            let _ = std::fs::copy(&self.path, self.path.with_extension("json.bak"));
+        }
         std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
         Ok(out)
     }
@@ -165,6 +205,22 @@ mod tests {
         let d: Data = serde_json::from_str(v1).unwrap();
         assert!(!d.servers[0].ai_access);
         assert!(d.tunnels.is_empty());
+    }
+
+    #[test]
+    fn corrupt_file_is_kept_and_backup_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path());
+        s.write(|d| d.snippets.push(Snippet { id: "1".into(), name: "a".into(), command: "ls".into() })).unwrap();
+        s.write(|d| d.snippets.push(Snippet { id: "2".into(), name: "b".into(), command: "ls".into() })).unwrap();
+        std::fs::write(dir.path().join("helm.json"), b"{ tronqu").unwrap();
+
+        let s = Store::open(dir.path());
+        assert!(s.warning().is_some());
+        assert_eq!(s.read(|d| d.snippets.len()), 1, "la version précédente est restaurée");
+        let aside =
+            std::fs::read_dir(dir.path()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("helm.json.corrompu-"));
+        assert!(aside, "le fichier illisible est conservé");
     }
 
     #[test]

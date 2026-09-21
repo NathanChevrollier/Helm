@@ -59,6 +59,12 @@ export interface FsEntry {
   group: string | null;
 }
 
+/** Date de modification (s) et taille d'un fichier distant. */
+export interface FileStamp {
+  mtime: number;
+  size: number;
+}
+
 export interface Listing {
   path: string;
   entries: FsEntry[];
@@ -445,6 +451,7 @@ export const api = {
   version: () => invoke<string>("app_version"),
 
   uiStateGet: () => invoke<unknown>("ui_state_get"),
+  storeWarning: () => invoke<string | null>("store_warning"),
   uiStateSet: (state: unknown) => invoke<void>("ui_state_set", { state }),
   auditList: (limit = 500) => invoke<AuditEntry[]>("audit_list", { limit }),
   tmuxCheck: (serverId: string) => invoke<string | null>("tmux_check", { serverId }),
@@ -484,8 +491,10 @@ export const api = {
   fsHome: (serverId: string) => invoke<string>("fs_home", { serverId }),
   fsList: (serverId: string, path: string) => invoke<Listing>("fs_list", { serverId, path }),
   fsRead: (serverId: string, path: string, sudo = false) => invoke<string>("fs_read", { serverId, path, sudo }),
-  fsWrite: (serverId: string, path: string, content: string, sudo = false) =>
-    invoke<void>("fs_write", { serverId, path, content, sudo }),
+  /** Écrit un fichier ; avec `expected`, échoue (erreur `CONFLICT…`) s'il a changé entre-temps. Renvoie son nouvel état. */
+  fsWrite: (serverId: string, path: string, content: string, sudo = false, expected: FileStamp | null = null) =>
+    invoke<FileStamp | null>("fs_write", { serverId, path, content, sudo, expected }),
+  fsStat: (serverId: string, path: string, sudo = false) => invoke<FileStamp | null>("fs_stat", { serverId, path, sudo }),
   fsMkdir: (serverId: string, path: string) => invoke<void>("fs_mkdir", { serverId, path }),
   fsCreate: (serverId: string, path: string) => invoke<void>("fs_create", { serverId, path }),
   fsRename: (serverId: string, from: string, to: string) => invoke<void>("fs_rename", { serverId, from, to }),

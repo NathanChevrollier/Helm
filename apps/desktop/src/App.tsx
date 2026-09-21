@@ -32,6 +32,10 @@ export default function App() {
     api.version().then(setVersion).catch(() => setVersion(undefined));
     // Profils d'abord (les onglets restaurés en dépendent), puis l'espace de travail sauvegardé.
     void refreshServers().then(hydrate);
+    // Fichier de configuration illisible au démarrage : on prévient au lieu de repartir de zéro en silence.
+    void api.storeWarning().then((w) => {
+      if (w) void useApp.getState().ask({ title: "Configuration récupérée", body: w, confirmLabel: "Compris" });
+    });
   }, [refreshServers, hydrate]);
 
   // Ctrl+K : palette de commandes.

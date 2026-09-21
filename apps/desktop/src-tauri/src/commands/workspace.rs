@@ -17,6 +17,12 @@ pub fn ui_state_get(store: State<'_, Store>) -> serde_json::Value {
     store.read(|d| d.ui_state.clone())
 }
 
+/// Problème rencontré au chargement de la configuration, à afficher au démarrage.
+#[tauri::command]
+pub fn store_warning(store: State<'_, Store>) -> Option<String> {
+    store.warning()
+}
+
 #[tauri::command]
 pub fn ui_state_set(store: State<'_, Store>, state: serde_json::Value) -> Result<(), String> {
     store.write(|d| d.ui_state = state)
