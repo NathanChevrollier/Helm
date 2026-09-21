@@ -285,9 +285,14 @@ pub struct AlertEvent {
 pub enum Request {
     Status,
     /// Derniers relevés à pleine résolution (un par intervalle d'échantillonnage).
-    Live { count: usize },
+    Live {
+        count: usize,
+    },
     /// Historique sur une fenêtre, sous-échantillonné à `points` points au plus.
-    History { range_secs: u64, points: usize },
+    History {
+        range_secs: u64,
+        points: usize,
+    },
     TestNotify,
 }
 

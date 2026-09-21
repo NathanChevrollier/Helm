@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
+import { ShipWheel } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp } from "./lib/store";
 import { SECTIONS } from "./sections";
-import { DialogHost, EmptyState, Toasts } from "./components/ui";
+import { DialogHost, Toasts } from "./components/ui";
 import ServersView from "./views/Servers";
 import TerminalView from "./views/Terminal";
 import FilesView from "./views/Files";
 import MonitoringView from "./views/Monitoring";
 import DockerView from "./views/Docker";
+import SitesView from "./views/Sites";
 
 export default function App() {
   const { section, setSection, servers, activeServerId, setActiveServer, refreshServers } = useApp();
   const [version, setVersion] = useState<string>();
   const active = servers.find((s) => s.id === activeServerId);
-  const current = SECTIONS.find((s) => s.id === section)!;
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(undefined));
@@ -24,7 +25,10 @@ export default function App() {
     <div className="flex h-full flex-col">
       <div className="flex min-h-0 flex-1">
         <nav className="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
-          <div className="px-4 pt-4 pb-3 text-lg font-semibold tracking-tight">Helm</div>
+          <div className="flex items-center gap-2 px-4 pt-4 pb-3 text-lg font-semibold tracking-tight">
+            <ShipWheel size={20} className="text-accent" />
+            Helm
+          </div>
           <div className="px-3 pb-3">
             <select
               className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm outline-none focus:border-accent"
@@ -73,9 +77,7 @@ export default function App() {
               ) : section === "docker" ? (
                 <DockerView />
               ) : (
-                <EmptyState icon={<current.icon size={40} />} title={current.label}>
-                  {current.description}
-                </EmptyState>
+                <SitesView />
               )}
             </div>
           )}

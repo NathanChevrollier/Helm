@@ -130,10 +130,7 @@ mod tests {
     use helm_protocol::{AlertMetric, AlertRule};
 
     fn cfg(for_secs: u64) -> AgentConfig {
-        AgentConfig {
-            rules: vec![AlertRule { metric: AlertMetric::Cpu, threshold: 80.0, for_secs, enabled: true }],
-            ..Default::default()
-        }
+        AgentConfig { rules: vec![AlertRule { metric: AlertMetric::Cpu, threshold: 80.0, for_secs, enabled: true }], ..Default::default() }
     }
 
     fn m(t: i64, cpu: f32) -> Metrics {

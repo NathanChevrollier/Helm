@@ -2,7 +2,7 @@ mod commands;
 mod sessions;
 mod store;
 
-use commands::{docker, files, monitoring, servers, terminal};
+use commands::{docker, files, monitoring, servers, sites, terminal};
 use tauri::Manager;
 
 /// Renvoie la version de l'app, utilisée par l'UI pour vérifier que le pont Rust fonctionne.
@@ -73,6 +73,20 @@ pub fn run() {
             docker::docker_storage,
             docker::docker_remove_image,
             docker::docker_prune,
+            sites::sites_state,
+            sites::sites_read,
+            sites::sites_write,
+            sites::sites_set_enabled,
+            sites::sites_delete,
+            sites::sites_test,
+            sites::sites_reload,
+            sites::sites_plan,
+            sites::sites_resolve,
+            sites::sites_create_app,
+            sites::sites_certbot,
+            sites::sites_renew,
+            sites::sites_check,
+            sites::sites_preview,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Tauri");

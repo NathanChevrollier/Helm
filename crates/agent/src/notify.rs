@@ -70,7 +70,5 @@ pub fn probe(url: &str) -> Result<u16, String> {
 }
 
 pub fn any_configured(n: &Notifiers) -> bool {
-    [&n.discord_webhook, &n.ntfy_url, &n.webhook_url]
-        .iter()
-        .any(|s| s.as_deref().is_some_and(|s| !s.trim().is_empty()))
+    [&n.discord_webhook, &n.ntfy_url, &n.webhook_url].iter().any(|s| s.as_deref().is_some_and(|s| !s.trim().is_empty()))
 }

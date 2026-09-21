@@ -146,11 +146,7 @@ pub async fn save_config(conn: &Connection, cfg: &AgentConfig, sudo: Option<&str
 
 /// Envoie le binaire adapté à l'architecture du serveur et l'installe comme service.
 /// `binary_for` renvoie le chemin local du binaire pour une architecture (`x86_64`, `aarch64`).
-pub async fn install(
-    conn: &Connection,
-    sudo: Option<&str>,
-    binary_for: impl Fn(&str) -> Option<std::path::PathBuf>,
-) -> Result<String> {
+pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(&str) -> Option<std::path::PathBuf>) -> Result<String> {
     let arch = conn.run("uname -m").await?;
     let target = target_for_arch(&arch).ok_or_else(|| Error::Other(format!("architecture non prise en charge : {}", arch.trim())))?;
     let local = binary_for(target).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;

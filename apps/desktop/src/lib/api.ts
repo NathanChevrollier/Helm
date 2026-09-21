@@ -226,6 +226,72 @@ export interface DockerDiskUsage {
   reclaimable: string;
 }
 
+export interface NginxLocation {
+  path: string;
+  proxyPass: string | null;
+  root: string | null;
+  returns: string | null;
+}
+
+export interface ServerBlock {
+  serverNames: string[];
+  listen: string[];
+  ssl: boolean;
+  root: string | null;
+  sslCertificate: string | null;
+  returns: string | null;
+  locations: NginxLocation[];
+  line: number;
+  upstreamPorts: number[];
+}
+
+export interface SiteFile {
+  path: string;
+  realPath: string;
+  enabled: boolean;
+  servers: ServerBlock[];
+}
+
+export interface Certificate {
+  path: string;
+  subject: string;
+  domains: string[];
+  notAfter: number;
+  issuer: string;
+}
+
+export interface NginxState {
+  installed: boolean;
+  version: string;
+  running: boolean;
+  files: SiteFile[];
+  disabled: SiteFile[];
+  certificates: Certificate[];
+  certbot: boolean;
+}
+
+export interface ApplyResult {
+  ok: boolean;
+  backup: string | null;
+  log: string;
+}
+
+export interface NewSitePlan {
+  freePort: number;
+  usedPorts: number[];
+  publicIp: string | null;
+  docker: boolean;
+  certbot: boolean;
+}
+
+export interface AppSpec {
+  name: string;
+  image: string;
+  hostPort: number;
+  containerPort: number;
+  env: [string, string][];
+}
+
 function progressChannel(onProgress: (p: Progress) => void) {
   const channel = new Channel<Progress>();
   channel.onmessage = onProgress;
@@ -297,6 +363,24 @@ export const api = {
   dockerStorage: (serverId: string) => invoke<{ images: DockerImage[]; usage: DockerDiskUsage[] }>("docker_storage", { serverId }),
   dockerRemoveImage: (serverId: string, id: string) => invoke<void>("docker_remove_image", { serverId, id }),
   dockerPrune: (serverId: string, what: string) => invoke<string>("docker_prune", { serverId, what }),
+
+  sitesState: (serverId: string) => invoke<NginxState>("sites_state", { serverId }),
+  sitesRead: (serverId: string, path: string) => invoke<string>("sites_read", { serverId, path }),
+  sitesWrite: (serverId: string, path: string, content: string, enableLink?: string) =>
+    invoke<ApplyResult>("sites_write", { serverId, path, content, enableLink }),
+  sitesSetEnabled: (serverId: string, available: string, link: string, enabled: boolean) =>
+    invoke<ApplyResult>("sites_set_enabled", { serverId, available, link, enabled }),
+  sitesDelete: (serverId: string, available: string, link: string) => invoke<ApplyResult>("sites_delete", { serverId, available, link }),
+  sitesTest: (serverId: string) => invoke<{ ok: boolean; output: string }>("sites_test", { serverId }),
+  sitesReload: (serverId: string) => invoke<string>("sites_reload", { serverId }),
+  sitesPlan: (serverId: string) => invoke<NewSitePlan>("sites_plan", { serverId }),
+  sitesResolve: (serverId: string, domain: string) => invoke<string | null>("sites_resolve", { serverId, domain }),
+  sitesCreateApp: (serverId: string, spec: AppSpec) => invoke<string>("sites_create_app", { serverId, spec }),
+  sitesCertbot: (serverId: string, domain: string, email: string) => invoke<string>("sites_certbot", { serverId, domain, email }),
+  sitesRenew: (serverId: string) => invoke<string>("sites_renew", { serverId }),
+  sitesCheck: (serverId: string, domain: string) => invoke<string>("sites_check", { serverId, domain }),
+  sitesPreview: (domain: string, hostPort: number, app?: AppSpec) =>
+    invoke<{ vhost: string; compose: string | null }>("sites_preview", { domain, hostPort, app }),
 };
 
 export function formatDuration(secs: number): string {
@@ -309,7 +393,7 @@ export function formatDuration(secs: number): string {
 }
 
 export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} o`;
+  if (n < 1024) return `${Math.round(n)} o`;
   const units = ["Ko", "Mo", "Go", "To"];
   let v = n / 1024;
   let i = 0;

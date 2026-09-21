@@ -66,7 +66,8 @@ pub async fn docker_overview(
         return Ok(Overview { access, version, containers: vec![], projects: vec![] });
     }
     let s = sudo.as_deref();
-    let (containers, projects) = tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?;
+    let (containers, projects) =
+        tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?;
     Ok(Overview { access, version, containers, projects })
 }
 

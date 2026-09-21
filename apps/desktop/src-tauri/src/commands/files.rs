@@ -21,12 +21,7 @@ pub async fn fs_home(store: State<'_, Store>, sessions: State<'_, Sessions>, ser
 }
 
 #[tauri::command]
-pub async fn fs_list(
-    store: State<'_, Store>,
-    sessions: State<'_, Sessions>,
-    server_id: String,
-    path: String,
-) -> Result<Listing, String> {
+pub async fn fs_list(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String, path: String) -> Result<Listing, String> {
     let sftp = sessions.sftp(&store, &server_id).await?;
     let mut listing = sftp::list(&sftp, &path).await.map_err(err)?;
     let conn = sessions.get(&store, &server_id).await?;
@@ -103,7 +98,12 @@ pub async fn fs_rename(
 }
 
 #[tauri::command]
-pub async fn fs_remove(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String, paths: Vec<String>) -> Result<(), String> {
+pub async fn fs_remove(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
     let sftp = sessions.sftp(&store, &server_id).await?;
     for p in paths {
         sftp::remove(&sftp, &p).await.map_err(err)?;

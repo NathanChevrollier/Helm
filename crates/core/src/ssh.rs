@@ -14,8 +14,13 @@ use crate::{Error, Result};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Auth {
-    Password { password: String },
-    KeyFile { path: String, passphrase: Option<String> },
+    Password {
+        password: String,
+    },
+    KeyFile {
+        path: String,
+        passphrase: Option<String>,
+    },
     /// Agent SSH du système : Pageant ou OpenSSH sous Windows, `SSH_AUTH_SOCK` ailleurs.
     Agent,
 }
@@ -64,15 +69,10 @@ struct HostKeyCheck {
 impl client::Handler for HostKeyCheck {
     type Error = russh::Error;
 
-    async fn check_server_key(
-        &mut self,
-        key: &PublicKeyOrCertificate,
-    ) -> std::result::Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, key: &PublicKeyOrCertificate) -> std::result::Result<bool, Self::Error> {
         let fingerprint = match key {
             PublicKeyOrCertificate::PublicKey { key, .. } => key.fingerprint(HashAlg::Sha256),
-            PublicKeyOrCertificate::Certificate(cert) => {
-                keys::PublicKey::from(cert.public_key().clone()).fingerprint(HashAlg::Sha256)
-            }
+            PublicKeyOrCertificate::Certificate(cert) => keys::PublicKey::from(cert.public_key().clone()).fingerprint(HashAlg::Sha256),
         }
         .to_string();
         let trusted = self.expected.as_deref() == Some(fingerprint.as_str());
@@ -102,9 +102,7 @@ impl Connection {
         let addr = (params.host.as_str(), params.port);
         let result = tokio::time::timeout(Duration::from_secs(15), client::connect(config, addr, handler))
             .await
-            .map_err(|_| {
-                Error::Connection(format!("délai dépassé en se connectant à {}:{}", params.host, params.port))
-            })?;
+            .map_err(|_| Error::Connection(format!("délai dépassé en se connectant à {}:{}", params.host, params.port)))?;
 
         let seen_fp = seen.lock().unwrap().clone();
         let mut handle = match result {
@@ -175,20 +173,13 @@ impl Connection {
 
     /// Exécute une commande en root : directement si l'utilisateur est root, sinon via sudo.
     /// Le mot de passe sudo est transmis sur stdin, jamais dans la ligne de commande.
-    pub async fn exec_sudo(
-        &self,
-        command: &str,
-        sudo_password: Option<&str>,
-        stdin: Option<&[u8]>,
-    ) -> Result<ExecOutput> {
+    pub async fn exec_sudo(&self, command: &str, sudo_password: Option<&str>, stdin: Option<&[u8]>) -> Result<ExecOutput> {
         let q = shell_quote(command);
         match sudo_password {
             Some(pw) => {
                 let mut input = format!("{pw}\n").into_bytes();
                 input.extend_from_slice(stdin.unwrap_or_default());
-                let cmd = format!(
-                    "if [ \"$(id -u)\" = 0 ]; then read -r _; sh -c {q}; else sudo -S -p '' sh -c {q}; fi"
-                );
+                let cmd = format!("if [ \"$(id -u)\" = 0 ]; then read -r _; sh -c {q}; else sudo -S -p '' sh -c {q}; fi");
                 self.exec(&cmd, Some(&input)).await
             }
             None => {
@@ -207,9 +198,7 @@ impl Connection {
 
     /// Écrit un fichier en root. `cat >` conserve le propriétaire et les permissions du fichier existant.
     pub async fn write_file_sudo(&self, path: &str, content: &str, sudo_password: Option<&str>) -> Result<()> {
-        self.exec_sudo(&format!("cat > {}", shell_quote(path)), sudo_password, Some(content.as_bytes()))
-            .await?
-            .into_result()?;
+        self.exec_sudo(&format!("cat > {}", shell_quote(path)), sudo_password, Some(content.as_bytes())).await?.into_result()?;
         Ok(())
     }
 
@@ -235,9 +224,7 @@ impl Connection {
     pub async fn sftp(&self) -> Result<russh_sftp::client::SftpSession> {
         let channel = self.handle.channel_open_session().await?;
         channel.request_subsystem(true, "sftp").await?;
-        russh_sftp::client::SftpSession::new(channel.into_stream())
-            .await
-            .map_err(|e| Error::Sftp(e.to_string()))
+        russh_sftp::client::SftpSession::new(channel.into_stream()).await.map_err(|e| Error::Sftp(e.to_string()))
     }
 }
 
@@ -249,13 +236,17 @@ async fn authenticate(handle: &mut Handle<HostKeyCheck>, user: &str, auth: &Auth
             res.success() || keyboard_interactive(handle, user, password).await?
         }
         Auth::KeyFile { path, passphrase } => {
-            let key = keys::load_secret_key(expand_home(path), passphrase.as_deref())
-                .map_err(|e| Error::Auth(format!("clé illisible ({path}) : {e}")))?;
+            let key = keys::load_secret_key(expand_home(path), passphrase.as_deref()).map_err(|e| {
+                let raw = e.to_string();
+                let lower = raw.to_lowercase();
+                if lower.contains("mac") || lower.contains("decrypt") || lower.contains("encrypted") || lower.contains("passphrase") {
+                    Error::Auth(format!("passphrase de la clé manquante ou incorrecte ({path})"))
+                } else {
+                    Error::Auth(format!("clé illisible ({path}) : {raw}"))
+                }
+            })?;
             let hash = handle.best_supported_rsa_hash().await?.flatten();
-            handle
-                .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
-                .await?
-                .success()
+            handle.authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await?.success()
         }
         Auth::Agent => authenticate_with_agent(handle, user).await?,
     };
@@ -299,18 +290,12 @@ async fn authenticate_with_agent(handle: &mut Handle<HostKeyCheck>, user: &str) 
     }
     #[cfg(not(windows))]
     {
-        let agent = AgentClient::connect_env()
-            .await
-            .map_err(|e| Error::Auth(format!("agent SSH indisponible : {e}")))?;
+        let agent = AgentClient::connect_env().await.map_err(|e| Error::Auth(format!("agent SSH indisponible : {e}")))?;
         try_agent(handle, user, agent).await
     }
 }
 
-async fn try_agent<S>(
-    handle: &mut Handle<HostKeyCheck>,
-    user: &str,
-    mut agent: keys::agent::client::AgentClient<S>,
-) -> Result<bool>
+async fn try_agent<S>(handle: &mut Handle<HostKeyCheck>, user: &str, mut agent: keys::agent::client::AgentClient<S>) -> Result<bool>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {

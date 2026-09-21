@@ -124,7 +124,9 @@ pub fn parse_ports(s: &str) -> Vec<PortMapping> {
         let (cport, proto) = container.split_once('/').unwrap_or((container, "tcp"));
         let Some((ip, hport)) = host.rsplit_once(':') else { continue };
         // Plages « 8000-8010->8000-8010/tcp » : on ne garde que le premier port.
-        let (Ok(hp), Ok(cp)) = (hport.split('-').next().unwrap_or("").parse(), cport.split('-').next().unwrap_or("").parse()) else { continue };
+        let (Ok(hp), Ok(cp)) = (hport.split('-').next().unwrap_or("").parse(), cport.split('-').next().unwrap_or("").parse()) else {
+            continue;
+        };
         let ip = ip.trim_start_matches('[').trim_end_matches(']');
         let ip = if ip.is_empty() || ip == "::" { "0.0.0.0" } else { ip };
         let m = PortMapping { host_ip: ip.to_string(), host_port: hp, container_port: cp, protocol: proto.to_string() };
@@ -271,7 +273,13 @@ pub fn compose_command(project: &ComposeProject, sub: &str) -> Result<String> {
     Ok(format!("docker {} {sub}", compose_args(project)?))
 }
 
-pub async fn compose_action(conn: &Connection, access: Access, sudo: Option<&str>, project: &ComposeProject, action: &str) -> Result<String> {
+pub async fn compose_action(
+    conn: &Connection,
+    access: Access,
+    sudo: Option<&str>,
+    project: &ComposeProject,
+    action: &str,
+) -> Result<String> {
     let sub = match action {
         "up" => "up -d --remove-orphans",
         "pull" => "pull",
@@ -375,12 +383,16 @@ mod tests {
     #[test]
     fn compose_args_quote_paths() {
         let p = ComposeProject { name: "web".into(), status: "running(1)".into(), config_files: "/opt/web/docker-compose.yml".into() };
-        assert_eq!(compose_command(&p, "logs -f").unwrap(), "docker compose --project-directory '/opt/web' -p 'web' -f '/opt/web/docker-compose.yml' logs -f");
+        assert_eq!(
+            compose_command(&p, "logs -f").unwrap(),
+            "docker compose --project-directory '/opt/web' -p 'web' -f '/opt/web/docker-compose.yml' logs -f"
+        );
     }
 
     #[test]
     fn compose_project_accepts_docker_and_ui_json() {
-        let from_docker: Vec<ComposeProject> = serde_json::from_str(r#"[{"Name":"web","Status":"running(1)","ConfigFiles":"/a.yml"}]"#).unwrap();
+        let from_docker: Vec<ComposeProject> =
+            serde_json::from_str(r#"[{"Name":"web","Status":"running(1)","ConfigFiles":"/a.yml"}]"#).unwrap();
         let from_ui: ComposeProject = serde_json::from_str(r#"{"name":"web","status":"running(1)","configFiles":"/a.yml"}"#).unwrap();
         assert_eq!(from_docker[0].name, from_ui.name);
         assert_eq!(serde_json::to_string(&from_ui).unwrap(), r#"{"name":"web","status":"running(1)","configFiles":"/a.yml"}"#);

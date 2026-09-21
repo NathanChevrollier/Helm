@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::store::{secrets, AuthKind, ServerProfile, Snippet, Store};
 use crate::sessions::Sessions;
+use crate::store::{secrets, AuthKind, ServerProfile, Snippet, Store};
 
 /// Secrets transmis avec un profil : `None` = inchangé, `Some("")` = supprimé.
 #[derive(Deserialize)]
@@ -57,11 +57,9 @@ pub async fn server_save(
         profile.id = uuid::Uuid::new_v4().to_string();
     }
     let id = profile.id.clone();
-    for (kind, value) in [
-        ("password", &secrets_input.password),
-        ("passphrase", &secrets_input.passphrase),
-        ("sudo", &secrets_input.sudo_password),
-    ] {
+    for (kind, value) in
+        [("password", &secrets_input.password), ("passphrase", &secrets_input.passphrase), ("sudo", &secrets_input.sudo_password)]
+    {
         if let Some(v) = value {
             secrets::set(&id, kind, v)?;
         }

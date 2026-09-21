@@ -126,11 +126,8 @@ pub async fn list(sftp: &SftpSession, path: &str) -> Result<Listing> {
         }
         let meta = e.metadata();
         let full = join(&path, &name);
-        let target_is_dir = if meta.file_type() == FileType::Symlink {
-            sftp.metadata(&full).await.map(|m| m.is_dir()).unwrap_or(false)
-        } else {
-            false
-        };
+        let target_is_dir =
+            if meta.file_type() == FileType::Symlink { sftp.metadata(&full).await.map(|m| m.is_dir()).unwrap_or(false) } else { false };
         entries.push(to_entry(name, full, &meta, target_is_dir));
     }
     entries.sort_by(|a, b| {
@@ -164,10 +161,7 @@ pub async fn write_text(sftp: &SftpSession, path: &str, content: &str) -> Result
     let existing = sftp.metadata(path).await.ok();
     let tmp = format!("{path}.helm-tmp");
     {
-        let mut f = sftp
-            .open_with_flags(&tmp, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
-            .await
-            .map_err(sftp_err)?;
+        let mut f = sftp.open_with_flags(&tmp, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
         f.write_all(content.as_bytes()).await.map_err(sftp_err)?;
         f.shutdown().await.map_err(sftp_err)?;
     }
@@ -292,12 +286,7 @@ async fn download_file(
 }
 
 /// Envoie un fichier ou un dossier local dans le dossier distant `remote_dir`.
-pub async fn upload(
-    sftp: &SftpSession,
-    local: &Path,
-    remote_dir: &str,
-    on_progress: &(dyn Fn(Progress) + Send + Sync),
-) -> Result<()> {
+pub async fn upload(sftp: &SftpSession, local: &Path, remote_dir: &str, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<()> {
     let name = local.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::Other("nom de fichier invalide".into()))?;
     let target = join(remote_dir, name);
     if local.is_dir() {
@@ -323,18 +312,10 @@ pub async fn upload(
     }
 }
 
-async fn upload_file(
-    sftp: &SftpSession,
-    local: &Path,
-    remote: &str,
-    on_progress: &(dyn Fn(Progress) + Send + Sync),
-) -> Result<()> {
+async fn upload_file(sftp: &SftpSession, local: &Path, remote: &str, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<()> {
     let mut src = tokio::fs::File::open(local).await.map_err(|e| Error::Other(e.to_string()))?;
     let total = src.metadata().await.map(|m| m.len()).unwrap_or(0);
-    let mut dst = sftp
-        .open_with_flags(remote, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
-        .await
-        .map_err(sftp_err)?;
+    let mut dst = sftp.open_with_flags(remote, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
     let mut buf = vec![0u8; CHUNK];
     let mut done = 0u64;
     let label = local.display().to_string();

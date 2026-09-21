@@ -81,8 +81,7 @@ impl Store {
     }
 
     pub fn server(&self, id: &str) -> Result<ServerProfile, String> {
-        self.read(|d| d.servers.iter().find(|s| s.id == id).cloned())
-            .ok_or_else(|| "serveur introuvable".to_string())
+        self.read(|d| d.servers.iter().find(|s| s.id == id).cloned()).ok_or_else(|| "serveur introuvable".to_string())
     }
 }
 

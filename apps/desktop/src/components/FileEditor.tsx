@@ -125,6 +125,8 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
           <p className="text-sm text-muted">Chargement…</p>
         ) : showDiff ? (
           <DiffEditor
+            keepCurrentOriginalModel
+            keepCurrentModifiedModel
             original={original}
             modified={value}
             language={languageFor(path)}

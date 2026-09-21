@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod docker;
+pub mod nginx;
 pub mod sftp;
 pub mod ssh;
 pub mod system;

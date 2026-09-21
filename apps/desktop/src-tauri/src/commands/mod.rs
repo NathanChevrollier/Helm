@@ -2,6 +2,7 @@ pub mod docker;
 pub mod files;
 pub mod monitoring;
 pub mod servers;
+pub mod sites;
 pub mod terminal;
 
 use helm_core::Connection;

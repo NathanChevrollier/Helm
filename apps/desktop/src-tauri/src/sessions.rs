@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use base64::Engine;
-use helm_core::russh_sftp::client::SftpSession;
-use helm_core::{Auth, ConnectParams, Connection};
 use helm_core::russh::client::Msg;
 use helm_core::russh::{ChannelMsg, ChannelWriteHalf};
+use helm_core::russh_sftp::client::SftpSession;
+use helm_core::{Auth, ConnectParams, Connection};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tokio::sync::Mutex;
@@ -20,8 +20,12 @@ use crate::store::{secrets, AuthKind, Store};
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TermEvent {
     /// Octets bruts encodés en base64 (xterm.js décode l'UTF-8 lui-même, même coupé entre deux paquets).
-    Data { data: String },
-    Exit { code: Option<u32> },
+    Data {
+        data: String,
+    },
+    Exit {
+        code: Option<u32>,
+    },
 }
 
 pub struct Sessions {
@@ -101,8 +105,7 @@ impl Sessions {
         let host_key = format!("{}:{}", profile.host, profile.port);
         let auth = match profile.auth_kind {
             AuthKind::Password => Auth::Password {
-                password: secrets::get(server_id, "password")
-                    .ok_or("NEED_PASSWORD: aucun mot de passe enregistré pour ce serveur")?,
+                password: secrets::get(server_id, "password").ok_or("NEED_PASSWORD: aucun mot de passe enregistré pour ce serveur")?,
             },
             AuthKind::Key => Auth::KeyFile {
                 path: profile.key_path.clone().ok_or("aucune clé privée configurée")?,

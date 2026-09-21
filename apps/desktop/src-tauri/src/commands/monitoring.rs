@@ -54,13 +54,23 @@ pub async fn mon_processes(store: State<'_, Store>, sessions: State<'_, Sessions
 }
 
 #[tauri::command]
-pub async fn mon_kill(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String, pid: u32, force: bool) -> Result<(), String> {
+pub async fn mon_kill(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    pid: u32,
+    force: bool,
+) -> Result<(), String> {
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
     system::kill(&conn, pid, force, pw.as_deref()).await.map_err(err)
 }
 
 #[tauri::command]
-pub async fn mon_services(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Option<Vec<Service>>, String> {
+pub async fn mon_services(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+) -> Result<Option<Vec<Service>>, String> {
     let conn = sessions.get(&store, &server_id).await?;
     system::services(&conn).await.map_err(err)
 }
