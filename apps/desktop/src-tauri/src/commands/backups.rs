@@ -212,7 +212,7 @@ pub async fn backup_stage_download(
         r = shell_quote(&restored),
         u = shell_quote(&user)
     );
-    conn.exec_sudo(&cmd, sudo.as_deref(), None).await.map_err(err)?.into_result().map_err(err)?;
+    helm_core::ssh::long(conn.exec_sudo(&cmd, sudo.as_deref(), None)).await.map_err(err)?.into_result().map_err(err)?;
     let name = restored.rsplit('/').next().unwrap_or("");
     Ok(format!("{dest}/{name}"))
 }

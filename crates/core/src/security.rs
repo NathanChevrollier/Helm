@@ -349,13 +349,19 @@ pub struct FixOutcome {
 }
 
 pub async fn apply_fix(conn: &Connection, sudo: Option<&str>, id: &str) -> Result<FixOutcome> {
-    let plan = fix_plan(id)?;
-    let out = conn.exec_sudo(&format!("bash -c {} helm-fix", crate::ssh::shell_quote(&plan.script)), sudo, None).await?;
-    let text = format!("{}{}", out.stdout, out.stderr);
-    let ok = out.success() && text.contains("@@OK");
-    let rollback =
-        text.lines().find_map(|l| l.strip_prefix("@@OK ")).map(|s| s.trim().to_string()).filter(|s| s != "fail2ban" && s != "unattended");
-    Ok(FixOutcome { ok, output: text.replace("@@OK", "OK").replace("@@FAILED", "ÉCHEC"), rollback })
+    crate::ssh::long(async move {
+        let plan = fix_plan(id)?;
+        let out = conn.exec_sudo(&format!("bash -c {} helm-fix", crate::ssh::shell_quote(&plan.script)), sudo, None).await?;
+        let text = format!("{}{}", out.stdout, out.stderr);
+        let ok = out.success() && text.contains("@@OK");
+        let rollback = text
+            .lines()
+            .find_map(|l| l.strip_prefix("@@OK "))
+            .map(|s| s.trim().to_string())
+            .filter(|s| s != "fail2ban" && s != "unattended");
+        Ok(FixOutcome { ok, output: text.replace("@@OK", "OK").replace("@@FAILED", "ÉCHEC"), rollback })
+    })
+    .await
 }
 
 /// Annule une correction SSH ou pare-feu (appelé si la connexion de contrôle échoue).

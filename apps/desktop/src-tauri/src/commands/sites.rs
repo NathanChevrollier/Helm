@@ -217,12 +217,13 @@ pub async fn sites_create_app(
         conn.exec_sudo(&format!("mkdir -p {}", shell_quote(&dir)), pw.as_deref(), None).await.map_err(err)?.into_result().map_err(err)?;
         let compose = nginx::site_compose(&spec.name, &spec.image, spec.host_port, spec.container_port, &spec.env);
         conn.write_file_sudo(&file, &compose, pw.as_deref()).await.map_err(err)?;
-        let out = docker::run(
+        // Premier démarrage : le téléchargement de l'image peut être long.
+        let out = helm_core::ssh::long(docker::run(
             &conn,
             access,
             pw.as_deref(),
             &format!("compose -f {} -p {} up -d 2>&1", shell_quote(&file), shell_quote(&spec.name)),
-        )
+        ))
         .await
         .map_err(err)?;
         if !out.success() {

@@ -662,26 +662,32 @@ pub fn first_free(used: &[u16], start: u16) -> u16 {
 
 /// Obtient un certificat Let's Encrypt et active HTTPS (avec redirection) via le plugin nginx de certbot.
 pub async fn certbot(conn: &Connection, sudo: Option<&str>, domain: &str, email: &str) -> Result<String> {
-    if !valid_domain(domain) {
-        return Err(Error::Other(format!("domaine invalide : {domain}")));
-    }
-    let cmd = format!(
-        "command -v certbot >/dev/null || {{ echo 'certbot n'\\''est pas installé (apt install certbot python3-certbot-nginx)'; exit 1; }}; \
-         certbot --nginx -d {} --non-interactive --agree-tos -m {} --redirect 2>&1",
-        shell_quote(domain),
-        shell_quote(email)
-    );
-    let out = conn.exec_sudo(&cmd, sudo, None).await?;
-    if out.success() {
-        Ok(out.stdout)
-    } else {
-        Err(Error::Remote(format!("{}{}", out.stdout, out.stderr).trim().to_string()))
-    }
+    crate::ssh::long(async move {
+        if !valid_domain(domain) {
+            return Err(Error::Other(format!("domaine invalide : {domain}")));
+        }
+        let cmd = format!(
+            "command -v certbot >/dev/null || {{ echo 'certbot n'\\''est pas installé (apt install certbot python3-certbot-nginx)'; exit 1; }}; \
+             certbot --nginx -d {} --non-interactive --agree-tos -m {} --redirect 2>&1",
+            shell_quote(domain),
+            shell_quote(email)
+        );
+        let out = conn.exec_sudo(&cmd, sudo, None).await?;
+        if out.success() {
+            Ok(out.stdout)
+        } else {
+            Err(Error::Remote(format!("{}{}", out.stdout, out.stderr).trim().to_string()))
+        }
+    })
+    .await
 }
 
 pub async fn renew_certificates(conn: &Connection, sudo: Option<&str>) -> Result<String> {
-    let out = conn.exec_sudo("certbot renew --no-random-sleep-on-renew 2>&1", sudo, None).await?;
-    Ok(format!("{}{}", out.stdout, out.stderr))
+    crate::ssh::long(async move {
+        let out = conn.exec_sudo("certbot renew --no-random-sleep-on-renew 2>&1", sudo, None).await?;
+        Ok(format!("{}{}", out.stdout, out.stderr))
+    })
+    .await
 }
 
 #[cfg(test)]

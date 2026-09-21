@@ -29,6 +29,26 @@ pub enum Auth {
     },
 }
 
+/// Délai maximal par défaut d'une commande distante.
+pub const DEFAULT_EXEC_LIMIT: Duration = Duration::from_secs(120);
+/// Délai des opérations longues : installations, mises à jour, sauvegardes, pull d'images, certbot.
+pub const LONG_EXEC_LIMIT: Duration = Duration::from_secs(30 * 60);
+const AUTH_LIMIT: Duration = Duration::from_secs(60);
+
+tokio::task_local! {
+    static EXEC_LIMIT: Duration;
+}
+
+/// Exécute `f` en autorisant ses commandes distantes à durer jusqu'à [`LONG_EXEC_LIMIT`].
+pub async fn long<F: std::future::Future>(f: F) -> F::Output {
+    with_limit(LONG_EXEC_LIMIT, f).await
+}
+
+/// Exécute `f` avec un délai maximal choisi pour chacune de ses commandes distantes.
+pub async fn with_limit<F: std::future::Future>(limit: Duration, f: F) -> F::Output {
+    EXEC_LIMIT.scope(limit, f).await
+}
+
 /// Paramètres d'une connexion.
 #[derive(Debug, Clone)]
 pub struct ConnectParams {
@@ -126,7 +146,10 @@ impl Connection {
         };
         let fingerprint = seen_fp.unwrap_or_default();
 
-        authenticate(&mut handle, &params.username, &params.auth).await?;
+        // Large, car un agent (1Password, Pageant avec confirmation) peut attendre une validation.
+        tokio::time::timeout(AUTH_LIMIT, authenticate(&mut handle, &params.username, &params.auth))
+            .await
+            .map_err(|_| Error::Connection(format!("délai dépassé pendant l'authentification sur {}:{}", params.host, params.port)))??;
         Ok(Self { handle: Arc::new(handle), fingerprint })
     }
 
@@ -144,30 +167,42 @@ impl Connection {
     }
 
     /// Exécute une commande et attend sa fin. `stdin` est envoyé puis fermé s'il est fourni.
+    /// Au-delà du délai maximal (voir [`long`]), le canal est fermé et une erreur est renvoyée :
+    /// une commande bloquée (`df` sur un montage mort, dockerd figé…) ne fige pas l'interface.
     pub async fn exec(&self, command: &str, stdin: Option<&[u8]>) -> Result<ExecOutput> {
+        let limit = EXEC_LIMIT.try_with(|l| *l).unwrap_or(DEFAULT_EXEC_LIMIT);
         let mut channel = self.handle.channel_open_session().await?;
         channel.exec(true, with_admin_path(command)).await?;
-        if let Some(input) = stdin {
-            channel.data(input).await?;
-        }
-        channel.eof().await?;
 
-        let (mut stdout, mut stderr, mut exit_code) = (Vec::new(), Vec::new(), None);
-        while let Some(msg) = channel.wait().await {
-            match msg {
-                ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
-                ChannelMsg::ExtendedData { data, ext: 1 } => stderr.extend_from_slice(&data),
-                ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
-                ChannelMsg::ExitSignal { .. } => exit_code = exit_code.or(Some(255)),
-                ChannelMsg::Close => break,
-                _ => {}
+        let run = async {
+            if let Some(input) = stdin {
+                channel.data(input).await?;
+            }
+            channel.eof().await?;
+            let (mut stdout, mut stderr, mut exit_code) = (Vec::new(), Vec::new(), None);
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                    ChannelMsg::ExtendedData { data, ext: 1 } => stderr.extend_from_slice(&data),
+                    ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
+                    ChannelMsg::ExitSignal { .. } => exit_code = exit_code.or(Some(255)),
+                    ChannelMsg::Close => break,
+                    _ => {}
+                }
+            }
+            Ok::<_, Error>(ExecOutput {
+                stdout: String::from_utf8_lossy(&stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                exit_code: exit_code.unwrap_or(0),
+            })
+        };
+        match tokio::time::timeout(limit, run).await {
+            Ok(out) => out,
+            Err(_) => {
+                let _ = channel.close().await;
+                Err(Error::Remote(format!("la commande ne répond plus après {} s, abandonnée", limit.as_secs())))
             }
         }
-        Ok(ExecOutput {
-            stdout: String::from_utf8_lossy(&stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-            exit_code: exit_code.unwrap_or(0),
-        })
     }
 
     /// Exécute une commande, en échouant si son code de sortie est non nul.

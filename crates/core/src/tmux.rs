@@ -75,12 +75,15 @@ pub async fn kill(conn: &Connection, name: &str) -> Result<()> {
 
 /// Installe tmux avec le gestionnaire de paquets du serveur.
 pub async fn install(conn: &Connection, sudo: Option<&str>) -> Result<String> {
-    let script = "if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y tmux; \
-                  elif command -v dnf >/dev/null; then dnf install -y tmux; \
-                  elif command -v yum >/dev/null; then yum install -y tmux; \
-                  elif command -v apk >/dev/null; then apk add tmux; \
-                  else echo 'gestionnaire de paquets non reconnu' >&2; exit 1; fi";
-    Ok(conn.exec_sudo(script, sudo, None).await?.into_result()?.stdout)
+    crate::ssh::long(async move {
+        let script = "if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y tmux; \
+                      elif command -v dnf >/dev/null; then dnf install -y tmux; \
+                      elif command -v yum >/dev/null; then yum install -y tmux; \
+                      elif command -v apk >/dev/null; then apk add tmux; \
+                      else echo 'gestionnaire de paquets non reconnu' >&2; exit 1; fi";
+        Ok(conn.exec_sudo(script, sudo, None).await?.into_result()?.stdout)
+    })
+    .await
 }
 
 #[cfg(test)]

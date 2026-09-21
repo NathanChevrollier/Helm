@@ -280,21 +280,24 @@ pub async fn compose_action(
     project: &ComposeProject,
     action: &str,
 ) -> Result<String> {
-    let sub = match action {
-        "up" => "up -d --remove-orphans",
-        "pull" => "pull",
-        "update" => "pull",
-        "restart" => "restart",
-        "stop" => "stop",
-        "down" => "down",
-        _ => return Err(Error::Other(format!("action inconnue : {action}"))),
-    };
-    let base = compose_args(project)?;
-    let mut out = run(conn, access, sudo, &format!("{base} {sub} 2>&1")).await?.into_result()?.stdout;
-    if action == "update" {
-        out.push_str(&run(conn, access, sudo, &format!("{base} up -d --remove-orphans 2>&1")).await?.into_result()?.stdout);
-    }
-    Ok(out)
+    crate::ssh::long(async move {
+        let sub = match action {
+            "up" => "up -d --remove-orphans",
+            "pull" => "pull",
+            "update" => "pull",
+            "restart" => "restart",
+            "stop" => "stop",
+            "down" => "down",
+            _ => return Err(Error::Other(format!("action inconnue : {action}"))),
+        };
+        let base = compose_args(project)?;
+        let mut out = run(conn, access, sudo, &format!("{base} {sub} 2>&1")).await?.into_result()?.stdout;
+        if action == "update" {
+            out.push_str(&run(conn, access, sudo, &format!("{base} up -d --remove-orphans 2>&1")).await?.into_result()?.stdout);
+        }
+        Ok(out)
+    })
+    .await
 }
 
 // ---------- Images, volumes, nettoyage ----------
@@ -348,15 +351,18 @@ pub async fn disk_usage(conn: &Connection, access: Access, sudo: Option<&str>) -
 
 /// Nettoyage ciblé. `images` ne supprime que les images inutilisées ET sans tag (sûr).
 pub async fn prune(conn: &Connection, access: Access, sudo: Option<&str>, what: &str) -> Result<String> {
-    let args = match what {
-        "containers" => "container prune -f",
-        "images" => "image prune -f",
-        "images-all" => "image prune -a -f",
-        "build-cache" => "builder prune -f",
-        "networks" => "network prune -f",
-        _ => return Err(Error::Other(format!("nettoyage inconnu : {what}"))),
-    };
-    run_ok(conn, access, sudo, args).await
+    crate::ssh::long(async move {
+        let args = match what {
+            "containers" => "container prune -f",
+            "images" => "image prune -f",
+            "images-all" => "image prune -a -f",
+            "build-cache" => "builder prune -f",
+            "networks" => "network prune -f",
+            _ => return Err(Error::Other(format!("nettoyage inconnu : {what}"))),
+        };
+        run_ok(conn, access, sudo, args).await
+    })
+    .await
 }
 
 // ---------- Refermer un port exposé ----------
