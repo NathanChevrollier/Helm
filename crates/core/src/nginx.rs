@@ -266,7 +266,9 @@ pub struct NginxState {
     pub certbot: bool,
 }
 
-const DISCOVER_SCRIPT: &str = r#"command -v nginx >/dev/null 2>&1 || { echo @@NONGINX; exit 0; }
+// Exécuté sans sudo : sur Debian, nginx est dans /usr/sbin, absent du PATH des utilisateurs normaux.
+const DISCOVER_SCRIPT: &str = r#"PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
+command -v nginx >/dev/null 2>&1 || { echo @@NONGINX; exit 0; }
 echo "@@VERSION $(nginx -v 2>&1)"
 if pgrep -x nginx >/dev/null 2>&1; then echo @@RUNNING; fi
 command -v certbot >/dev/null 2>&1 && echo @@CERTBOT
