@@ -31,7 +31,10 @@ pub enum TermEvent {
 pub struct Sessions {
     connections: Mutex<HashMap<String, Connection>>,
     sftp: Mutex<HashMap<String, (Connection, Arc<SftpSession>)>>,
-    terminals: Mutex<HashMap<u64, ChannelWriteHalf<Msg>>>,
+    terminals: Arc<Mutex<HashMap<u64, Arc<ChannelWriteHalf<Msg>>>>>,
+    /// Un verrou par serveur pendant l'établissement de la connexion : un serveur lent ou
+    /// injoignable ne bloque pas les autres, et deux demandes simultanées partagent une tentative.
+    connecting: std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>,
     next_term: AtomicU64,
     /// Noms d'utilisateurs et de groupes par serveur (uid/gid → nom), pour l'explorateur.
     id_names: Mutex<HashMap<String, Arc<IdNames>>>,
@@ -51,7 +54,8 @@ impl Sessions {
         Self {
             connections: Mutex::new(HashMap::new()),
             sftp: Mutex::new(HashMap::new()),
-            terminals: Mutex::new(HashMap::new()),
+            terminals: Arc::new(Mutex::new(HashMap::new())),
+            connecting: std::sync::Mutex::new(HashMap::new()),
             next_term: AtomicU64::new(1),
             id_names: Mutex::new(HashMap::new()),
             auth_blocked: std::sync::Mutex::new(HashMap::new()),
@@ -99,11 +103,14 @@ impl Sessions {
 
     /// Renvoie la connexion du serveur, en la (re)créant si elle n'existe pas ou a été coupée.
     pub async fn get(&self, store: &Store, server_id: &str) -> Result<Connection, String> {
-        let mut conns = self.connections.lock().await;
-        if let Some(c) = conns.get(server_id) {
-            if !c.is_closed() {
-                return Ok(c.clone());
-            }
+        if let Some(c) = self.live(server_id).await {
+            return Ok(c);
+        }
+        let gate = self.connecting.lock().unwrap().entry(server_id.to_string()).or_default().clone();
+        let _guard = gate.lock().await;
+        // Une autre demande a peut-être connecté le serveur pendant l'attente.
+        if let Some(c) = self.live(server_id).await {
+            return Ok(c);
         }
         if let Some(reason) = self.auth_blocked.lock().unwrap().get(server_id) {
             return Err(format!("AUTH_BLOCKED: {reason} — reconnexion automatique suspendue, clique « Connecter » pour réessayer"));
@@ -117,8 +124,14 @@ impl Sessions {
             }
             Err(e) => return Err(e.to_string()),
         };
-        conns.insert(server_id.to_string(), conn.clone());
+        // Nouvelle connexion : les noms d'utilisateurs ont pu changer depuis la précédente.
+        self.id_names.lock().await.remove(server_id);
+        self.connections.lock().await.insert(server_id.to_string(), conn.clone());
         Ok(conn)
+    }
+
+    async fn live(&self, server_id: &str) -> Option<Connection> {
+        self.connections.lock().await.get(server_id).filter(|c| !c.is_closed()).cloned()
     }
 
     /// Autorise de nouveau les tentatives (action explicite de l'utilisateur, ou profil modifié).
@@ -154,8 +167,9 @@ impl Sessions {
 
         let id = self.next_term.fetch_add(1, Ordering::Relaxed);
         let (mut reader, writer) = channel.split();
-        self.terminals.lock().await.insert(id, writer);
+        self.terminals.lock().await.insert(id, Arc::new(writer));
 
+        let terminals = self.terminals.clone();
         tauri::async_runtime::spawn(async move {
             let b64 = base64::engine::general_purpose::STANDARD;
             let mut code = None;
@@ -172,20 +186,23 @@ impl Sessions {
                 }
             }
             let _ = events.send(TermEvent::Exit { code });
+            terminals.lock().await.remove(&id);
         });
         Ok(id)
     }
 
+    /// Le verrou n'est tenu que le temps de copier la référence : un terminal saturé
+    /// (sortie énorme, réseau lent) ne bloque pas la saisie dans les autres.
+    async fn writer(&self, id: u64) -> Result<Arc<ChannelWriteHalf<Msg>>, String> {
+        self.terminals.lock().await.get(&id).cloned().ok_or_else(|| "terminal fermé".to_string())
+    }
+
     pub async fn write_terminal(&self, id: u64, data: &[u8]) -> Result<(), String> {
-        let terms = self.terminals.lock().await;
-        let writer = terms.get(&id).ok_or("terminal fermé")?;
-        writer.data(data).await.map_err(|e| e.to_string())
+        self.writer(id).await?.data(data).await.map_err(|e| e.to_string())
     }
 
     pub async fn resize_terminal(&self, id: u64, cols: u32, rows: u32) -> Result<(), String> {
-        let terms = self.terminals.lock().await;
-        let writer = terms.get(&id).ok_or("terminal fermé")?;
-        writer.window_change(cols, rows, 0, 0).await.map_err(|e| e.to_string())
+        self.writer(id).await?.window_change(cols, rows, 0, 0).await.map_err(|e| e.to_string())
     }
 
     pub async fn close_terminal(&self, id: u64) {
