@@ -18,14 +18,22 @@ pub enum Access {
     Unavailable,
 }
 
-/// Détermine le mode d'accès : direct, sinon via sudo, sinon indisponible.
+/// Podman (Rocky, Alma, Fedora) a une ligne de commande compatible avec Docker : si Docker est
+/// absent, `docker` devient un alias de `podman` le temps de la commande.
+pub const PODMAN_SHIM: &str = "command -v docker >/dev/null 2>&1 || docker() { podman \"$@\"; }; ";
+
+const VERSION_COMMAND: &str =
+    "if command -v docker >/dev/null 2>&1; then docker version --format '{{.Server.Version}}'; else podman version --format 'podman {{.Client.Version}}'; fi";
+
+/// Détermine le mode d'accès : direct, sinon via sudo, sinon indisponible. La version renvoyée
+/// commence par « podman » quand c'est Podman qui répond.
 pub async fn access(conn: &Connection, sudo: Option<&str>) -> Result<(Access, String)> {
-    let direct = conn.exec("docker version --format '{{.Server.Version}}'", None).await?;
+    let direct = conn.exec(VERSION_COMMAND, None).await?;
     if direct.success() {
         return Ok((Access::Direct, direct.stdout.trim().to_string()));
     }
-    if conn.exec("command -v docker", None).await?.success() {
-        let via_sudo = conn.exec_sudo("docker version --format '{{.Server.Version}}'", sudo, None).await?;
+    if conn.exec("command -v docker || command -v podman", None).await?.success() {
+        let via_sudo = conn.exec_sudo(VERSION_COMMAND, sudo, None).await?;
         if via_sudo.success() {
             return Ok((Access::Sudo, via_sudo.stdout.trim().to_string()));
         }
@@ -35,7 +43,7 @@ pub async fn access(conn: &Connection, sudo: Option<&str>) -> Result<(Access, St
 
 /// Exécute une commande docker selon le mode d'accès.
 pub async fn run(conn: &Connection, access: Access, sudo: Option<&str>, args: &str) -> Result<ExecOutput> {
-    let cmd = format!("docker {args}");
+    let cmd = format!("{PODMAN_SHIM}docker {args}");
     match access {
         Access::Direct => conn.exec(&cmd, None).await,
         Access::Sudo => conn.exec_sudo(&cmd, sudo, None).await,
@@ -270,7 +278,7 @@ fn compose_args(project: &ComposeProject) -> Result<String> {
 
 /// Commande shell complète pour un projet compose (utilisée aussi pour les terminaux de logs).
 pub fn compose_command(project: &ComposeProject, sub: &str) -> Result<String> {
-    Ok(format!("docker {} {sub}", compose_args(project)?))
+    Ok(format!("{PODMAN_SHIM}docker {} {sub}", compose_args(project)?))
 }
 
 pub async fn compose_action(
@@ -437,10 +445,9 @@ mod tests {
     #[test]
     fn compose_args_quote_paths() {
         let p = ComposeProject { name: "web".into(), status: "running(1)".into(), config_files: "/opt/web/docker-compose.yml".into() };
-        assert_eq!(
-            compose_command(&p, "logs -f").unwrap(),
-            "docker compose --project-directory '/opt/web' -p 'web' -f '/opt/web/docker-compose.yml' logs -f"
-        );
+        assert!(compose_command(&p, "logs -f")
+            .unwrap()
+            .ends_with("docker compose --project-directory '/opt/web' -p 'web' -f '/opt/web/docker-compose.yml' logs -f"));
     }
 
     #[test]

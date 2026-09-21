@@ -117,9 +117,10 @@ pub async fn logs_start(
     let mut stream = Stream { tasks: vec![], writers: vec![] };
     for (idx, src) in sources.iter().enumerate() {
         let (command, root) = match src.kind.as_str() {
-            "docker" if safe_name(&src.name) => {
-                (format!("docker logs -f -t --tail {tail} {} 2>&1", shell_quote(&src.name)), docker_access == Access::Sudo)
-            }
+            "docker" if safe_name(&src.name) => (
+                format!("{}docker logs -f -t --tail {tail} {} 2>&1", docker::PODMAN_SHIM, shell_quote(&src.name)),
+                docker_access == Access::Sudo,
+            ),
             "unit" if safe_name(&src.name) => {
                 (format!("journalctl -f -n {tail} -o short-iso --no-pager -u {}", shell_quote(&src.name)), true)
             }

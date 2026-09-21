@@ -324,6 +324,8 @@ export interface ComposeProject {
 export interface DockerOverview {
   access: DockerAccess;
   version: string;
+  /** « docker » ou « podman ». */
+  engine: string;
   containers: Container[];
   projects: ComposeProject[];
 }

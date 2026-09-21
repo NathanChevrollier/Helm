@@ -50,6 +50,8 @@ async fn ctx(store: &Store, sessions: &Sessions, cache: &DockerAccess, server_id
 pub struct Overview {
     access: Access,
     version: String,
+    /// `docker` ou `podman` : commande à utiliser dans les terminaux ouverts par l'interface.
+    engine: String,
     containers: Vec<Container>,
     projects: Vec<ComposeProject>,
 }
@@ -64,13 +66,14 @@ pub async fn docker_overview(
     let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
     let (access, version) = docker::access(&conn, sudo.as_deref()).await.map_err(err)?;
     cache.0.lock().await.insert(server_id.clone(), access);
+    let engine = if version.starts_with("podman") { "podman" } else { "docker" }.to_string();
     if access == Access::Unavailable {
-        return Ok(Overview { access, version, containers: vec![], projects: vec![] });
+        return Ok(Overview { access, version, engine, containers: vec![], projects: vec![] });
     }
     let s = sudo.as_deref();
     let (containers, projects) =
         tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?;
-    Ok(Overview { access, version, containers, projects })
+    Ok(Overview { access, version, engine, containers, projects })
 }
 
 #[tauri::command]

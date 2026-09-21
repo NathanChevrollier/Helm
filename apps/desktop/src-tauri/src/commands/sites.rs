@@ -346,7 +346,8 @@ pub async fn domains_check(
     domains: Vec<String>,
 ) -> Result<Vec<helm_core::domains::DomainInfo>, String> {
     let host = store.server(&server_id)?.host;
-    let mut ips: Vec<std::net::IpAddr> = tokio::net::lookup_host((host.as_str(), 22)).await.map(|a| a.map(|a| a.ip()).collect()).unwrap_or_default();
+    let mut ips: Vec<std::net::IpAddr> =
+        tokio::net::lookup_host((host.as_str(), 22)).await.map(|a| a.map(|a| a.ip()).collect()).unwrap_or_default();
     // Adresse publique vue depuis le serveur (utile si le profil utilise un nom ou une IP privée).
     if let Ok(conn) = sessions.get(&store, &server_id).await {
         if let Ok(o) = conn.exec("curl -s -4 --max-time 5 https://api.ipify.org || wget -qO- -T 5 https://api.ipify.org", None).await {

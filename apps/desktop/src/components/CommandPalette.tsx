@@ -90,7 +90,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     }
     if (server) {
       const sid = server.id;
-      const dk = docker?.access === "sudo" ? "sudo docker" : "docker";
+      const dk = `${docker?.access === "sudo" ? "sudo " : ""}${docker?.engine ?? "docker"}`;
       list.push({
         id: "nginx:test",
         label: "Tester la configuration nginx",

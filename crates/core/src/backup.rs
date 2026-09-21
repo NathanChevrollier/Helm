@@ -143,6 +143,7 @@ pub fn run_script(cfg: &BackupConfig) -> String {
         r#"#!/bin/bash
 # Généré par Helm : ne pas modifier à la main (régénéré à chaque enregistrement).
 set -uo pipefail
+command -v docker >/dev/null 2>&1 || docker() { podman "$@"; }
 set -a; . /etc/helm-backup/env; set +a
 STATE=/var/lib/helm-backup; STAGE=$STATE/stage
 mkdir -p "$STATE"; chmod 755 "$STATE"
@@ -404,7 +405,7 @@ pub async fn import_dump(conn: &Connection, sudo: Option<&str>, dump: &str, db: 
             "postgres" => format!("docker exec -i {c} sh -c 'exec psql -U \"${{POSTGRES_USER:-postgres}}\" -d postgres' < {}", shell_quote(dump)),
             _ => return Err(Error::Other("type de base inconnu".into())),
         };
-        Ok(conn.exec_sudo(&format!("{cmd} 2>&1"), sudo, None).await?.into_result()?.stdout)
+        Ok(conn.exec_sudo(&format!("{}{cmd} 2>&1", crate::docker::PODMAN_SHIM), sudo, None).await?.into_result()?.stdout)
     })
     .await
 }

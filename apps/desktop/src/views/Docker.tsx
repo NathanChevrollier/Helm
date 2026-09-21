@@ -70,7 +70,7 @@ function Docker({ serverId }: { serverId: string }) {
   }
 
   // En mode sudo, les commandes lancées dans un terminal passent aussi par sudo (le mot de passe y sera demandé).
-  const docker = data.access === "sudo" ? "sudo docker" : "docker";
+  const docker = `${data.access === "sudo" ? "sudo " : ""}${data.engine}`;
   const running = data.containers.filter((c) => c.state === "running").length;
 
   return (
