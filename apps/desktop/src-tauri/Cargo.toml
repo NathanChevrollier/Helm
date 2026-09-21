@@ -29,6 +29,7 @@ helm-protocol.workspace = true
 tauri-plugin-single-instance = "2"
 tauri-plugin-log = "2"
 log = "0.4"
+tauri-plugin-notification = "2"
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

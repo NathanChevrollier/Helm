@@ -8,6 +8,7 @@ import CommandPalette from "./components/CommandPalette";
 import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
 import { useLock, watchInactivity } from "./lib/lock";
+import { watchAlerts } from "./lib/alerts";
 import HomeView from "./views/Home";
 import TerminalView from "./views/Terminal";
 
@@ -48,6 +49,7 @@ export default function App() {
     void useLock.getState().refresh();
     return watchInactivity(() => useApp.getState().settings.lockMinutes);
   }, []);
+  useEffect(() => watchAlerts(), []);
 
   // Ctrl+K : palette de commandes.
   useEffect(() => {

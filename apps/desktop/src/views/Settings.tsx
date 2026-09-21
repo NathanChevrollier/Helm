@@ -201,6 +201,15 @@ function Preferences() {
           </span>
         </span>
       </label>
+      <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
+        <input type="checkbox" className="mt-1" checked={settings.alertNotifications} onChange={(e) => setSettings({ alertNotifications: e.target.checked })} />
+        <span>
+          <span className="font-medium">Notifications Windows pour les alertes</span>
+          <span className="block text-sm text-muted">
+            Tant que Helm est ouvert, une notification apparaît dès qu'une alerte se déclenche sur un serveur connecté (CPU, mémoire, disque, site injoignable…). Helm fermé, c'est l'agent qui prévient (Discord, ntfy, webhook).
+          </span>
+        </span>
+      </label>
       <AppLock />
       <ExportImport />
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">

@@ -48,6 +48,8 @@ export interface Settings {
   lockMinutes: number;
   /** Taille de police des terminaux (Ctrl+= / Ctrl+- / Ctrl+0). */
   terminalFontSize: number;
+  /** Notifications Windows pour les nouvelles alertes, tant que Helm est ouvert. */
+  alertNotifications: boolean;
 }
 
 /** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
@@ -185,7 +187,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14 },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],
