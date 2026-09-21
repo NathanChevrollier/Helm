@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use helm_core::fail2ban;
 use helm_core::security::{self, FixOutcome, FixPlan, Report};
 use helm_core::Connection;
+use helm_core::{access, fail2ban, firewall};
 use helm_profiles::AuthKind;
 use tauri::State;
 
@@ -147,4 +147,101 @@ pub async fn f2b_set_ignore(
 #[tauri::command]
 pub async fn my_public_ip() -> Option<String> {
     helm_core::diagnose::public_ip().await
+}
+
+// ---------- Pare-feu ----------
+
+#[tauri::command]
+pub async fn fw_state(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<firewall::State, String> {
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    firewall::state(&conn, sudo.as_deref()).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn fw_allow(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    port: u16,
+    proto: String,
+) -> Result<String, String> {
+    let detail = format!("{port}/{proto}");
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        firewall::allow(&conn, sudo.as_deref(), port, &proto).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "firewall.allow", &detail, r)
+}
+
+#[tauri::command]
+pub async fn fw_delete(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    num: u32,
+) -> Result<String, String> {
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        firewall::delete(&conn, sudo.as_deref(), num).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "firewall.delete", &num.to_string(), r)
+}
+
+// ---------- Accès (comptes et clés SSH) ----------
+
+/// Empreinte de la clé avec laquelle Helm se connecte à ce serveur, si elle est connue.
+fn current_key(store: &Store, server_id: &str) -> Option<String> {
+    let p = store.server(server_id).ok()?;
+    if p.auth_kind == AuthKind::Password {
+        return None;
+    }
+    let path = p.key_path.filter(|k| !k.is_empty())?;
+    helm_core::ssh::public_key_from_file(&helm_core::ssh::expand_home(&path))
+        .map(|k| k.fingerprint(helm_core::russh::keys::HashAlg::Sha256).to_string())
+}
+
+#[tauri::command]
+pub async fn access_users(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<access::User>, String> {
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    access::users(&conn, sudo.as_deref(), current_key(&store, &server_id).as_deref()).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn access_add_key(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    user: String,
+    key: String,
+) -> Result<(), String> {
+    let detail = format!("{user} {}", key.split_whitespace().nth(2).unwrap_or(""));
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        access::add_key(&conn, sudo.as_deref(), &user, &key).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "ssh.key.add", &detail, r)
+}
+
+#[tauri::command]
+pub async fn access_remove_key(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    user: String,
+    line: String,
+) -> Result<(), String> {
+    let detail = format!("{user} {}", line.split_whitespace().last().unwrap_or(""));
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        access::remove_key(&conn, sudo.as_deref(), &user, &line, current_key(&store, &server_id).as_deref()).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "ssh.key.remove", &detail, r)
 }

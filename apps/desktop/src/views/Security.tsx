@@ -4,6 +4,8 @@ import { api, errorMessage, type Finding, type FixPlan, type SecurityReport, typ
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import Fail2ban from "./security/Fail2ban";
+import Firewall from "./security/Firewall";
+import Access from "./security/Access";
 
 const LABEL: Record<Severity, string> = { critical: "critique", high: "élevé", medium: "moyen", low: "faible", ok: "OK" };
 const TONE: Record<Severity, "danger" | "warn" | "accent" | "muted" | "ok"> = { critical: "danger", high: "danger", medium: "warn", low: "muted", ok: "ok" };
@@ -24,6 +26,8 @@ export default function SecurityView() {
 const TABS = [
   { id: "audit", label: "Audit" },
   { id: "f2b", label: "fail2ban" },
+  { id: "firewall", label: "Pare-feu" },
+  { id: "access", label: "Accès" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -88,9 +92,11 @@ function Security({ serverId }: { serverId: string }) {
           )}
         </nav>
       </header>
-      {tab === "f2b" && (
+      {tab !== "audit" && (
         <div className="min-h-0 flex-1 overflow-auto p-6">
-          <Fail2ban serverId={serverId} />
+          {tab === "f2b" && <Fail2ban serverId={serverId} />}
+          {tab === "firewall" && <Firewall serverId={serverId} />}
+          {tab === "access" && <Access serverId={serverId} />}
         </div>
       )}
       <div className={`min-h-0 flex-1 overflow-auto p-6 ${tab === "audit" ? "" : "hidden"}`}>

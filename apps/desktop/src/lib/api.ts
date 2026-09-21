@@ -79,6 +79,55 @@ export interface F2bState {
   jails: F2bJail[];
 }
 
+export interface FwRule {
+  num: number;
+  to: string;
+  action: string;
+  from: string;
+  v6: boolean;
+}
+
+export interface FwExposure {
+  port: number;
+  proto: string;
+  address: string;
+  owner: string;
+  public: boolean;
+  docker: boolean;
+  status: "open" | "blocked" | "local";
+  note: string;
+}
+
+export interface FwState {
+  kind: "ufw" | "firewalld" | "none";
+  active: boolean;
+  defaults: string | null;
+  rules: FwRule[];
+  raw: string | null;
+  exposures: FwExposure[];
+  sshPorts: number[];
+}
+
+export interface AuthorizedKey {
+  line: string;
+  algorithm: string;
+  fingerprint: string;
+  comment: string;
+  options: string;
+  current: boolean;
+}
+
+export interface ServerUser {
+  name: string;
+  uid: number;
+  home: string;
+  shell: string;
+  groups: string[];
+  admin: boolean;
+  lastLogin: string;
+  keys: AuthorizedKey[];
+}
+
 export interface DiagnosisCheck {
   label: string;
   ok: boolean;
@@ -490,6 +539,12 @@ export const api = {
   f2bUnban: (serverId: string, jail: string, ip: string) => invoke<void>("f2b_unban", { serverId, jail, ip }),
   f2bSetIgnore: (serverId: string, addresses: string[]) => invoke<string>("f2b_set_ignore", { serverId, addresses }),
   myPublicIp: () => invoke<string | null>("my_public_ip"),
+  fwState: (serverId: string) => invoke<FwState>("fw_state", { serverId }),
+  fwAllow: (serverId: string, port: number, proto: string) => invoke<string>("fw_allow", { serverId, port, proto }),
+  fwDelete: (serverId: string, num: number) => invoke<string>("fw_delete", { serverId, num }),
+  accessUsers: (serverId: string) => invoke<ServerUser[]>("access_users", { serverId }),
+  accessAddKey: (serverId: string, user: string, key: string) => invoke<void>("access_add_key", { serverId, user, key }),
+  accessRemoveKey: (serverId: string, user: string, line: string) => invoke<void>("access_remove_key", { serverId, user, line }),
   diagnose: (id: string) => invoke<Diagnosis>("ssh_diagnose", { id }),
   settingsExport: (path: string, password: string, includeSecrets: boolean) => invoke<void>("settings_export", { path, password, includeSecrets }),
   settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),
