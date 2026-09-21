@@ -211,6 +211,17 @@ pub struct Notifiers {
     pub webhook_url: Option<String>,
 }
 
+/// Valeur affichée à la place d'une URL de notification pour un client non root.
+pub const REDACTED: &str = "(masqué)";
+
+impl Notifiers {
+    /// Copie sans les URL (ce sont des secrets : qui les connaît peut envoyer des messages).
+    pub fn redacted(&self) -> Self {
+        let hide = |v: &Option<String>| v.as_ref().filter(|s| !s.trim().is_empty()).map(|_| REDACTED.to_string());
+        Self { discord_webhook: hide(&self.discord_webhook), ntfy_url: hide(&self.ntfy_url), webhook_url: hide(&self.webhook_url) }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfig {

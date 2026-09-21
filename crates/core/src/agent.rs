@@ -110,12 +110,38 @@ async fn query(conn: &Connection, req: &Request) -> Result<Response> {
     serde_json::from_str(out.stdout.trim()).map_err(|e| Error::Other(format!("réponse de l'agent illisible : {e}")))
 }
 
+/// Requête en root : seule façon d'obtenir les URL de notification et l'envoi de test.
+async fn query_root(conn: &Connection, req: &Request, sudo: Option<&str>) -> Result<Response> {
+    let out = conn.exec_sudo(&format!("PATH=$PATH:/usr/local/bin; {}", query_command(req)), sudo, None).await?;
+    if !out.success() {
+        return Err(Error::Remote(out.stderr.trim().to_string()));
+    }
+    serde_json::from_str(out.stdout.trim()).map_err(|e| Error::Other(format!("réponse de l'agent illisible : {e}")))
+}
+
+/// État de l'agent, URL de notification masquées (lecture sans privilège).
 pub async fn info(conn: &Connection) -> Result<AgentInfo> {
+    info_with(conn, None).await
+}
+
+/// État complet de l'agent, configuration comprise, lu en root. Repli sur [`info`] sans sudo.
+pub async fn info_privileged(conn: &Connection, sudo: Option<&str>) -> Result<AgentInfo> {
+    match info_with(conn, Some(sudo)).await {
+        Ok(i) if i.status.is_some() => Ok(i),
+        _ => info(conn).await,
+    }
+}
+
+async fn info_with(conn: &Connection, root: Option<Option<&str>>) -> Result<AgentInfo> {
     let installed = conn.exec("test -x /usr/local/bin/helmd", None).await?.success();
     if !installed {
         return Ok(AgentInfo { installed, running: false, status: None, error: None });
     }
-    Ok(match query(conn, &Request::Status).await {
+    let answer = match root {
+        Some(sudo) => query_root(conn, &Request::Status, sudo).await,
+        None => query(conn, &Request::Status).await,
+    };
+    Ok(match answer {
         Ok(Response::Status(s)) => AgentInfo { installed, running: true, status: Some(*s), error: None },
         Ok(other) => AgentInfo { installed, running: true, status: None, error: Some(format!("réponse inattendue : {other:?}")) },
         Err(e) => AgentInfo { installed, running: false, status: None, error: Some(e.to_string()) },
@@ -130,8 +156,8 @@ pub async fn history(conn: &Connection, range_secs: u64, points: usize) -> Resul
     }
 }
 
-pub async fn test_notify(conn: &Connection) -> Result<String> {
-    match query(conn, &Request::TestNotify).await? {
+pub async fn test_notify(conn: &Connection, sudo: Option<&str>) -> Result<String> {
+    match query_root(conn, &Request::TestNotify, sudo).await? {
         Response::Ok { message } => Ok(message),
         Response::Error { message } => Err(Error::Remote(message)),
         other => Err(Error::Other(format!("réponse inattendue : {other:?}"))),
@@ -140,7 +166,21 @@ pub async fn test_notify(conn: &Connection) -> Result<String> {
 
 /// Écrit la configuration ; l'agent la recharge tout seul au relevé suivant.
 pub async fn save_config(conn: &Connection, cfg: &AgentConfig, sudo: Option<&str>) -> Result<()> {
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| Error::Other(e.to_string()))?;
+    // Une URL affichée masquée (lecture sans sudo) conserve sa valeur actuelle.
+    let mut cfg = cfg.clone();
+    let n = &mut cfg.notifiers;
+    if [&n.discord_webhook, &n.ntfy_url, &n.webhook_url].iter().any(|v| v.as_deref() == Some(helm_protocol::REDACTED)) {
+        let current: AgentConfig = serde_json::from_str(&conn.read_file_sudo(CONFIG_PATH, sudo).await?).unwrap_or_default();
+        let keep = |v: &mut Option<String>, old: &Option<String>| {
+            if v.as_deref() == Some(helm_protocol::REDACTED) {
+                v.clone_from(old);
+            }
+        };
+        keep(&mut n.discord_webhook, &current.notifiers.discord_webhook);
+        keep(&mut n.ntfy_url, &current.notifiers.ntfy_url);
+        keep(&mut n.webhook_url, &current.notifiers.webhook_url);
+    }
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| Error::Other(e.to_string()))?;
     conn.write_file_sudo(CONFIG_PATH, &json, sudo).await
 }
 

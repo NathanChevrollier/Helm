@@ -114,8 +114,8 @@ pub async fn mon_service_logs(
 
 #[tauri::command]
 pub async fn agent_info(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<AgentInfo, String> {
-    let conn = sessions.get(&store, &server_id).await?;
-    agent::info(&conn).await.map_err(err)
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    agent::info_privileged(&conn, sudo.as_deref()).await.map_err(err)
 }
 
 #[tauri::command]
@@ -196,6 +196,6 @@ pub async fn agent_save_config(
 
 #[tauri::command]
 pub async fn agent_test_notify(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<String, String> {
-    let conn = sessions.get(&store, &server_id).await?;
-    agent::test_notify(&conn).await.map_err(err)
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    agent::test_notify(&conn, sudo.as_deref()).await.map_err(err)
 }
