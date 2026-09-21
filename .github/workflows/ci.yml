@@ -30,6 +30,50 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Vulnérabilités connues dans les dépendances Rust et JavaScript.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
+
+  # Tests de bout en bout contre les deux faux VPS (Ubuntu root, Debian non-root avec fail2ban).
+  e2e:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Démarrage des faux VPS
+        run: docker compose -f testenv/docker-compose.yml up -d --build
+      - name: Attente de SSH
+        run: |
+          for port in 2222 2223; do
+            for i in $(seq 1 90); do
+              (echo > /dev/tcp/127.0.0.1/$port) 2>/dev/null && head -c 4 < /dev/tcp/127.0.0.1/$port | grep -q SSH && break
+              sleep 2
+            done
+          done
+          sleep 20
+      - run: cargo run -p helm-core --example smoke
+      - run: cargo run -p helm-core --example nginx_smoke
+      - run: cargo run -p helm-core --example debian_smoke
+      - name: Journaux des faux VPS en cas d'échec
+        if: failure()
+        run: |
+          docker logs helm-test-vps | tail -50
+          docker exec helm-test-debian tail -50 /var/log/auth.log
+
   # Agent helmd : binaires Linux statiques (x86_64 et arm64), embarqués ensuite dans l'app.
   agent:
     needs: check

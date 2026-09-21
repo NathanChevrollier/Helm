@@ -1,2 +1,6 @@
 packages:
   - "apps/*"
+
+# Correctifs de sécurité de dépendances indirectes (Monaco embarque DOMPurify).
+overrides:
+  dompurify: ">=3.4.13"

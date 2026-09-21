@@ -1,0 +1,8 @@
+# Avis ignorés par `cargo audit`, avec leur justification. À réexaminer à chaque mise à jour.
+[advisories]
+ignore = [
+    # rsa « Marvin » : attaque temporelle à distance contre un serveur qui DÉCHIFFRE en RSA.
+    # Helm n'utilise RSA que pour signer localement l'authentification SSH avec la clé de
+    # l'utilisateur ; aucun correctif n'existe en amont (dépendance de russh / ssh-key).
+    "RUSTSEC-2023-0071",
+]
