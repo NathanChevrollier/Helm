@@ -355,13 +355,13 @@ function ConfigForm({ serverId, data, onClose, onSaved }: { serverId: string; da
           <span className="text-xs font-medium text-muted">Destination</span>
           <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
             <button
-              className={`flex-1 rounded px-2 py-1 text-xs ${!s3 ? "bg-accent text-white" : "text-muted"}`}
+              className={`flex-1 rounded px-2 py-1 text-xs ${!s3 ? "bg-accent text-accent-fg" : "text-muted"}`}
               onClick={() => set("destination", { kind: "local", path: "/var/backups/helm/restic" })}
             >
               Dossier du serveur
             </button>
             <button
-              className={`flex-1 rounded px-2 py-1 text-xs ${s3 ? "bg-accent text-white" : "text-muted"}`}
+              className={`flex-1 rounded px-2 py-1 text-xs ${s3 ? "bg-accent text-accent-fg" : "text-muted"}`}
               onClick={() => set("destination", { kind: "s3", endpoint: "https://", bucket: "", prefix: "", accessKeyId: "" })}
             >
               Stockage S3 (hors du serveur)

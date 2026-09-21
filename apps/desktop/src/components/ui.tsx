@@ -5,7 +5,7 @@ import { useApp } from "../lib/store";
 type Variant = "primary" | "ghost" | "danger" | "outline";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-white hover:bg-accent/90",
+  primary: "bg-accent text-accent-fg hover:bg-accent/90",
   ghost: "text-muted hover:bg-hover hover:text-fg",
   danger: "bg-danger/15 text-danger hover:bg-danger/25",
   outline: "border border-border text-fg hover:bg-hover",

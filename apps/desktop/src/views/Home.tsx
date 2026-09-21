@@ -1,26 +1,38 @@
-import { useCallback, useRef, useState } from "react";
-import { AlertTriangle, Box, CheckCircle2, LayoutDashboard, Lock, OctagonAlert, Plug, RefreshCw, Server, Stethoscope } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { LayoutDashboard, RefreshCw, SquareTerminal } from "lucide-react";
 import { useDoctor } from "../components/ConnectionDoctor";
-import { api, formatBytes, formatDuration, type DashboardSummary, type ServerView } from "../lib/api";
+import { api, errorMessage, formatBytes, formatDuration, type AuditEntry, type DashboardSummary, type ServerView } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { usePolling } from "../lib/poll";
-import { Badge, Button, EmptyState, IconButton } from "../components/ui";
+import { Button, EmptyState, IconButton } from "../components/ui";
 
 const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
 const CERT_WARN_DAYS = 21;
+const DAY = 86_400;
 
 type Result = DashboardSummary | "loading";
 
+/** Point qui demande une action, affiché dans la colonne « À traiter ». */
+interface Todo {
+  key: string;
+  tone: "warn" | "danger" | "info";
+  title: string;
+  detail?: ReactNode;
+  actions: { label: string; primary?: boolean; run: () => void | Promise<void> }[];
+}
+
 export default function HomeView({ visible }: { visible: boolean }) {
-  const { servers, setSection, setActiveServer } = useApp();
+  const { servers, setSection, setActiveServer, openTab, notify } = useApp();
   const [results, setResults] = useState<Record<string, Result>>({});
-  const [updated, setUpdated] = useState<number | null>(null);
+  const [activity, setActivity] = useState<AuditEntry[]>([]);
   const running = useRef(false);
+  const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     if (running.current) return;
     running.current = true;
+    setLoading(true);
     const queue = [...servers];
     setResults((r) => Object.fromEntries(servers.map((s) => [s.id, r[s.id] ?? "loading"])));
     // Au plus 4 serveurs interrogés en même temps.
@@ -32,16 +44,20 @@ export default function HomeView({ visible }: { visible: boolean }) {
       }
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    setUpdated(Date.now());
+    void api.auditList(6).then(setActivity).catch(() => {});
     running.current = false;
+    setLoading(false);
   }, [servers]);
 
   usePolling(refresh, REFRESH_MS, [refresh], visible);
+  useEffect(() => {
+    void api.auditList(6).then(setActivity).catch(() => {});
+  }, []);
 
   if (servers.length === 0) {
     return (
       <EmptyState icon={<LayoutDashboard size={40} />} title="Bienvenue dans Helm">
-        Ajoute ton premier serveur (ou importe tes sessions PuTTY) dans l'onglet Serveurs.
+        Ajoute ton premier serveur (ou importe tes sessions PuTTY et OpenSSH) dans Serveurs.
         <div className="mt-4">
           <Button variant="primary" onClick={() => setSection("servers")}>
             Ajouter un serveur
@@ -51,110 +67,250 @@ export default function HomeView({ visible }: { visible: boolean }) {
     );
   }
 
-  const open = (s: ServerView, section: "monitoring" | "docker" | "sites") => {
+  const go = (s: ServerView, section: "monitoring" | "docker" | "sites" | "security") => {
     setActiveServer(s.id);
     setSection(section);
   };
+  const summaries = servers.map((s) => ({ server: s, r: results[s.id] })).filter((x): x is { server: ServerView; r: DashboardSummary } => !!x.r && x.r !== "loading");
+  const online = summaries.filter((x) => x.r.connected);
+  const running_ = online.reduce((n, x) => n + x.r.containersRunning, 0);
+  const stopped = online.reduce((n, x) => n + x.r.containersStopped, 0);
+  const alerts = online.reduce((n, x) => n + x.r.alerts.length, 0);
+  const now = Date.now() / 1000;
+
+  // Tout ce qui demande une action, du plus urgent au moins urgent.
+  const todos: Todo[] = [];
+  for (const { server: s, r } of summaries) {
+    if (!r.connected) {
+      const auth = /AUTH_BLOCKED|Authentification échouée/.test(r.error ?? "");
+      const needsUser = /NEED_PASSWORD|UNKNOWN_HOST_KEY|HOST_KEY_MISMATCH/.test(r.error ?? "");
+      todos.push({
+        key: `down:${s.id}`,
+        tone: "danger",
+        title: needsUser ? `${s.name} : connexion à valider` : auth ? `${s.name} : authentification refusée` : `${s.name} injoignable`,
+        detail: auth ? "Helm ne réessaie plus tout seul, pour ne pas déclencher fail2ban." : needsUser ? undefined : r.error?.replace(/^.*?: /, ""),
+        actions: [
+          { label: "Se connecter", primary: true, run: async () => void ((await ensureConnected(s.id, { force: true })) && refresh()) },
+          ...(auth || needsUser ? [] : [{ label: "Diagnostiquer", run: () => useDoctor.getState().open(s.id) }]),
+        ],
+      });
+      continue;
+    }
+    for (const a of r.alerts) {
+      todos.push({ key: `alert:${s.id}:${a.key}`, tone: "danger", title: `${s.name} : ${a.title}`, actions: [{ label: "Monitoring", run: () => go(s, "monitoring") }] });
+    }
+    if (r.containersStopped > 0) {
+      todos.push({
+        key: `stopped:${s.id}`,
+        tone: "warn",
+        title: `${r.containersStopped} conteneur${r.containersStopped > 1 ? "s" : ""} arrêté${r.containersStopped > 1 ? "s" : ""} sur ${s.name}`,
+        detail: <span className="font-mono text-xs leading-relaxed">{r.stoppedNames.join(" · ")}</span>,
+        actions: [
+          {
+            label: "Relancer",
+            primary: true,
+            run: async () => {
+              try {
+                for (const name of r.stoppedNames) await api.dockerAction(s.id, name, "start");
+                notify(`${r.stoppedNames.length} conteneur(s) relancé(s) sur ${s.name}`, "success");
+              } catch (e) {
+                notify(errorMessage(e), "error");
+              }
+              void refresh();
+            },
+          },
+          { label: "Docker", run: () => go(s, "docker") },
+        ],
+      });
+    }
+    for (const c of r.certificates.filter((c) => (c.notAfter - now) / DAY < CERT_WARN_DAYS)) {
+      const days = Math.floor((c.notAfter - now) / DAY);
+      todos.push({
+        key: `cert:${s.id}:${c.domains[0]}`,
+        tone: days < 7 ? "danger" : "warn",
+        title: `${c.domains[0] ?? "Certificat"} : ${days < 0 ? "certificat expiré" : `certificat expire dans ${days} j`}`,
+        actions: [{ label: "Sites", run: () => go(s, "sites") }],
+      });
+    }
+  }
+  const noAgent = online.filter((x) => !x.r.agent).map((x) => x.server.name);
+  if (noAgent.length) {
+    todos.push({
+      key: "agent",
+      tone: "info",
+      title: `Pas d'agent sur ${noAgent.join(" et ")}`,
+      detail: "Aucune alerte quand ton PC est éteint.",
+      actions: [{ label: "Installer l'agent", run: () => go(online.find((x) => !x.r.agent)!.server, "monitoring") }],
+    });
+  }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold">Vue d'ensemble</h1>
-          <p className="text-sm text-muted">
-            {servers.length} serveur(s){updated ? ` · actualisé à ${new Date(updated).toLocaleTimeString("fr-FR")}` : ""}
-          </p>
+    <div className="grid h-full grid-cols-[minmax(0,1fr)_360px]">
+      <section className="flex min-h-0 flex-col gap-[18px] overflow-auto px-6 py-[22px]">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-semibold">Vue d'ensemble</h1>
+          <span className="text-[13px] text-muted">
+            {servers.length} serveur{servers.length > 1 ? "s" : ""} · actualisation automatique
+          </span>
+          <IconButton title="Actualiser" className="ml-auto" onClick={() => void refresh()}>
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </IconButton>
         </div>
-        <IconButton title="Actualiser" onClick={() => void refresh()}>
-          <RefreshCw size={15} className={running.current ? "animate-spin" : ""} />
-        </IconButton>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto p-6">
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(360px,1fr))] gap-4">
+
+        <div className="grid grid-cols-4 gap-2.5">
+          <Kpi label="Serveurs en ligne" value={online.length} total={servers.length} />
+          <Kpi label="Conteneurs actifs" value={running_} />
+          <Kpi label="Conteneurs arrêtés" value={stopped} tone={stopped ? "warn" : undefined} />
+          <Kpi label="Alertes actives" value={alerts} tone={alerts ? "danger" : undefined} />
+        </div>
+
+        <div className="overflow-hidden rounded-[10px] border border-border bg-panel">
+          <div className="grid grid-cols-[200px_repeat(3,minmax(0,1fr))_150px_110px] gap-4 border-b border-border px-4 py-2.5 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase">
+            <span>Serveur</span>
+            <span>CPU</span>
+            <span>Mémoire</span>
+            <span>Disque</span>
+            <span>Conteneurs</span>
+            <span />
+          </div>
           {servers.map((s) => (
-            <ServerCard key={s.id} server={s} result={results[s.id]} onOpen={(section) => open(s, section)} onRetry={() => void refresh()} />
+            <ServerRow key={s.id} server={s} result={results[s.id]} onOpen={(section) => go(s, section)} onTerminal={() => openTab(s.id)} />
           ))}
         </div>
+      </section>
+
+      <aside className="flex min-h-0 flex-col gap-3.5 overflow-auto border-l border-border px-5 py-[22px]" aria-label="À traiter">
+        <h2 className="text-sm font-semibold">À traiter</h2>
+        {todos.length === 0 && <p className="rounded-[10px] border border-border bg-panel p-3.5 text-[13px] text-muted">Rien à signaler : tout tourne normalement.</p>}
+        {todos.map((t) => (
+          <div
+            key={t.key}
+            className={`flex flex-col gap-2 rounded-[10px] border p-3.5 text-[13px] ${
+              t.tone === "danger" ? "border-danger/40 bg-danger/10" : t.tone === "warn" ? "border-warn/40 bg-warn/10" : "border-border bg-panel"
+            }`}
+          >
+            <div className={`font-semibold ${t.tone === "danger" ? "text-danger" : t.tone === "warn" ? "text-warn" : ""}`}>{t.title}</div>
+            {t.detail && <div className="text-muted">{t.detail}</div>}
+            <div className="flex flex-wrap gap-2">
+              {t.actions.map((a) => (
+                <button
+                  key={a.label}
+                  onClick={() => void a.run()}
+                  className={`h-[30px] rounded-[7px] px-3 text-xs font-medium ${
+                    a.primary ? (t.tone === "warn" ? "bg-warn text-[#1a1406]" : "bg-accent text-accent-fg") : "border border-border-strong hover:bg-hover"
+                  }`}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <h2 className="mt-2.5 text-sm font-semibold">Activité récente</h2>
+        {activity.length === 0 ? (
+          <p className="text-xs text-muted">Aucune action enregistrée pour l'instant.</p>
+        ) : (
+          <ul className="flex flex-col gap-2.5 text-xs">
+            {activity.map((a, i) => (
+              <li key={i} className="flex min-w-0 gap-2.5" title={`${a.action} ${a.detail}${a.error ? ` : ${a.error}` : ""}`}>
+                <span className="shrink-0 font-mono text-muted/80">{new Date(a.t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                <span className={`min-w-0 truncate ${a.ok ? "text-muted" : "text-danger"}`}>
+                  <span className="text-fg">{a.serverName}</span> · {actionLabel(a.action)}
+                  {a.ok ? "" : " (échec)"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button onClick={() => setSection("settings")} className="self-start text-xs text-accent hover:underline">
+          Tout le journal →
+        </button>
+      </aside>
+    </div>
+  );
+}
+
+/** Libellé lisible d'une action du journal (le détail complet reste dans l'infobulle et le journal). */
+const ACTIONS: Record<string, string> = {
+  "ssh.trust_host": "clé du serveur approuvée",
+  "tmux.install": "installation de tmux",
+  "tmux.kill": "session tmux fermée",
+  "file.write": "fichier modifié",
+  "nginx.write": "configuration nginx appliquée",
+  "fail2ban.unban": "IP débloquée",
+  "fail2ban.ignoreip": "exceptions fail2ban modifiées",
+  "firewall.allow": "port ouvert dans le pare-feu",
+  "firewall.delete": "règle de pare-feu supprimée",
+  "ssh.key.add": "clé SSH ajoutée",
+  "ssh.key.remove": "clé SSH retirée",
+  "crontab.save": "crontab modifiée",
+  "timer.run": "tâche planifiée lancée",
+};
+
+function actionLabel(action: string): string {
+  return ACTIONS[action] ?? action.replace(/[._]/g, " ");
+}
+
+function Kpi({ label, value, total, tone }: { label: string; value: number; total?: number; tone?: "warn" | "danger" }) {
+  const color = tone === "warn" ? "text-warn" : tone === "danger" ? "text-danger" : "";
+  return (
+    <div className={`rounded-[10px] border bg-panel px-4 py-3.5 ${tone === "warn" ? "border-warn/40" : tone === "danger" ? "border-danger/40" : "border-border"}`}>
+      <div className={`text-xs ${tone ? color : "text-muted"}`}>{label}</div>
+      <div className={`mt-1 font-mono text-[26px] font-semibold ${color}`}>
+        {value}
+        {total !== undefined && <span className="text-muted/70">/{total}</span>}
       </div>
     </div>
   );
 }
 
-function Meter({ label, value, detail }: { label: string; value: number | null; detail?: string }) {
+function Bar({ label, sub, value }: { label: string; sub?: string; value: number | null }) {
   const tone = value == null ? "bg-border" : value >= 90 ? "bg-danger" : value >= 80 ? "bg-warn" : "bg-accent";
   return (
-    <div>
-      <div className="flex justify-between text-xs">
-        <span className="text-muted">{label}</span>
-        <span className="tabular-nums">{value == null ? "…" : `${value.toFixed(0)} %`}</span>
+    <div className="min-w-0">
+      <div className="font-mono text-[13px]">{label}</div>
+      <div className="mt-1.5 h-1 rounded-sm bg-hover-strong">
+        <div className={`h-1 rounded-sm ${tone}`} style={{ width: `${Math.max(1, value ?? 0)}%` }} />
       </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded bg-border">
-        <div className={`h-full rounded ${tone}`} style={{ width: `${value ?? 0}%` }} />
-      </div>
-      {detail && <div className="mt-0.5 text-[11px] text-muted">{detail}</div>}
+      {sub && <div className="mt-1 truncate text-[11px] text-muted">{sub}</div>}
     </div>
   );
 }
 
-function ServerCard({
+function ServerRow({
   server,
   result,
   onOpen,
-  onRetry,
+  onTerminal,
 }: {
   server: ServerView;
   result: Result | undefined;
-  onOpen: (section: "monitoring" | "docker" | "sites") => void;
-  onRetry: () => void;
+  onOpen: (section: "monitoring" | "docker" | "sites" | "security") => void;
+  onTerminal: () => void;
 }) {
-  const header = (
-    <div className="flex items-center gap-2">
-      <span className="size-2.5 rounded-full" style={{ background: server.color ?? "#3b82f6" }} />
-      <span className="font-medium">{server.name}</span>
-      <span className="truncate font-mono text-xs text-muted">{server.host}</span>
+  const name = (
+    <div className="min-w-0">
+      <div className="flex items-center gap-2 font-semibold">
+        <span className={`size-[7px] shrink-0 rounded-full ${result && result !== "loading" && result.connected ? "bg-ok" : "bg-muted/40"}`} />
+        <span className="truncate">{server.name}</span>
+      </div>
+      <div className="mt-0.5 truncate font-mono text-xs text-muted">{server.host}</div>
     </div>
   );
+  const grid = "grid grid-cols-[200px_repeat(3,minmax(0,1fr))_150px_110px] items-center gap-4 border-b border-border/60 px-4 py-3.5 text-[13px] last:border-b-0";
 
-  if (!result || result === "loading") {
+  if (!result || result === "loading" || !result.connected) {
     return (
-      <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
-        {header}
-        <p className="text-sm text-muted">Interrogation…</p>
-      </div>
-    );
-  }
-
-  if (!result.connected) {
-    const needsUser = /NEED_PASSWORD|UNKNOWN_HOST_KEY|HOST_KEY_MISMATCH/.test(result.error ?? "");
-    const authFailed = /AUTH_BLOCKED|Authentification échouée/.test(result.error ?? "");
-    return (
-      <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
-        {header}
-        <div className="flex items-start gap-2 text-sm">
-          <Server size={15} className="mt-0.5 shrink-0 text-muted" />
-          <span className="text-muted">
-            {needsUser
-              ? "Connexion à valider (mot de passe ou clé du serveur)."
-              : authFailed
-                ? `Authentification refusée : Helm ne réessaie plus tout seul, pour ne pas déclencher fail2ban. ${result.error?.replace(/^(AUTH_BLOCKED|Authentification échouée) ?: ?/, "")}`
-                : `Injoignable : ${result.error}`}
-          </span>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            icon={<Plug size={13} />}
-            onClick={async () => {
-              if (await ensureConnected(server.id, { force: true })) onRetry();
-            }}
-          >
-            Se connecter
-          </Button>
-          {!needsUser && !authFailed && (
-            <Button size="sm" icon={<Stethoscope size={13} />} onClick={() => useDoctor.getState().open(server.id)}>
-              Diagnostiquer
-            </Button>
-          )}
+      <div className={grid}>
+        {name}
+        <span className="col-span-4 text-muted">
+          {!result || result === "loading" ? "Interrogation…" : `Non connecté${result.error ? ` · ${result.error.replace(/^.*?: /, "").slice(0, 90)}` : ""}`}
+        </span>
+        <div className="flex justify-end">
+          <button onClick={onTerminal} className="h-7 rounded-[7px] border border-border-strong px-2.5 text-xs hover:bg-hover">
+            Terminal
+          </button>
         </div>
       </div>
     );
@@ -164,70 +320,28 @@ function ServerCard({
   const mem = m && m.memTotal ? (m.memUsed / m.memTotal) * 100 : null;
   const root = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
   const disk = root && root.total ? (root.used / root.total) * 100 : null;
-  const now = Date.now() / 1000;
-  const expiring = result.certificates.filter((c) => (c.notAfter - now) / 86400 < CERT_WARN_DAYS);
-  const healthy = result.alerts.length === 0 && expiring.length === 0 && result.containersStopped === 0;
-
   return (
-    <div className={`flex flex-col gap-3 rounded-lg border bg-panel p-4 ${result.alerts.length ? "border-danger/50" : "border-border"}`}>
-      <div className="flex items-start justify-between gap-2">
-        {header}
-        {healthy ? (
-          <Badge tone="ok">
-            <CheckCircle2 size={11} className="mr-1" /> OK
-          </Badge>
-        ) : result.alerts.length ? (
-          <Badge tone="danger">{result.alerts.length} alerte(s)</Badge>
-        ) : (
-          <Badge tone="warn">à surveiller</Badge>
-        )}
-      </div>
-
-      <button className="grid grid-cols-3 gap-3 text-left" onClick={() => onOpen("monitoring")}>
-        <Meter label="CPU" value={m && m.cpuPercent > 0 ? m.cpuPercent : m ? 0 : null} detail={m ? `charge ${m.load[0].toFixed(2)}` : undefined} />
-        <Meter label="Mémoire" value={mem} detail={m ? formatBytes(m.memUsed) : undefined} />
-        <Meter label="Disque" value={disk} detail={root ? `${formatBytes(root.total - root.used)} libres` : undefined} />
+    <div className={grid}>
+      <button className="text-left" onClick={() => onOpen("monitoring")} title={m ? `En ligne depuis ${formatDuration(m.uptimeSecs)}` : undefined}>
+        {name}
       </button>
-
-      <ul className="flex flex-col gap-1.5 text-xs">
-        {result.alerts.map((a) => (
-          <li key={a.key} className="flex items-start gap-1.5 text-danger">
-            <OctagonAlert size={13} className="mt-0.5 shrink-0" /> {a.title}
-          </li>
-        ))}
-        {result.docker && (
-          <li>
-            <button className="flex items-center gap-1.5 text-muted hover:text-fg" onClick={() => onOpen("docker")}>
-              <Box size={13} />
-              {result.containersRunning} conteneur(s) actif(s)
-              {result.containersStopped > 0 && (
-                <span className="text-warn">
-                  · {result.containersStopped} arrêté(s) : {result.stoppedNames.join(", ")}
-                </span>
-              )}
-            </button>
-          </li>
+      <Bar label={m ? `${m.cpuPercent.toFixed(0)} %` : "…"} sub={m ? `charge ${m.load[0].toFixed(2)}` : undefined} value={m ? m.cpuPercent : null} />
+      <Bar label={m && mem != null ? `${mem.toFixed(0)} %` : "…"} sub={m ? formatBytes(m.memUsed) : undefined} value={mem} />
+      <Bar label={root && disk != null ? `${disk.toFixed(0)} %` : "…"} sub={root ? `${formatBytes(root.total - root.used)} libres` : undefined} value={disk} />
+      <button className="text-left font-mono" onClick={() => onOpen("docker")} disabled={!result.docker}>
+        {result.docker ? (
+          <>
+            {result.containersRunning}
+            {result.containersStopped > 0 && <span className="text-warn"> · {result.containersStopped} arrêté(s)</span>}
+          </>
+        ) : (
+          <span className="text-muted">—</span>
         )}
-        {expiring.map((c, i) => {
-          const days = Math.floor((c.notAfter - now) / 86400);
-          return (
-            <li key={i}>
-              <button className={`flex items-center gap-1.5 ${days < 7 ? "text-danger" : "text-warn"}`} onClick={() => onOpen("sites")}>
-                <Lock size={13} />
-                {c.domains[0] ?? "certificat"} : {days < 0 ? "expiré" : `expire dans ${days} j`}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="flex items-center gap-2 text-[11px] text-muted">
-        {m && <span>en ligne depuis {formatDuration(m.uptimeSecs)}</span>}
-        {!result.agent && (
-          <span className="flex items-center gap-1">
-            <AlertTriangle size={11} /> sans agent : pas d'alertes quand ton PC est éteint
-          </span>
-        )}
+      </button>
+      <div className="flex justify-end">
+        <button onClick={onTerminal} className="flex h-7 items-center gap-1.5 rounded-[7px] border border-border-strong px-2.5 text-xs hover:bg-hover">
+          <SquareTerminal size={12} /> Terminal
+        </button>
       </div>
     </div>
   );

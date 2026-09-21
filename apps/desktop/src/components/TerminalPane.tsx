@@ -17,10 +17,10 @@ import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 export const focusedTerminal: { id: number | null; focus?: () => void } = { id: null };
 
 const THEME = {
-  background: "#0d1117",
-  foreground: "#e6edf3",
-  cursor: "#3b82f6",
-  selectionBackground: "#3b82f655",
+  background: "#0b0c0e",
+  foreground: "#d7dae0",
+  cursor: "#8ab4ff",
+  selectionBackground: "#8ab4ff44",
   black: "#484f58",
   red: "#ff7b72",
   green: "#3fb950",

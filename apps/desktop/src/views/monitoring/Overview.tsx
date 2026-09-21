@@ -163,7 +163,7 @@ export default function Overview({ serverId, agent, visible }: { serverId: strin
             disabled={r.secs > 0 && !agentOk}
             title={r.secs > 0 && !agentOk ? "Installe l'agent helmd pour conserver l'historique" : undefined}
             onClick={() => setRange(r.id)}
-            className={`rounded px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${range === r.id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+            className={`rounded px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${range === r.id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
           >
             {r.label}
           </button>

@@ -250,7 +250,7 @@ impl Connection {
             }
         };
         match (!out.success()).then(|| sudo_failure(&out.stderr)).flatten() {
-            Some(reason) => Err(Error::Remote(reason)),
+            Some(reason) => Err(Error::Other(reason)),
             None => Ok(out),
         }
     }

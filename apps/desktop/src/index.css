@@ -2,38 +2,47 @@
 @import "@xterm/xterm/css/xterm.css";
 
 @theme {
-  --color-bg: #0d1117;
-  --color-panel: #161b22;
-  --color-border: #262c36;
-  --color-fg: #e6edf3;
-  --color-muted: #8b949e;
-  --color-accent: #3b82f6;
-  --color-ok: #3fb950;
-  --color-warn: #d29922;
-  --color-danger: #f85149;
+  /* Direction « Cockpit » : graphite, dense, un accent bleu clair et un ambre pour ce qui demande une action. */
+  --color-bg: #0e0f11;
+  --color-panel: #16181c;
+  --color-rail: #0a0b0d;
+  --color-border: #22252b;
+  --color-border-strong: #3a3f49;
+  --color-fg: #e8e9ec;
+  --color-muted: #9aa0aa;
+  --color-accent: #8ab4ff;
+  --color-accent-fg: #0b1220;
+  --color-ok: #3dd6b5;
+  --color-warn: #f5a524;
+  --color-danger: #ff6b6b;
   --color-hover: rgb(255 255 255 / 0.05);
   --color-hover-strong: rgb(255 255 255 / 0.1);
   --color-hover-soft: rgb(255 255 255 / 0.03);
-  --color-scrollbar: #30363d;
-  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --color-scrollbar: #2e323a;
+  --color-term: #0b0c0e;
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
 }
 
 /* Thème clair : mêmes jetons, autres valeurs (contrastes vérifiés sur fond blanc). */
 :root[data-theme="light"] {
   --color-bg: #ffffff;
-  --color-panel: #f6f8fa;
-  --color-border: #d0d7de;
-  --color-fg: #1f2328;
-  --color-muted: #59636e;
-  --color-accent: #0969da;
-  --color-ok: #1a7f37;
-  --color-warn: #9a6700;
-  --color-danger: #cf222e;
+  --color-panel: #f6f7f9;
+  --color-rail: #eef0f3;
+  --color-border: #d9dde3;
+  --color-border-strong: #b8bec8;
+  --color-fg: #1b1d21;
+  --color-muted: #5b616b;
+  --color-accent: #0b5cd6;
+  --color-accent-fg: #ffffff;
+  --color-ok: #0f7a5c;
+  --color-warn: #9a5b00;
+  --color-danger: #c62828;
   --color-hover: rgb(0 0 0 / 0.05);
   --color-hover-strong: rgb(0 0 0 / 0.08);
   --color-hover-soft: rgb(0 0 0 / 0.03);
-  --color-scrollbar: #c3cad1;
+  --color-scrollbar: #c3c9d1;
+  --color-term: #ffffff;
   color-scheme: light;
 }
 
@@ -73,10 +82,10 @@ body {
 .xterm {
   padding: 6px 0 0 8px;
   height: 100%;
-  background: var(--color-bg);
+  background: var(--color-term);
 }
 
 /* Le rendu WebGL ne repeint pas le fond du viewport quand le thème change : on le suit ici. */
 .xterm .xterm-viewport {
-  background-color: var(--color-bg) !important;
+  background-color: var(--color-term) !important;
 }

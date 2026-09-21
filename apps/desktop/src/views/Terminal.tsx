@@ -90,7 +90,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-9 shrink-0 items-stretch border-b border-border bg-panel">
+      <div className="flex h-11 shrink-0 items-stretch border-b border-border bg-rail pl-2">
         <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
           {tabs.map((t) => {
             const s = serverOf(t.serverId);
@@ -100,9 +100,11 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                 key={t.key}
                 onClick={() => setActiveTab(t.key)}
                 onAuxClick={(e) => e.button === 1 && void close(t)}
-                className={`group flex max-w-56 min-w-32 cursor-pointer items-center gap-2 border-r border-border px-3 text-xs ${active ? "bg-bg text-fg" : "text-muted hover:text-fg"}`}
+                className={`group flex max-w-60 min-w-32 cursor-pointer items-center gap-2 border-b-2 px-3.5 text-[13px] ${
+                  active ? "border-accent bg-bg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
+                }`}
               >
-                <span className="size-2 shrink-0 rounded-full" style={{ background: s?.color ?? "#3b82f6" }} />
+                <span className="size-[7px] shrink-0 rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
                 <span className="flex-1 truncate" title={titles[t.key] ?? t.title}>
                   {t.title}
                 </span>
@@ -122,32 +124,24 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           })}
           <IconButton
             title="Nouveau terminal (Ctrl+Shift+T)"
-            className="m-1"
+            className="m-2"
             disabled={!activeServerId}
             onClick={() => activeServerId && openTab(current?.serverId ?? activeServerId)}
           >
             <Plus size={15} />
           </IconButton>
         </div>
-        <div className="flex items-center gap-1 px-2">
+        <div className="flex items-center gap-1.5 px-3">
           {broadcast.active ? (
             <Button size="sm" variant="danger" icon={<Radio size={13} />} onClick={() => broadcast.setActive(false)}>
               Arrêter la diffusion
             </Button>
           ) : (
-            <IconButton title="Diffuser la saisie à plusieurs terminaux" disabled={Object.keys(broadcast.panes).length < 2} onClick={() => setBroadcastPicker(true)}>
-              <Radio size={15} />
-            </IconButton>
+            <ToolButton label="Diffuser" title="Diffuser la saisie à plusieurs terminaux" icon={<Radio size={13} />} disabled={Object.keys(broadcast.panes).length < 2} onClick={() => setBroadcastPicker(true)} />
           )}
-          <IconButton title="Sessions persistantes" disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)}>
-            <History size={15} />
-          </IconButton>
-          <IconButton title="Diviser l'écran" disabled={!current} className={current?.split != null ? "text-accent" : ""} onClick={toggleSplit}>
-            <Columns2 size={15} />
-          </IconButton>
-          <IconButton title="Snippets" className={showSnippets ? "text-accent" : ""} onClick={() => setShowSnippets((v) => !v)}>
-            <ScrollText size={15} />
-          </IconButton>
+          <ToolButton label="Sessions" title="Sessions persistantes (tmux)" icon={<History size={13} />} disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)} />
+          <ToolButton label="Diviser" title="Diviser l'écran" icon={<Columns2 size={13} />} disabled={!current} active={current?.split != null} onClick={toggleSplit} />
+          <ToolButton label="Snippets" title="Snippets" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
         </div>
       </div>
 
@@ -314,5 +308,23 @@ function SessionsModal({
         ))}
       </ul>
     </Modal>
+  );
+}
+
+/** Bouton texte de la barre d'onglets du terminal. */
+function ToolButton({ label, title, icon, active, disabled, onClick }: { label: string; title: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex h-7 items-center gap-1.5 rounded-[7px] border px-2.5 text-xs transition-colors disabled:opacity-40 ${
+        active ? "border-accent/60 bg-accent/10 text-fg" : "border-border text-muted hover:text-fg"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

@@ -36,7 +36,7 @@ pub async fn access(conn: &Connection, sudo: Option<&str>) -> Result<(Access, St
         // Refus de sudo (pas de mot de passe, pas de droits) : Docker est alors simplement inaccessible.
         let via_sudo = match conn.exec_sudo(VERSION_COMMAND, sudo, None).await {
             Ok(o) => o,
-            Err(Error::Remote(reason)) => return Ok((Access::Unavailable, reason)),
+            Err(Error::Other(reason)) => return Ok((Access::Unavailable, reason)),
             Err(e) => return Err(e),
         };
         if via_sudo.success() {

@@ -190,7 +190,7 @@ function Logs({ serverId }: { serverId: string }) {
                 ["error", "Erreurs"],
               ] as const
             ).map(([id, l]) => (
-              <button key={id} onClick={() => setLevel(id)} className={`rounded px-2 py-0.5 ${level === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}>
+              <button key={id} onClick={() => setLevel(id)} className={`rounded px-2 py-0.5 ${level === id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}>
                 {l}
               </button>
             ))}

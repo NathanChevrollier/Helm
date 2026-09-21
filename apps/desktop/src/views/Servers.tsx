@@ -271,7 +271,7 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
                 type="button"
                 key={k.id}
                 onClick={() => set("authKind", k.id)}
-                className={`flex-1 rounded px-2 py-1 text-xs transition-colors ${p.authKind === k.id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+                className={`flex-1 rounded px-2 py-1 text-xs transition-colors ${p.authKind === k.id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
               >
                 {k.label}
               </button>
@@ -403,7 +403,7 @@ function Import({ onClose, onDone }: { onClose: () => void; onDone: () => void }
             key={id}
             type="button"
             onClick={() => setSource(id)}
-            className={`flex-1 rounded px-2 py-1 text-xs ${source === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+            className={`flex-1 rounded px-2 py-1 text-xs ${source === id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
           >
             {label}
           </button>

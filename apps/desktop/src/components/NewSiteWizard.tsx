@@ -222,7 +222,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
                     type="button"
                     disabled={id === "docker" && !plan?.docker}
                     onClick={() => setSource(id)}
-                    className={`flex-1 rounded px-2 py-1 text-xs disabled:opacity-40 ${source === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+                    className={`flex-1 rounded px-2 py-1 text-xs disabled:opacity-40 ${source === id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
                   >
                     {label}
                   </button>

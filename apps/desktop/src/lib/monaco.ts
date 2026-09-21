@@ -31,7 +31,7 @@ monaco.editor.defineTheme("helm-dark", {
   base: "vs-dark",
   inherit: true,
   rules: [],
-  colors: { "editor.background": "#0d1117", "editor.lineHighlightBackground": "#161b22" },
+  colors: { "editor.background": "#0e0f11", "editor.lineHighlightBackground": "#16181c" },
 });
 
 monaco.editor.defineTheme("helm-light", {

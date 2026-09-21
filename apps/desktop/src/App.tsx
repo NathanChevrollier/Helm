@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
-import { Lock, Search, ShipWheel } from "lucide-react";
+import { Lock, Plus, Search, ShipWheel, type LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
@@ -73,57 +73,72 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const railSections = SECTIONS.filter((s) => s.id !== "settings");
+  const settingsSection = SECTIONS.find((s) => s.id === "settings")!;
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
-        <nav className="flex w-56 shrink-0 flex-col border-r border-border bg-panel">
-          <div className="flex items-center gap-2 px-4 pt-4 pb-3 text-lg font-semibold tracking-tight">
-            <ShipWheel size={20} className="text-accent" />
-            Helm
-          </div>
-          <div className="px-3 pb-2">
-            <select
-              className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm outline-none focus:border-accent"
-              value={activeServerId ?? ""}
-              onChange={(e) => setActiveServer(e.target.value || null)}
-              aria-label="Serveur actif"
-            >
-              {servers.length === 0 && <option value="">Aucun serveur</option>}
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.connected ? "● " : "○ "}
+    <div className="flex h-full">
+      {/* Colonne d'icônes : toutes les sections, libellé au survol. */}
+      <nav className="flex w-[60px] shrink-0 flex-col items-center gap-1 border-r border-border bg-rail py-3" aria-label="Navigation principale">
+        <button
+          onClick={() => setSection("home")}
+          className="mb-3 flex size-9 items-center justify-center rounded-lg text-accent hover:bg-hover"
+          title="Helm"
+          aria-label="Helm, accueil"
+        >
+          <ShipWheel size={22} />
+        </button>
+        {railSections.map((s) => (
+          <RailButton key={s.id} label={s.label} icon={s.icon} active={section === s.id} onClick={() => setSection(s.id)} />
+        ))}
+        <div className="flex-1" />
+        {lockConfigured && (
+          <RailButton label={`Verrouiller (${display(shortcutOf("lock"))})`} icon={Lock} active={false} onClick={() => useLock.getState().lock()} />
+        )}
+        <RailButton label={settingsSection.label} icon={settingsSection.icon} active={section === "settings"} onClick={() => setSection("settings")} />
+      </nav>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Serveurs en onglets et barre de commande. */}
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+          <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto" role="group" aria-label="Serveur actif">
+            {servers.map((s) => {
+              const current = s.id === activeServerId;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => setActiveServer(s.id)}
+                  title={`${s.username}@${s.host}:${s.port}`}
+                  aria-pressed={current}
+                  className={`flex h-8 shrink-0 items-center gap-2 rounded-lg border px-3 text-[13px] transition-colors ${
+                    current ? "border-border-strong bg-panel font-semibold text-fg" : "border-border text-muted hover:text-fg"
+                  }`}
+                >
+                  <span className={`size-[7px] rounded-full ${s.connected ? "bg-ok" : "bg-muted/40"}`} />
                   {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="px-3 pb-3">
+                </button>
+              );
+            })}
             <button
-              onClick={() => setPalette(true)}
-              className="flex h-8 w-full items-center gap-2 rounded-md border border-border px-2 text-xs text-muted hover:text-fg"
+              onClick={() => setSection("servers")}
+              title="Ajouter ou gérer les serveurs"
+              aria-label="Ajouter ou gérer les serveurs"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-dashed border-border-strong text-muted hover:text-fg"
             >
-              <Search size={13} />
-              Rechercher une action
-              <kbd className="ml-auto rounded border border-border px-1 font-sans text-[10px]">{display(shortcutOf("palette"))}</kbd>
+              <Plus size={15} />
             </button>
           </div>
-          <div className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
-            {SECTIONS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setSection(id)}
-                className={`flex items-center gap-3 rounded-md px-2 py-1.5 text-sm transition-colors ${
-                  id === section ? "bg-accent/15 text-fg" : "text-muted hover:bg-hover hover:text-fg"
-                }`}
-              >
-                <Icon size={16} className={id === section ? "text-accent" : undefined} />
-                {label}
-              </button>
-            ))}
-          </div>
-        </nav>
+          <button
+            onClick={() => setPalette(true)}
+            className="ml-auto flex h-[34px] w-[440px] max-w-[45%] shrink-0 items-center gap-2.5 rounded-lg border border-border bg-panel px-3 text-[13px] text-muted hover:border-border-strong"
+          >
+            <Search size={15} />
+            Rechercher, ouvrir, relancer…
+            <kbd className="ml-auto rounded-[5px] border border-border-strong px-1.5 py-px font-mono text-[11px]">{display(shortcutOf("palette"))}</kbd>
+          </button>
+        </header>
 
-        <main className="relative min-w-0 flex-1">
+        <main className="relative min-h-0 flex-1">
           {hydrated && (
             <>
               {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
@@ -145,28 +160,26 @@ export default function App() {
             </>
           )}
         </main>
-      </div>
 
-      <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border bg-panel px-3 text-xs text-muted">
-        <span className="flex items-center gap-2">
+        {/* Barre d'état. */}
+        <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-border bg-rail px-3.5 text-xs text-muted">
           {active ? (
-            <>
-              <span className={`size-2 rounded-full ${active.connected ? "bg-ok" : "bg-muted/50"}`} />
-              {active.name} — {active.username}@{active.host}
-            </>
+            <span className="flex items-center gap-1.5">
+              <span className={`size-[7px] rounded-full ${active.connected ? "bg-ok" : "bg-muted/40"}`} />
+              <span className="font-mono">
+                {active.username}@{active.host}:{active.port}
+              </span>
+              {!active.connected && <span>· non connecté</span>}
+            </span>
           ) : (
-            "Aucun serveur sélectionné"
+            <span>Aucun serveur sélectionné</span>
           )}
-        </span>
-        <span className="flex items-center gap-3">
-          {lockConfigured && (
-            <button className="flex items-center gap-1 hover:text-fg" title={`Verrouiller Helm (${display(shortcutOf("lock"))})`} onClick={() => useLock.getState().lock()}>
-              <Lock size={11} /> Verrouiller
-            </button>
-          )}
-          {version ? `Helm v${version}` : ""}
-        </span>
-      </footer>
+          <span className="ml-auto font-mono">
+            {display(shortcutOf("palette"))} commandes · {display(shortcutOf("termSearch"))} rechercher
+          </span>
+          {version && <span>Helm v{version}</span>}
+        </footer>
+      </div>
 
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
       <ConnectionDoctor />
@@ -174,5 +187,24 @@ export default function App() {
       <Toasts />
       {locked && <LockScreen />}
     </div>
+  );
+}
+
+/** Bouton de la colonne d'icônes, avec son libellé en infobulle. */
+function RailButton({ label, icon: Icon, active, onClick }: { label: string; icon: LucideIcon; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      className={`group relative flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors ${
+        active ? "bg-panel text-fg ring-1 ring-border-strong" : "text-muted hover:bg-hover hover:text-fg"
+      }`}
+    >
+      <Icon size={18} />
+      <span className="pointer-events-none absolute left-full z-50 ml-2.5 rounded-md border border-border-strong bg-panel px-2 py-1 text-xs whitespace-nowrap text-fg opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+        {label}
+      </span>
+    </button>
   );
 }
