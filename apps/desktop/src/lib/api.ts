@@ -491,6 +491,10 @@ export const api = {
   f2bSetIgnore: (serverId: string, addresses: string[]) => invoke<string>("f2b_set_ignore", { serverId, addresses }),
   myPublicIp: () => invoke<string | null>("my_public_ip"),
   diagnose: (id: string) => invoke<Diagnosis>("ssh_diagnose", { id }),
+  settingsExport: (path: string, password: string, includeSecrets: boolean) => invoke<void>("settings_export", { path, password, includeSecrets }),
+  settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),
+  settingsImport: (path: string, password: string) =>
+    invoke<{ servers: number; snippets: number; tunnels: number; secrets: number }>("settings_import", { path, password }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
   appLockGet: () => invoke<string | null>("app_lock_get"),
   /** Chaîne vide : supprime le mot de passe (verrouillage désactivé). */

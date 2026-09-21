@@ -124,3 +124,26 @@ pub fn mcp_config() -> Result<McpConfig, String> {
 pub fn save_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(err)
 }
+
+/// Exporte les réglages dans un fichier (chiffré si un mot de passe est donné).
+#[tauri::command]
+pub fn settings_export(store: State<'_, Store>, path: String, password: String, include_secrets: bool) -> Result<(), String> {
+    let text = helm_profiles::export::export(&store, &password, include_secrets)?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    log::info!("réglages exportés vers {path} (chiffré : {}, secrets : {include_secrets})", !password.is_empty());
+    Ok(())
+}
+
+/// Le fichier à importer est-il chiffré ?
+#[tauri::command]
+pub fn settings_import_encrypted(path: String) -> Result<bool, String> {
+    helm_profiles::export::is_encrypted(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
+}
+
+#[tauri::command]
+pub fn settings_import(store: State<'_, Store>, path: String, password: String) -> Result<helm_profiles::export::ImportSummary, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let summary = helm_profiles::export::import(&store, &text, &password)?;
+    log::info!("réglages importés depuis {path} : {summary:?}");
+    Ok(summary)
+}

@@ -2046,9 +2046,11 @@ dependencies = [
 name = "helm-profiles"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "dirs",
  "helm-core",
  "keyring",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

@@ -3,6 +3,7 @@
 //! secrets (dans le keyring de l'OS) et journal d'actions.
 
 pub mod audit;
+pub mod export;
 pub mod secrets;
 
 use std::collections::HashMap;

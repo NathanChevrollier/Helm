@@ -3,6 +3,7 @@ import { Bot, CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } fr
 import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useApp } from "../lib/store";
 import { hashPassword, useLock } from "../lib/lock";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Badge, Button, Input } from "../components/ui";
 
 const TABS = [
@@ -201,6 +202,7 @@ function Preferences() {
         </span>
       </label>
       <AppLock />
+      <ExportImport />
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
         <span className="flex-1">
           <span className="font-medium">Journaux de Helm</span>
@@ -320,6 +322,83 @@ function AppLock() {
             )}
           </div>
         </form>
+      )}
+    </div>
+  );
+}
+
+/** Export / import des réglages (changement de PC, copie de secours). */
+function ExportImport() {
+  const { notify, ask, refreshServers } = useApp();
+  const [exporting, setExporting] = useState(false);
+  const [pw, setPw] = useState("");
+  const [withSecrets, setWithSecrets] = useState(false);
+
+  const doExport = async () => {
+    if (withSecrets && pw.length < 8) return notify("Avec les secrets, choisis un mot de passe d'au moins 8 caractères.", "error");
+    const path = await saveDialog({ defaultPath: `helm-reglages-${new Date().toISOString().slice(0, 10)}.helm`, filters: [{ name: "Réglages Helm", extensions: ["helm"] }] });
+    if (!path) return;
+    try {
+      await api.settingsExport(path, pw, withSecrets);
+      notify(pw ? "Réglages exportés (fichier chiffré)" : "Réglages exportés", "success");
+      setExporting(false);
+      setPw("");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const doImport = async () => {
+    const path = await openDialog({ multiple: false, filters: [{ name: "Réglages Helm", extensions: ["helm", "json"] }] });
+    if (typeof path !== "string") return;
+    try {
+      let password = "";
+      if (await api.settingsImportEncrypted(path)) {
+        const v = await ask({ title: "Fichier chiffré", body: "Mot de passe choisi lors de l'export :", input: { label: "Mot de passe", secret: true }, confirmLabel: "Importer" });
+        if (typeof v !== "string" || !v) return;
+        password = v;
+      }
+      const r = await api.settingsImport(path, password);
+      await refreshServers();
+      notify(`Importé : ${r.servers} serveur(s), ${r.snippets} snippet(s), ${r.tunnels} tunnel(s), ${r.secrets} secret(s)`, "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
+      <div>
+        <span className="font-medium">Exporter / importer mes réglages</span>
+        <span className="block text-sm text-muted">
+          Serveurs, clés d'hôte approuvées, snippets et tunnels, pour changer de PC ou garder une copie. L'import complète la configuration actuelle sans rien supprimer.
+        </span>
+      </div>
+      {exporting ? (
+        <div className="flex flex-col gap-2">
+          <Input className="!w-80" type="password" placeholder="Mot de passe de chiffrement (recommandé)" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={withSecrets} onChange={(e) => setWithSecrets(e.target.checked)} />
+            Inclure les secrets (mots de passe SSH et sudo, passphrases, mot de passe restic) — fichier chiffré obligatoire
+          </label>
+          <div className="flex gap-2">
+            <Button size="sm" variant="primary" onClick={() => void doExport()}>
+              Choisir l'emplacement…
+            </Button>
+            <Button size="sm" onClick={() => setExporting(false)}>
+              Annuler
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => setExporting(true)}>
+            Exporter…
+          </Button>
+          <Button size="sm" onClick={() => void doImport()}>
+            Importer…
+          </Button>
+        </div>
       )}
     </div>
   );
