@@ -1,0 +1,9 @@
+[package]
+name = "helm-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Types partagés entre l'app desktop et l'agent helmd"
+
+[dependencies]
+serde.workspace = true

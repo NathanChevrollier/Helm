@@ -1,0 +1,10 @@
+{
+  "name": "helm",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter helm-desktop tauri dev",
+    "build": "pnpm --filter helm-desktop tauri build",
+    "typecheck": "pnpm --filter helm-desktop exec tsc --noEmit"
+  },
+  "packageManager": "pnpm@12.5.1"
+}

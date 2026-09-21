@@ -1,0 +1,9 @@
+[package]
+name = "helmd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent de monitoring Helm, exécuté sur le VPS"
+
+[dependencies]
+helm-protocol.workspace = true
