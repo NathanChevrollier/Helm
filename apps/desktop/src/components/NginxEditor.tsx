@@ -50,6 +50,19 @@ export default function NginxEditor({
     setApplying(true);
     setResult(null);
     try {
+      // Modification concurrente (certbot, autre session…) depuis l'ouverture : on ne l'écrase pas sans accord.
+      if (initial === undefined && original !== null) {
+        const current = await api.sitesRead(serverId, path).catch(() => null);
+        if (current !== null && current !== original) {
+          const ok = await ask({
+            title: "Le fichier a changé sur le serveur",
+            body: "Il a été modifié depuis que tu l'as ouvert (certbot ajoute par exemple ses lignes HTTPS). Appliquer ta version fera disparaître ces changements. Pour les récupérer, ferme puis rouvre le fichier.",
+            confirmLabel: "Appliquer quand même",
+            danger: true,
+          });
+          if (!ok) return;
+        }
+      }
       const r = await api.sitesWrite(serverId, path, value, enableLink);
       setResult(r);
       if (r.ok) {
