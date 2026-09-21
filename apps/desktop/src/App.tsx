@@ -6,6 +6,7 @@ import { SECTIONS, type SectionId } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
 import CommandPalette from "./components/CommandPalette";
 import LockScreen from "./components/LockScreen";
+import ConnectionDoctor from "./components/ConnectionDoctor";
 import { useLock, watchInactivity } from "./lib/lock";
 import HomeView from "./views/Home";
 import TerminalView from "./views/Terminal";
@@ -162,6 +163,7 @@ export default function App() {
       </footer>
 
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
+      <ConnectionDoctor />
       <DialogHost />
       <Toasts />
       {locked && <LockScreen />}

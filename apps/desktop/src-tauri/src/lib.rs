@@ -73,6 +73,7 @@ pub fn run() {
             servers::host_trust,
             servers::ssh_connect,
             servers::ssh_disconnect,
+            servers::ssh_diagnose,
             servers::snippets_list,
             servers::snippet_save,
             servers::snippet_delete,

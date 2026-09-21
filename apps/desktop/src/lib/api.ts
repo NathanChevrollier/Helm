@@ -59,6 +59,20 @@ export interface FsEntry {
   group: string | null;
 }
 
+export interface DiagnosisCheck {
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface Diagnosis {
+  checks: DiagnosisCheck[];
+  verdict: string;
+  advice: string[];
+  probablyBanned: boolean;
+  publicIp: string | null;
+}
+
 /** Date de modification (s) et taille d'un fichier distant. */
 export interface FileStamp {
   mtime: number;
@@ -452,6 +466,7 @@ export const api = {
 
   uiStateGet: () => invoke<unknown>("ui_state_get"),
   storeWarning: () => invoke<string | null>("store_warning"),
+  diagnose: (id: string) => invoke<Diagnosis>("ssh_diagnose", { id }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
   appLockGet: () => invoke<string | null>("app_lock_get"),
   /** Chaîne vide : supprime le mot de passe (verrouillage désactivé). */

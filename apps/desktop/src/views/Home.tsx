@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { AlertTriangle, Box, CheckCircle2, LayoutDashboard, Lock, OctagonAlert, Plug, RefreshCw, Server } from "lucide-react";
+import { AlertTriangle, Box, CheckCircle2, LayoutDashboard, Lock, OctagonAlert, Plug, RefreshCw, Server, Stethoscope } from "lucide-react";
+import { useDoctor } from "../components/ConnectionDoctor";
 import { api, formatBytes, formatDuration, type DashboardSummary, type ServerView } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { usePolling } from "../lib/poll";
@@ -139,16 +140,22 @@ function ServerCard({
                 : `Injoignable : ${result.error}`}
           </span>
         </div>
-        <Button
-          size="sm"
-          className="self-start"
-          icon={<Plug size={13} />}
-          onClick={async () => {
-            if (await ensureConnected(server.id, { force: true })) onRetry();
-          }}
-        >
-          Se connecter
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            icon={<Plug size={13} />}
+            onClick={async () => {
+              if (await ensureConnected(server.id, { force: true })) onRetry();
+            }}
+          >
+            Se connecter
+          </Button>
+          {!needsUser && !authFailed && (
+            <Button size="sm" icon={<Stethoscope size={13} />} onClick={() => useDoctor.getState().open(server.id)}>
+              Diagnostiquer
+            </Button>
+          )}
+        </div>
       </div>
     );
   }

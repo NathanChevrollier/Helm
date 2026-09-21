@@ -126,6 +126,15 @@ pub async fn ssh_connect(
     })
 }
 
+/// Diagnostic réseau d'un serveur injoignable, sans tentative d'authentification.
+#[tauri::command]
+pub async fn ssh_diagnose(store: State<'_, Store>, id: String) -> Result<helm_core::diagnose::Diagnosis, String> {
+    let p = store.server(&id)?;
+    let d = helm_core::diagnose::diagnose(&p.host, p.port).await;
+    log::info!("diagnostic de {} : {}", p.host, d.verdict);
+    Ok(d)
+}
+
 #[tauri::command]
 pub async fn ssh_disconnect(sessions: State<'_, Sessions>, id: String) -> Result<(), String> {
     sessions.disconnect(&id).await;

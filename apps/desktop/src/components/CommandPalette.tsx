@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Box, Cable, FolderOpen, Globe, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Zap } from "lucide-react";
+import { Box, Cable, FolderOpen, Globe, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Stethoscope, Zap } from "lucide-react";
+import { useDoctor } from "./ConnectionDoctor";
 import { api, errorMessage, shellQuote, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
 import { SECTIONS } from "../sections";
 import { ensureConnected, useApp } from "../lib/store";
@@ -62,6 +63,13 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     for (const s of servers) {
       list.push({ id: `server:${s.id}`, label: `Serveur : ${s.name}`, hint: s.host, icon: <Server size={15} />, run: () => setActiveServer(s.id) });
       list.push({ id: `term:${s.id}`, label: `Terminal sur ${s.name}`, icon: <SquareTerminal size={15} />, run: () => openTab(s.id) });
+      list.push({
+        id: `doctor:${s.id}`,
+        label: `Diagnostiquer la connexion à ${s.name}`,
+        hint: "IP bannie, sshd arrêté, serveur éteint…",
+        icon: <Stethoscope size={15} />,
+        run: () => useDoctor.getState().open(s.id),
+      });
       if (!s.connected) {
         list.push({
           id: `connect:${s.id}`,

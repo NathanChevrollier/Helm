@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod backup;
 pub mod deploy;
+pub mod diagnose;
 pub mod docker;
 pub mod nginx;
 pub mod security;

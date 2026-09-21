@@ -283,7 +283,14 @@ export async function ensureConnected(serverId: string, opts: { interactive?: bo
         await api.saveServer(s, { password: pw });
         continue;
       }
-      notify(msg, "error");
+      // Serveur injoignable : on propose le diagnostic réseau (IP bannie, sshd arrêté, serveur éteint…).
+      const { isNetworkFailure, useDoctor } = await import("../components/ConnectionDoctor");
+      if (isNetworkFailure(msg)) {
+        const ok = await ask({ title: `${server()?.name ?? "Serveur"} injoignable`, body: msg, confirmLabel: "Diagnostiquer" });
+        if (ok) useDoctor.getState().open(serverId);
+      } else {
+        notify(msg, "error");
+      }
       return false;
     }
   }
