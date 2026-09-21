@@ -1,0 +1,13 @@
+# Réglages proches d'un VPS réel, avec un bannissement court pour les tests.
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1
+bantime = 600
+findtime = 600
+maxretry = 3
+banaction = iptables-multiport
+
+[sshd]
+enabled = true
+port = 6666
+backend = polling
+logpath = /var/log/auth.log

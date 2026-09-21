@@ -3,6 +3,8 @@
 #
 #   pnpm testenv                      (ou : docker compose -f testenv/docker-compose.yml up -d --build)
 #   SSH : 127.0.0.1:2222   root / helm   ou   deploy / deploy (sudo avec mot de passe)
+#   Second VPS « Debian réaliste » : 127.0.0.1:2223   admin / admin (sudo avec mot de passe, fail2ban actif)
+#   Débannir le PC après des tests fail2ban :  docker exec helm-test-debian fail2ban-client unban --all
 #   Tout supprimer :  docker compose -f testenv/docker-compose.yml down -v
 services:
   # Démon Docker privé du faux VPS. Le VPS partage son réseau : 127.0.0.1 est le même pour les
@@ -28,6 +30,16 @@ services:
       - dind-run:/var/run/dind
     depends_on:
       - dind
+
+  # Debian non-root, port 6666, fail2ban : voir debian/Dockerfile.
+  debian:
+    build: ./debian
+    container_name: helm-test-debian
+    hostname: debian-vps
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "127.0.0.1:2223:6666"
 
 volumes:
   dind-run:
