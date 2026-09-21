@@ -165,6 +165,67 @@ export interface AgentInfo {
   error: string | null;
 }
 
+export type DockerAccess = "direct" | "sudo" | "unavailable";
+
+export interface PortMapping {
+  hostIp: string;
+  hostPort: number;
+  containerPort: number;
+  protocol: string;
+}
+
+export interface Container {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  ports: PortMapping[];
+  portsRaw: string;
+  createdAt: string;
+  composeProject: string | null;
+  composeService: string | null;
+}
+
+export interface ComposeProject {
+  name: string;
+  status: string;
+  configFiles: string;
+}
+
+export interface DockerOverview {
+  access: DockerAccess;
+  version: string;
+  containers: Container[];
+  projects: ComposeProject[];
+}
+
+export interface ContainerStats {
+  id: string;
+  cpu: number;
+  memPercent: number;
+  memUsage: string;
+  netIo: string;
+  pids: string;
+}
+
+export interface DockerImage {
+  id: string;
+  repository: string;
+  tag: string;
+  size: string;
+  createdSince: string;
+  containers: string;
+}
+
+export interface DockerDiskUsage {
+  kind: string;
+  totalCount: string;
+  active: string;
+  size: string;
+  reclaimable: string;
+}
+
 function progressChannel(onProgress: (p: Progress) => void) {
   const channel = new Channel<Progress>();
   channel.onmessage = onProgress;
@@ -224,6 +285,18 @@ export const api = {
   agentUninstall: (serverId: string) => invoke<void>("agent_uninstall", { serverId }),
   agentSaveConfig: (serverId: string, config: AgentConfig) => invoke<void>("agent_save_config", { serverId, config }),
   agentTestNotify: (serverId: string) => invoke<string>("agent_test_notify", { serverId }),
+
+  dockerOverview: (serverId: string) => invoke<DockerOverview>("docker_overview", { serverId }),
+  dockerStats: (serverId: string) => invoke<ContainerStats[]>("docker_stats", { serverId }),
+  dockerAction: (serverId: string, id: string, action: string) => invoke<void>("docker_container_action", { serverId, id, action }),
+  dockerInspect: (serverId: string, id: string) => invoke<string>("docker_inspect", { serverId, id }),
+  dockerLogs: (serverId: string, id: string, tail = 500) => invoke<string>("docker_logs", { serverId, id, tail }),
+  composeAction: (serverId: string, project: ComposeProject, action: string) =>
+    invoke<string>("docker_compose_action", { serverId, project, action }),
+  composeCommand: (project: ComposeProject, sub: string) => invoke<string>("docker_compose_command", { project, sub }),
+  dockerStorage: (serverId: string) => invoke<{ images: DockerImage[]; usage: DockerDiskUsage[] }>("docker_storage", { serverId }),
+  dockerRemoveImage: (serverId: string, id: string) => invoke<void>("docker_remove_image", { serverId, id }),
+  dockerPrune: (serverId: string, what: string) => invoke<string>("docker_prune", { serverId, what }),
 };
 
 export function formatDuration(secs: number): string {

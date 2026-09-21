@@ -7,6 +7,7 @@ import ServersView from "./views/Servers";
 import TerminalView from "./views/Terminal";
 import FilesView from "./views/Files";
 import MonitoringView from "./views/Monitoring";
+import DockerView from "./views/Docker";
 
 export default function App() {
   const { section, setSection, servers, activeServerId, setActiveServer, refreshServers } = useApp();
@@ -69,6 +70,8 @@ export default function App() {
                 <FilesView />
               ) : section === "monitoring" ? (
                 <MonitoringView />
+              ) : section === "docker" ? (
+                <DockerView />
               ) : (
                 <EmptyState icon={<current.icon size={40} />} title={current.label}>
                   {current.description}
