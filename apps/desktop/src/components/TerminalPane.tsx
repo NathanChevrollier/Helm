@@ -41,38 +41,45 @@ function decode(b64: string): Uint8Array {
   return out;
 }
 
-/** Disponibilité de tmux par serveur, vérifiée une seule fois (et installation proposée une seule fois). */
-const tmuxReady = new Map<string, Promise<boolean>>();
+/** Présence de tmux par serveur : vrai, faux, ou null si la vérification a échoué (rien n'est alors mis en cache). */
+const tmuxPresent = new Map<string, Promise<boolean>>();
 
-async function ensureTmux(serverId: string): Promise<boolean> {
-  const { settings, setSettings, ask, notify } = useApp.getState();
-  if (settings.tmuxDeclined[serverId]) return false;
-  let p = tmuxReady.get(serverId);
+function tmuxAvailable(serverId: string): Promise<boolean | null> {
+  let p = tmuxPresent.get(serverId);
   if (!p) {
-    p = (async () => {
-      if (await api.tmuxCheck(serverId).catch(() => null)) return true;
-      const ok = await ask({
-        title: "Sessions persistantes",
-        body: "tmux n'est pas installé sur ce serveur. Il permet de retrouver tes terminaux intacts après une coupure réseau ou la fermeture de l'app. L'installer maintenant (paquet officiel de ta distribution) ?",
-        confirmLabel: "Installer tmux",
-      });
-      if (!ok) {
-        setSettings({ tmuxDeclined: { ...useApp.getState().settings.tmuxDeclined, [serverId]: true } });
-        return false;
-      }
-      try {
-        await api.tmuxInstall(serverId);
-        notify("tmux installé", "success");
-        return true;
-      } catch (e) {
-        notify(`Installation de tmux impossible : ${errorMessage(e)}`, "error");
-        return false;
-      }
-    })();
-    tmuxReady.set(serverId, p);
-    void p.then((ok) => !ok && tmuxReady.delete(serverId));
+    p = api.tmuxCheck(serverId).then((v) => !!v);
+    tmuxPresent.set(serverId, p);
   }
-  return p;
+  return p.catch(() => {
+    tmuxPresent.delete(serverId);
+    return null;
+  });
+}
+
+/** Serveurs pour lesquels l'installation de tmux a déjà été proposée pendant cette session de l'app. */
+const tmuxOffered = new Set<string>();
+
+/** Propose tmux une fois le terminal ouvert, sans bloquer son ouverture. */
+async function offerTmux(serverId: string) {
+  const { settings, setSettings, ask, notify } = useApp.getState();
+  if (settings.tmuxDeclined[serverId] || tmuxOffered.has(serverId)) return;
+  tmuxOffered.add(serverId);
+  const ok = await ask({
+    title: "Sessions persistantes",
+    body: "tmux n'est pas installé sur ce serveur. Il permet de retrouver tes terminaux intacts après une coupure réseau ou la fermeture de l'app. L'installer maintenant (paquet officiel de ta distribution) ? Les prochains terminaux ouverts en profiteront.",
+    confirmLabel: "Installer tmux",
+  });
+  if (!ok) {
+    setSettings({ tmuxDeclined: { ...useApp.getState().settings.tmuxDeclined, [serverId]: true } });
+    return;
+  }
+  try {
+    await api.tmuxInstall(serverId);
+    tmuxPresent.set(serverId, Promise.resolve(true));
+    notify("tmux installé : les prochains terminaux seront persistants", "success");
+  } catch (e) {
+    notify(`Installation de tmux impossible : ${errorMessage(e)}`, "error");
+  }
 }
 
 export default function TerminalPane({
@@ -159,7 +166,8 @@ export default function TerminalPane({
         waitingReconnect = true;
         return;
       }
-      const useTmux = !command && !!tmux && (await ensureTmux(serverId));
+      const hasTmux = !command && tmux ? await tmuxAvailable(serverId) : null;
+      const useTmux = hasTmux === true;
       try {
         const id = await api.termOpen(
           serverId,
@@ -191,6 +199,7 @@ export default function TerminalPane({
         setTerm(id);
         focusedTerminal.id = id;
         if (visibleRef.current) term.focus();
+        if (hasTmux === false) void offerTmux(serverId);
       } catch (e) {
         if (!interactive && tmux) return scheduleRetry();
         term.write(`\x1b[31m${errorMessage(e)}\x1b[0m\r\nAppuie sur Entrée pour réessayer.\r\n`);
