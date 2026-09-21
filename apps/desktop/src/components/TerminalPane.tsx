@@ -123,7 +123,8 @@ export default function TerminalPane({
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
+    // Seuls les liens web s'ouvrent : une sortie de commande ne doit pas pouvoir lancer autre chose.
+    term.loadAddon(new WebLinksAddon((_e, url) => /^https?:\/\//i.test(url) && void openUrl(url)));
     term.open(host.current!);
     try {
       term.loadAddon(new WebglAddon());
@@ -237,6 +238,38 @@ export default function TerminalPane({
       focusedTerminal.id = idRef.current;
     });
 
+    // Collage : un bloc de plusieurs lignes s'exécuterait ligne par ligne dès le collage ; on
+    // demande confirmation (sauf si le shell gère le « bracketed paste »), et toujours quand la
+    // saisie est diffusée à plusieurs serveurs.
+    const safePaste = async (text: string) => {
+      if (!text) return;
+      const multiline = /[\r\n]/.test(text.replace(/\r?\n$/, ""));
+      const broadcast = isBroadcasting(paneId);
+      if ((multiline && !term.modes.bracketedPasteMode) || broadcast) {
+        const lines = text.split(/\r?\n/).filter((l) => l.trim()).length;
+        const ok = await useApp.getState().ask({
+          title: broadcast ? `Coller dans ${useBroadcast.getState().targets.length} terminaux ?` : `Coller ${lines} lignes ?`,
+          body: broadcast
+            ? "La saisie est diffusée : ce texte sera envoyé à tous les terminaux sélectionnés."
+            : "Chaque ligne sera exécutée dès le collage. Vérifie le contenu avant de continuer.",
+          code: text.length > 3000 ? `${text.slice(0, 3000)}\n…` : text,
+          confirmLabel: "Coller",
+          danger: broadcast,
+        });
+        if (!ok) return;
+      }
+      term.paste(text);
+      term.focus();
+    };
+    // Ctrl+V et collage natif : interceptés avant xterm (phase de capture sur le conteneur).
+    const onPaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void safePaste(e.clipboardData?.getData("text/plain") ?? "");
+    };
+    const hostEl = host.current!;
+    hostEl.addEventListener("paste", onPaste, true);
+
     // Ctrl+Shift+C / Ctrl+Shift+V, comme dans les terminaux Linux ; Ctrl+C reste SIGINT.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey) return true;
@@ -246,7 +279,7 @@ export default function TerminalPane({
         return false;
       }
       if (e.code === "KeyV") {
-        void navigator.clipboard.readText().then((text) => term.paste(text));
+        void navigator.clipboard.readText().then(safePaste);
         return false;
       }
       return true;
@@ -259,7 +292,7 @@ export default function TerminalPane({
         void navigator.clipboard.writeText(sel);
         term.clearSelection();
       } else {
-        void navigator.clipboard.readText().then((text) => term.paste(text));
+        void navigator.clipboard.readText().then(safePaste);
       }
     };
     host.current!.addEventListener("contextmenu", onContext);
@@ -275,6 +308,7 @@ export default function TerminalPane({
       disposed = true;
       clearTimeout(retryTimer);
       observer.disconnect();
+      hostEl.removeEventListener("paste", onPaste, true);
       useBroadcast.getState().unregister(paneId);
       // Fermer le canal détache simplement la session tmux : elle continue sur le serveur.
       if (idRef.current != null) void api.termClose(idRef.current);
