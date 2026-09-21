@@ -1,15 +1,30 @@
 //! Logique métier de Helm, indépendante de l'interface.
-//!
-//! Modules prévus : `ssh` (phase 1), `sftp` (phase 2), `docker` (phase 4), `nginx` (phase 5).
 
-use serde::{Deserialize, Serialize};
+pub mod ssh;
 
-/// Serveur enregistré dans l'app. Les secrets sont stockés dans le keyring de l'OS, jamais ici.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerProfile {
-    pub id: String,
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub username: String,
+pub use russh;
+
+pub use ssh::{Auth, ConnectParams, Connection, ExecOutput};
+
+/// Erreurs remontées à l'interface. Le préfixe de certains messages sert de code côté UI.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("UNKNOWN_HOST_KEY:{0}")]
+    UnknownHostKey(String),
+    #[error("HOST_KEY_MISMATCH:{expected}|{got}")]
+    HostKeyMismatch { expected: String, got: String },
+    #[error("Connexion impossible : {0}")]
+    Connection(String),
+    #[error("Authentification échouée : {0}")]
+    Auth(String),
+    #[error("Erreur SSH : {0}")]
+    Ssh(#[from] russh::Error),
+    #[error("Erreur SFTP : {0}")]
+    Sftp(String),
+    #[error("Commande distante en échec : {0}")]
+    Remote(String),
+    #[error("{0}")]
+    Other(String),
 }
+
+pub type Result<T> = std::result::Result<T, Error>;

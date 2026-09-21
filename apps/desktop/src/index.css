@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
 
 @theme {
   --color-bg: #0d1117;
@@ -7,6 +8,9 @@
   --color-fg: #e6edf3;
   --color-muted: #8b949e;
   --color-accent: #3b82f6;
+  --color-ok: #3fb950;
+  --color-warn: #d29922;
+  --color-danger: #f85149;
   --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
 }
@@ -19,8 +23,28 @@ body,
 
 body {
   margin: 0;
+  overflow: hidden;
   background: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-sans);
   user-select: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.xterm {
+  padding: 6px 0 0 8px;
+  height: 100%;
 }

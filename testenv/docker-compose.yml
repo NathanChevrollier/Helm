@@ -1,0 +1,18 @@
+# Environnement de test local : `docker compose -f testenv/docker-compose.yml up -d --build`
+# puis connexion SSH sur localhost:2222 (root/helm ou deploy/deploy).
+services:
+  vps:
+    build: .
+    container_name: helm-test-vps
+    hostname: test-vps
+    ports:
+      - "127.0.0.1:2222:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Conteneur « application » qui sert de cible au site demo.example.com.
+  demo-app:
+    image: nginx:alpine
+    container_name: helm-demo-app
+    ports:
+      - "127.0.0.1:8081:80"
