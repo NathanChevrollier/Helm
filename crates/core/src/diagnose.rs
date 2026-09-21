@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpStream;
 
 const STEP_LIMIT: Duration = Duration::from_secs(6);
@@ -63,17 +63,16 @@ fn describe(p: Probe, took: Duration) -> String {
     }
 }
 
-/// IP publique du PC, via un service web simple (en clair : aucune donnée envoyée).
+/// IP publique du PC, demandée en HTTPS : une réponse falsifiée sur un réseau non sûr pourrait
+/// sinon faire ajouter une mauvaise adresse aux exceptions fail2ban.
 pub async fn public_ip() -> Option<String> {
-    let work = async {
-        let mut s = TcpStream::connect("api.ipify.org:80").await.ok()?;
-        s.write_all(b"GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n").await.ok()?;
-        let mut body = String::new();
-        s.read_to_string(&mut body).await.ok()?;
-        let ip = body.rsplit("\r\n\r\n").next()?.trim().to_string();
+    let work = tokio::task::spawn_blocking(|| {
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(STEP_LIMIT)).build().into();
+        let body = agent.get("https://api.ipify.org").call().ok()?.body_mut().read_to_string().ok()?;
+        let ip = body.trim().to_string();
         ip.parse::<std::net::IpAddr>().ok().map(|_| ip)
-    };
-    tokio::time::timeout(STEP_LIMIT, work).await.ok().flatten()
+    });
+    work.await.ok().flatten()
 }
 
 pub async fn diagnose(host: &str, port: u16) -> Diagnosis {
