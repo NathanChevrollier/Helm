@@ -160,7 +160,7 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
 async fn upload_binary(conn: &Connection, local: &Path) -> Result<String> {
     let sftp = conn.sftp().await?;
     let remote = format!("/tmp/helmd-upload-{}", std::process::id());
-    let noop = |_p: crate::sftp::Progress| {};
+    let noop = |_p: crate::sftp::Progress| true;
     let dir = std::env::temp_dir().join(format!("helm-agent-{}", std::process::id()));
     // `upload` conserve le nom du fichier : on passe par une copie nommée comme la cible.
     std::fs::create_dir_all(&dir).map_err(|e| Error::Other(e.to_string()))?;

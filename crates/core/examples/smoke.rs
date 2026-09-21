@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(tmp.join("src/big.bin"), &big)?;
     std::fs::write(tmp.join("src/sub/a.txt"), "hello")?;
     let _ = fs::remove(&sftp, "/tmp/src").await;
-    let noop = |_p: fs::Progress| {};
+    let noop = |_p: fs::Progress| true;
     fs::upload(&sftp, &tmp.join("src"), "/tmp", &noop).await?;
     std::fs::create_dir_all(tmp.join("back"))?;
     fs::download(&sftp, "/tmp/src", &tmp.join("back"), &noop).await?;

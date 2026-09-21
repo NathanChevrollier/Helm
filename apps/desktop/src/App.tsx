@@ -1,25 +1,50 @@
-import { useEffect, useState } from "react";
-import { ShipWheel } from "lucide-react";
+import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
+import { Search, ShipWheel } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp } from "./lib/store";
-import { SECTIONS } from "./sections";
-import { DialogHost, Toasts } from "./components/ui";
-import ServersView from "./views/Servers";
+import { SECTIONS, type SectionId } from "./sections";
+import { DialogHost, EmptyState, Toasts } from "./components/ui";
+import CommandPalette from "./components/CommandPalette";
+import HomeView from "./views/Home";
 import TerminalView from "./views/Terminal";
-import FilesView from "./views/Files";
-import MonitoringView from "./views/Monitoring";
-import DockerView from "./views/Docker";
-import SitesView from "./views/Sites";
+
+const VIEWS: Partial<Record<SectionId, ComponentType>> = {
+  servers: lazy(() => import("./views/Servers")),
+  files: lazy(() => import("./views/Files")),
+  monitoring: lazy(() => import("./views/Monitoring")),
+  docker: lazy(() => import("./views/Docker")),
+  sites: lazy(() => import("./views/Sites")),
+  logs: lazy(() => import("./views/Logs")),
+  tunnels: lazy(() => import("./views/Tunnels")),
+  backups: lazy(() => import("./views/Backups")),
+  security: lazy(() => import("./views/Security")),
+  settings: lazy(() => import("./views/Settings")),
+};
 
 export default function App() {
-  const { section, setSection, servers, activeServerId, setActiveServer, refreshServers } = useApp();
+  const { section, setSection, servers, activeServerId, setActiveServer, refreshServers, hydrated, hydrate } = useApp();
   const [version, setVersion] = useState<string>();
+  const [palette, setPalette] = useState(false);
   const active = servers.find((s) => s.id === activeServerId);
+  const View = VIEWS[section];
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(undefined));
-    void refreshServers();
-  }, [refreshServers]);
+    // Profils d'abord (les onglets restaurés en dépendent), puis l'espace de travail sauvegardé.
+    void refreshServers().then(hydrate);
+  }, [refreshServers, hydrate]);
+
+  // Ctrl+K : palette de commandes.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === "KeyK") {
+        e.preventDefault();
+        setPalette((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -29,7 +54,7 @@ export default function App() {
             <ShipWheel size={20} className="text-accent" />
             Helm
           </div>
-          <div className="px-3 pb-3">
+          <div className="px-3 pb-2">
             <select
               className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm outline-none focus:border-accent"
               value={activeServerId ?? ""}
@@ -45,7 +70,17 @@ export default function App() {
               ))}
             </select>
           </div>
-          <div className="flex flex-col gap-0.5 px-3">
+          <div className="px-3 pb-3">
+            <button
+              onClick={() => setPalette(true)}
+              className="flex h-8 w-full items-center gap-2 rounded-md border border-border px-2 text-xs text-muted hover:text-fg"
+            >
+              <Search size={13} />
+              Rechercher une action
+              <kbd className="ml-auto rounded border border-border px-1 font-sans text-[10px]">Ctrl K</kbd>
+            </button>
+          </div>
+          <div className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
             {SECTIONS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -62,24 +97,25 @@ export default function App() {
         </nav>
 
         <main className="relative min-w-0 flex-1">
-          {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
-          <div className={`absolute inset-0 ${section === "terminal" ? "" : "invisible"}`}>
-            <TerminalView visible={section === "terminal"} />
-          </div>
-          {section !== "terminal" && (
-            <div className="absolute inset-0 bg-bg">
-              {section === "servers" ? (
-                <ServersView />
-              ) : section === "files" ? (
-                <FilesView />
-              ) : section === "monitoring" ? (
-                <MonitoringView />
-              ) : section === "docker" ? (
-                <DockerView />
-              ) : (
-                <SitesView />
+          {hydrated && (
+            <>
+              {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
+              <div className={`absolute inset-0 ${section === "terminal" ? "" : "invisible"}`}>
+                <TerminalView visible={section === "terminal"} />
+              </div>
+              {section === "home" && (
+                <div className="absolute inset-0 bg-bg">
+                  <HomeView visible />
+                </div>
               )}
-            </div>
+              {View && (
+                <div className="absolute inset-0 bg-bg">
+                  <Suspense fallback={<EmptyState icon={<ShipWheel size={32} className="animate-spin" />} title="Chargement…" />}>
+                    <View />
+                  </Suspense>
+                </div>
+              )}
+            </>
           )}
         </main>
       </div>
@@ -98,6 +134,7 @@ export default function App() {
         <span>{version ? `Helm v${version}` : ""}</span>
       </footer>
 
+      {palette && <CommandPalette onClose={() => setPalette(false)} />}
       <DialogHost />
       <Toasts />
     </div>

@@ -1,13 +1,18 @@
 //! Explorateur de fichiers SFTP et édition distante.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use helm_core::sftp::{self, Listing, Progress};
+use helm_core::ssh::shell_quote;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
-use crate::commands::admin;
+use crate::commands::{admin, track};
 use crate::sessions::Sessions;
+use crate::store::AuditLog;
 use crate::store::Store;
 
 fn err(e: impl ToString) -> String {
@@ -58,6 +63,7 @@ pub async fn fs_read(
 
 #[tauri::command]
 pub async fn fs_write(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
@@ -65,104 +71,242 @@ pub async fn fs_write(
     content: String,
     sudo: bool,
 ) -> Result<(), String> {
-    if sudo {
-        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        return conn.write_file_sudo(&path, &content, pw.as_deref()).await.map_err(err);
+    let detail = path.clone();
+    let r: Result<(), String> = async {
+        if sudo {
+            let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+            return conn.write_file_sudo(&path, &content, pw.as_deref()).await.map_err(err);
+        }
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        sftp::write_text(&sftp, &path, &content).await.map_err(err)
     }
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    sftp::write_text(&sftp, &path, &content).await.map_err(err)
+    .await;
+    track(&audit, &store, &server_id, "file.write", &detail, r)
 }
 
 #[tauri::command]
-pub async fn fs_mkdir(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String, path: String) -> Result<(), String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    sftp::mkdir(&sftp, &path).await.map_err(err)
+pub async fn fs_mkdir(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+) -> Result<(), String> {
+    let detail = path.clone();
+    let r: Result<(), String> = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        sftp::mkdir(&sftp, &path).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "file.mkdir", &detail, r)
 }
 
 #[tauri::command]
-pub async fn fs_create(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String, path: String) -> Result<(), String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    sftp::create_file(&sftp, &path).await.map_err(err)
+pub async fn fs_create(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+) -> Result<(), String> {
+    let detail = path.clone();
+    let r: Result<(), String> = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        sftp::create_file(&sftp, &path).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "file.create", &detail, r)
 }
 
 #[tauri::command]
 pub async fn fs_rename(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
     from: String,
     to: String,
 ) -> Result<(), String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    sftp::rename(&sftp, &from, &to).await.map_err(err)
+    let detail = format!("{from} → {to}");
+    let r: Result<(), String> = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        sftp::rename(&sftp, &from, &to).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "file.rename", &detail, r)
 }
 
 #[tauri::command]
 pub async fn fs_remove(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
     paths: Vec<String>,
 ) -> Result<(), String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    for p in paths {
-        sftp::remove(&sftp, &p).await.map_err(err)?;
+    let detail = paths.join(", ");
+    let r: Result<(), String> = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        for p in paths {
+            sftp::remove(&sftp, &p).await.map_err(err)?;
+        }
+        Ok(())
     }
-    Ok(())
+    .await;
+    track(&audit, &store, &server_id, "file.delete", &detail, r)
 }
 
 #[tauri::command]
 pub async fn fs_chmod(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
     path: String,
     mode: u32,
 ) -> Result<(), String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    sftp::chmod(&sftp, &path, mode).await.map_err(err)
+    let detail = format!("{path} {mode:o}");
+    let r: Result<(), String> = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        sftp::chmod(&sftp, &path, mode).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "file.chmod", &detail, r)
+}
+
+/// Transferts en cours, annulables depuis l'interface.
+#[derive(Default)]
+pub struct Transfers(Mutex<HashMap<u64, Arc<AtomicBool>>>);
+
+impl Transfers {
+    fn start(&self, id: u64) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        self.0.lock().unwrap().insert(id, flag.clone());
+        flag
+    }
+
+    fn finish(&self, id: u64) {
+        self.0.lock().unwrap().remove(&id);
+    }
+}
+
+#[tauri::command]
+pub fn fs_cancel(transfers: State<'_, Transfers>, transfer_id: u64) {
+    if let Some(f) = transfers.0.lock().unwrap().get(&transfer_id) {
+        f.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Callback de progression : relaie vers l'UI et renvoie `false` si le transfert a été annulé.
+fn reporter(channel: &Channel<Progress>, cancel: Arc<AtomicBool>) -> impl Fn(Progress) -> bool + Send + Sync + '_ {
+    move |p: Progress| {
+        let _ = channel.send(p);
+        !cancel.load(Ordering::Relaxed)
+    }
 }
 
 /// Télécharge des éléments distants dans `local_dir` (par défaut : le dossier Téléchargements).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_download(
     app: AppHandle,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
+    transfers: State<'_, Transfers>,
     server_id: String,
     paths: Vec<String>,
     local_dir: Option<String>,
+    transfer_id: u64,
     on_progress: Channel<Progress>,
 ) -> Result<String, String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    let dir = match local_dir {
-        Some(d) => PathBuf::from(d),
-        None => app.path().download_dir().map_err(err)?,
-    };
-    let report = |p: Progress| {
-        let _ = on_progress.send(p);
-    };
-    for p in &paths {
-        sftp::download(&sftp, p, &dir, &report).await.map_err(err)?;
+    let cancel = transfers.start(transfer_id);
+    let r = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        let dir = match local_dir {
+            Some(d) => PathBuf::from(d),
+            None => app.path().download_dir().map_err(err)?,
+        };
+        let report = reporter(&on_progress, cancel.clone());
+        for p in &paths {
+            sftp::download(&sftp, p, &dir, &report).await.map_err(err)?;
+        }
+        Ok(dir.display().to_string())
     }
-    Ok(dir.display().to_string())
+    .await;
+    transfers.finish(transfer_id);
+    r
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_upload(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
+    transfers: State<'_, Transfers>,
     server_id: String,
     local_paths: Vec<String>,
     remote_dir: String,
+    transfer_id: u64,
     on_progress: Channel<Progress>,
 ) -> Result<(), String> {
-    let sftp = sessions.sftp(&store, &server_id).await?;
-    let report = |p: Progress| {
-        let _ = on_progress.send(p);
-    };
-    for p in &local_paths {
-        sftp::upload(&sftp, &PathBuf::from(p), &remote_dir, &report).await.map_err(err)?;
+    let detail = format!("{} → {remote_dir}", local_paths.len());
+    let cancel = transfers.start(transfer_id);
+    let r: Result<(), String> = async {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        let report = reporter(&on_progress, cancel.clone());
+        for p in &local_paths {
+            sftp::upload(&sftp, &PathBuf::from(p), &remote_dir, &report).await.map_err(err)?;
+        }
+        Ok(())
     }
-    Ok(())
+    .await;
+    transfers.finish(transfer_id);
+    track(&audit, &store, &server_id, "file.upload", &detail, r)
+}
+
+/// Copie des éléments d'un serveur (ou dossier) vers un autre. Sur un même serveur : `cp -a`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_copy_between(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    transfers: State<'_, Transfers>,
+    src_server: String,
+    paths: Vec<String>,
+    dst_server: String,
+    dst_dir: String,
+    overwrite: bool,
+    transfer_id: u64,
+    on_progress: Channel<Progress>,
+) -> Result<(), String> {
+    let dst_name = store.server(&dst_server).map(|s| s.name).unwrap_or_default();
+    let detail = format!("{} élément(s) → {dst_name}:{dst_dir}", paths.len());
+    let cancel = transfers.start(transfer_id);
+    let r: Result<(), String> = async {
+        if src_server == dst_server {
+            let conn = sessions.get(&store, &src_server).await?;
+            for p in &paths {
+                let name = p.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                let target = sftp::join(&dst_dir, name);
+                if !overwrite && conn.exec(&format!("test -e {}", shell_quote(&target)), None).await.map_err(err)?.success() {
+                    return Err(format!("EXISTS:{target}"));
+                }
+                conn.run(&format!("cp -a -- {} {}", shell_quote(p), shell_quote(&dst_dir))).await.map_err(err)?;
+            }
+            return Ok(());
+        }
+        let src = sessions.sftp(&store, &src_server).await?;
+        let dst = sessions.sftp(&store, &dst_server).await?;
+        let report = reporter(&on_progress, cancel.clone());
+        for p in &paths {
+            sftp::copy_between(&src, p, &dst, &dst_dir, overwrite, &report).await.map_err(err)?;
+        }
+        Ok(())
+    }
+    .await;
+    transfers.finish(transfer_id);
+    // L'écriture a lieu sur le serveur de destination : c'est lui qui figure au journal.
+    track(&audit, &store, &dst_server, "file.copy_between", &detail, r)
 }

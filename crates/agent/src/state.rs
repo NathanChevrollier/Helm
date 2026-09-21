@@ -149,6 +149,20 @@ pub fn start(paths: Paths) -> Result<(), String> {
                     transitions.push(t);
                 }
             }
+            // Résultat de la dernière sauvegarde Helm, s'il y en a une de configurée.
+            let last = std::fs::read_to_string("/var/lib/helm-backup/last.json")
+                .ok()
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .map(|v| {
+                    (
+                        v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false),
+                        v.get("finishedAt").and_then(|x| x.as_i64()).unwrap_or(0),
+                        v.get("message").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    )
+                });
+            if let Some(t) = s.lock().unwrap().alerts.backup_result(last, now_ms() / 1000, &server) {
+                transitions.push(t);
+            }
             dispatch(&s, transitions);
             std::thread::sleep(Duration::from_secs(interval));
         });

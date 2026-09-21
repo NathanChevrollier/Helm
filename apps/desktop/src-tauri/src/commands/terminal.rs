@@ -14,9 +14,16 @@ pub async fn term_open(
     cols: u32,
     rows: u32,
     command: Option<String>,
+    tmux_session: Option<String>,
     on_event: Channel<TermEvent>,
 ) -> Result<u64, String> {
     let conn = sessions.get(&store, &server_id).await?;
+    // Une session tmux remplace le shell : elle survit aux coupures et à la fermeture de l'app.
+    let command = match (command, tmux_session) {
+        (Some(c), _) => Some(c),
+        (None, Some(name)) => Some(helm_core::tmux::attach_command(&name).map_err(|e| e.to_string())?),
+        (None, None) => None,
+    };
     sessions.open_terminal(&conn, cols, rows, command, on_event).await
 }
 

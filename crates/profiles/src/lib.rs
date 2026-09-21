@@ -1,0 +1,178 @@
+//! Données locales de Helm, partagées par l'app desktop et le serveur MCP :
+//! profils de serveurs, clés d'hôte approuvées, snippets, tunnels, état de l'interface,
+//! secrets (dans le keyring de l'OS) et journal d'actions.
+
+pub mod audit;
+pub mod secrets;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use helm_core::{Auth, ConnectParams};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+/// Identifiant de l'app : nom du dossier de configuration et du service keyring.
+pub const APP_ID: &str = "dev.helm.desktop";
+
+/// Dossier de configuration de Helm (identique à `app_config_dir` de Tauri).
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(APP_ID)
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthKind {
+    Password,
+    Key,
+    Agent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerProfile {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_kind: AuthKind,
+    #[serde(default)]
+    pub key_path: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Le serveur MCP (lecture seule) peut-il interroger ce serveur ? Désactivé par défaut.
+    #[serde(default)]
+    pub ai_access: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snippet {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+}
+
+/// Tunnel SSH local : 127.0.0.1:`local_port` sur le PC → `remote_host`:`remote_port` vu du serveur.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelDef {
+    pub id: String,
+    pub server_id: String,
+    pub name: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+    #[serde(default)]
+    pub auto_start: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Data {
+    #[serde(default)]
+    pub servers: Vec<ServerProfile>,
+    /// `host:port` → empreinte SHA256 de la clé d'hôte approuvée.
+    #[serde(default)]
+    pub known_hosts: HashMap<String, String>,
+    #[serde(default)]
+    pub snippets: Vec<Snippet>,
+    #[serde(default)]
+    pub tunnels: Vec<TunnelDef>,
+    /// État de l'interface (onglets, dossiers ouverts…), opaque côté Rust.
+    #[serde(default)]
+    pub ui_state: serde_json::Value,
+}
+
+pub struct Store {
+    path: PathBuf,
+    data: Mutex<Data>,
+}
+
+impl Store {
+    pub fn load(dir: &Path) -> Self {
+        let _ = std::fs::create_dir_all(dir);
+        let path = dir.join("helm.json");
+        let data = read_json(&path).unwrap_or_default();
+        Self { path, data: Mutex::new(data) }
+    }
+
+    /// Relit le fichier (le serveur MCP tourne dans un autre processus que l'app).
+    pub fn reload(&self) {
+        if let Some(d) = read_json(&self.path) {
+            *self.data.lock().unwrap() = d;
+        }
+    }
+
+    pub fn read<T>(&self, f: impl FnOnce(&Data) -> T) -> T {
+        f(&self.data.lock().unwrap())
+    }
+
+    /// Modifie les données puis les écrit sur disque de façon atomique (fichier temporaire + rename).
+    pub fn write<T>(&self, f: impl FnOnce(&mut Data) -> T) -> Result<T, String> {
+        let mut data = self.data.lock().unwrap();
+        let out = f(&mut data);
+        let json = serde_json::to_vec_pretty(&*data).map_err(|e| e.to_string())?;
+        let tmp = self.path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
+        Ok(out)
+    }
+
+    pub fn server(&self, id: &str) -> Result<ServerProfile, String> {
+        self.read(|d| d.servers.iter().find(|s| s.id == id).cloned()).ok_or_else(|| "serveur introuvable".to_string())
+    }
+
+    /// Paramètres de connexion SSH d'un serveur, secrets lus dans le keyring.
+    pub fn connect_params(&self, server_id: &str) -> Result<ConnectParams, String> {
+        let profile = self.server(server_id)?;
+        let auth = match profile.auth_kind {
+            AuthKind::Password => Auth::Password {
+                password: secrets::get(server_id, "password").ok_or("NEED_PASSWORD: aucun mot de passe enregistré pour ce serveur")?,
+            },
+            AuthKind::Key => Auth::KeyFile {
+                path: profile.key_path.clone().ok_or("aucune clé privée configurée")?,
+                passphrase: secrets::get(server_id, "passphrase"),
+            },
+            AuthKind::Agent => Auth::Agent,
+        };
+        let host_key = format!("{}:{}", profile.host, profile.port);
+        Ok(ConnectParams {
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            auth,
+            known_fingerprint: self.read(|d| d.known_hosts.get(&host_key).cloned()),
+        })
+    }
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_files_still_load() {
+        // Fichier de la v1 : sans tunnels, ui_state ni ai_access.
+        let v1 = r#"{"servers":[{"id":"a","name":"VPS","host":"h","port":22,"username":"root","authKind":"password"}],"knownHosts":{},"snippets":[]}"#;
+        let d: Data = serde_json::from_str(v1).unwrap();
+        assert!(!d.servers[0].ai_access);
+        assert!(d.tunnels.is_empty());
+    }
+
+    #[test]
+    fn write_then_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::load(dir.path());
+        s.write(|d| d.snippets.push(Snippet { id: "1".into(), name: "n".into(), command: "ls".into() })).unwrap();
+        let other = Store::load(dir.path());
+        assert_eq!(other.read(|d| d.snippets.len()), 1);
+    }
+}

@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowRight, CircleCheck, CircleX, ExternalLink, FileCode2, Globe, Lock, LockOpen, Plus, Power, PowerOff,
-  RefreshCw, ShieldCheck, Trash2, Zap,
+  History, RefreshCw, ShieldCheck, Trash2, Zap,
 } from "lucide-react";
 import { api, errorMessage, type Certificate, type Container, type NginxState, type ServerBlock, type SiteFile } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
@@ -10,6 +10,7 @@ import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 
 const NginxEditor = lazy(() => import("../components/NginxEditor"));
 const NewSiteWizard = lazy(() => import("../components/NewSiteWizard"));
+const NginxHistory = lazy(() => import("../components/NginxHistory"));
 
 export default function SitesView() {
   const serverId = useApp((s) => s.activeServerId);
@@ -50,6 +51,7 @@ function Sites({ serverId }: { serverId: string }) {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<SiteFile | null>(null);
   const [wizard, setWizard] = useState(false);
+  const [history, setHistory] = useState(false);
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   const [checks, setChecks] = useState<Record<string, string>>({});
 
@@ -148,6 +150,9 @@ function Sites({ serverId }: { serverId: string }) {
               Renouveler les certificats
             </Button>
           )}
+          <Button size="sm" icon={<History size={13} />} onClick={() => setHistory(true)}>
+            Historique
+          </Button>
           <IconButton title="Actualiser" onClick={() => void load()}>
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
           </IconButton>
@@ -340,6 +345,7 @@ function Sites({ serverId }: { serverId: string }) {
       <Suspense fallback={null}>
         {editing && <NginxEditor serverId={serverId} path={editing.realPath} onClose={() => setEditing(null)} onApplied={() => void load()} />}
         {wizard && <NewSiteWizard serverId={serverId} onClose={() => setWizard(false)} onDone={() => void load()} />}
+        {history && <NginxHistory serverId={serverId} onClose={() => setHistory(false)} onRestored={() => void load()} />}
       </Suspense>
       {output && (
         <Modal title={output.title} width="max-w-3xl" onClose={() => setOutput(null)}>

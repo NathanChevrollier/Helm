@@ -1,11 +1,15 @@
 //! Logique métier de Helm, indépendante de l'interface.
 
 pub mod agent;
+pub mod backup;
+pub mod deploy;
 pub mod docker;
 pub mod nginx;
+pub mod security;
 pub mod sftp;
 pub mod ssh;
 pub mod system;
+pub mod tmux;
 
 pub use russh;
 pub use russh_sftp;

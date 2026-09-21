@@ -1,16 +1,57 @@
-import { useEffect, useState } from "react";
-import { Columns2, Pencil, Plus, ScrollText, SquareTerminal, Trash2, X } from "lucide-react";
-import TerminalPane, { focusedTerminal } from "../components/TerminalPane";
-import { api, type Snippet } from "../lib/api";
-import { useApp } from "../lib/store";
-import { Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import { useCallback, useEffect, useState } from "react";
+import { Columns2, History, Plus, Radio, ScrollText, SquareTerminal, X } from "lucide-react";
+import TerminalPane from "../components/TerminalPane";
+import SnippetsPanel from "../components/SnippetsPanel";
+import { api, errorMessage, type TmuxSession } from "../lib/api";
+import { useBroadcast } from "../lib/broadcast";
+import { newTmuxName, useApp, type TermTab } from "../lib/store";
+import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+
+const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
 
 export default function TerminalView({ visible }: { visible: boolean }) {
-  const { tabs, activeTab, setActiveTab, closeTab, openTab, activeServerId, servers } = useApp();
-  const [split, setSplit] = useState<Record<string, boolean>>({});
+  const { tabs, activeTab, setActiveTab, closeTab, openTab, updateTab, activeServerId, servers, ask, notify } = useApp();
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [showSnippets, setShowSnippets] = useState(false);
+  const [sessionsOf, setSessionsOf] = useState<string | null>(null);
+  const [broadcastPicker, setBroadcastPicker] = useState(false);
+  const broadcast = useBroadcast();
   const current = tabs.find((t) => t.key === activeTab);
+  const serverOf = useCallback((id: string) => servers.find((s) => s.id === id), [servers]);
+
+  // La diffusion s'arrête dès qu'on quitte le terminal.
+  useEffect(() => {
+    if (!visible && useBroadcast.getState().active) useBroadcast.getState().setActive(false);
+  }, [visible]);
+
+  /**
+   * Ferme un onglet. Sa session tmux est fermée aussi, sauf si un programme y tourne encore :
+   * on propose alors de le laisser continuer en arrière-plan.
+   */
+  const close = useCallback(
+    async (tab: TermTab) => {
+      const names = [tab.tmux, tab.split].filter((n): n is string => !!n);
+      if (names.length) {
+        try {
+          const live = (await api.tmuxSessions(tab.serverId)).filter((s) => names.includes(s.name));
+          const busy = live.filter((s) => !SHELLS.includes(s.command));
+          let keep = false;
+          if (busy.length) {
+            keep = !!(await ask({
+              title: "Un programme tourne encore",
+              body: `« ${busy.map((b) => b.command).join(", ")} » est en cours dans ce terminal. Le laisser continuer en arrière-plan ? Tu pourras le retrouver via « Sessions ». Sinon, il sera arrêté.`,
+              confirmLabel: "Laisser tourner",
+            }));
+          }
+          if (!keep) for (const s of live) await api.tmuxKill(tab.serverId, s.name).catch(() => {});
+        } catch {
+          /* serveur injoignable : la session sera visible dans « Sessions » à la prochaine connexion */
+        }
+      }
+      closeTab(tab.key);
+    },
+    [ask, closeTab],
+  );
 
   // Raccourcis : Ctrl+Shift+T nouvel onglet, Ctrl+Shift+W fermer.
   useEffect(() => {
@@ -20,16 +61,27 @@ export default function TerminalView({ visible }: { visible: boolean }) {
       if (e.code === "KeyT" && activeServerId) {
         e.preventDefault();
         openTab(current?.serverId ?? activeServerId);
-      } else if (e.code === "KeyW" && activeTab) {
+      } else if (e.code === "KeyW" && current) {
         e.preventDefault();
-        closeTab(activeTab);
+        void close(current);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visible, activeServerId, activeTab, current, openTab, closeTab]);
+  }, [visible, activeServerId, current, openTab, close]);
 
-  const serverOf = (id: string) => servers.find((s) => s.id === id);
+  const toggleSplit = () => {
+    if (!current) return;
+    if (current.split != null) {
+      const name = current.split;
+      updateTab(current.key, { split: null });
+      if (name) void api.tmuxKill(current.serverId, name).catch(() => {});
+    } else {
+      updateTab(current.key, { split: !current.command && current.tmux ? newTmuxName() : "" });
+    }
+  };
+
+  const labelOf = (t: TermTab, right = false) => `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}${right ? " (droite)" : ""}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -42,18 +94,19 @@ export default function TerminalView({ visible }: { visible: boolean }) {
               <div
                 key={t.key}
                 onClick={() => setActiveTab(t.key)}
-                onAuxClick={(e) => e.button === 1 && closeTab(t.key)}
+                onAuxClick={(e) => e.button === 1 && void close(t)}
                 className={`group flex max-w-56 min-w-32 cursor-pointer items-center gap-2 border-r border-border px-3 text-xs ${active ? "bg-bg text-fg" : "text-muted hover:text-fg"}`}
               >
                 <span className="size-2 shrink-0 rounded-full" style={{ background: s?.color ?? "#3b82f6" }} />
                 <span className="flex-1 truncate" title={titles[t.key] ?? t.title}>
                   {t.title}
                 </span>
+                {t.tmux && <span title="Session persistante (tmux)" className="text-[9px] text-muted">●</span>}
                 <button
                   className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-white/10"
                   onClick={(e) => {
                     e.stopPropagation();
-                    closeTab(t.key);
+                    void close(t);
                   }}
                   aria-label="Fermer l'onglet"
                 >
@@ -72,12 +125,19 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           </IconButton>
         </div>
         <div className="flex items-center gap-1 px-2">
-          <IconButton
-            title="Diviser l'écran"
-            disabled={!current}
-            className={current && split[current.key] ? "text-accent" : ""}
-            onClick={() => current && setSplit((s) => ({ ...s, [current.key]: !s[current.key] }))}
-          >
+          {broadcast.active ? (
+            <Button size="sm" variant="danger" icon={<Radio size={13} />} onClick={() => broadcast.setActive(false)}>
+              Arrêter la diffusion
+            </Button>
+          ) : (
+            <IconButton title="Diffuser la saisie à plusieurs terminaux" disabled={Object.keys(broadcast.panes).length < 2} onClick={() => setBroadcastPicker(true)}>
+              <Radio size={15} />
+            </IconButton>
+          )}
+          <IconButton title="Sessions persistantes" disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)}>
+            <History size={15} />
+          </IconButton>
+          <IconButton title="Diviser l'écran" disabled={!current} className={current?.split != null ? "text-accent" : ""} onClick={toggleSplit}>
             <Columns2 size={15} />
           </IconButton>
           <IconButton title="Snippets" className={showSnippets ? "text-accent" : ""} onClick={() => setShowSnippets((v) => !v)}>
@@ -107,13 +167,16 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                   <TerminalPane
                     serverId={t.serverId}
                     command={t.command}
+                    tmux={t.tmux}
+                    paneId={`${t.key}:0`}
+                    label={labelOf(t)}
                     visible={show}
                     onTitle={(title) => setTitles((x) => ({ ...x, [t.key]: title }))}
                   />
                 </div>
-                {split[t.key] && (
+                {t.split != null && (
                   <div className="min-w-0 flex-1 border-l border-border">
-                    <TerminalPane serverId={t.serverId} visible={show} />
+                    <TerminalPane serverId={t.serverId} tmux={t.split || undefined} paneId={`${t.key}:1`} label={labelOf(t, true)} visible={show} />
                   </div>
                 )}
               </div>
@@ -122,93 +185,129 @@ export default function TerminalView({ visible }: { visible: boolean }) {
         </div>
         {showSnippets && <SnippetsPanel />}
       </div>
+
+      {broadcastPicker && <BroadcastPicker onClose={() => setBroadcastPicker(false)} />}
+      {sessionsOf && (
+        <SessionsModal
+          serverId={sessionsOf}
+          openNames={tabs.flatMap((t) => [t.tmux, t.split]).filter((n): n is string => !!n)}
+          onOpen={(name) => {
+            const existing = tabs.find((t) => t.tmux === name || t.split === name);
+            if (existing) setActiveTab(existing.key);
+            else openTab(sessionsOf, { title: `${serverOf(sessionsOf)?.name} (reprise)`, tmux: name });
+            setSessionsOf(null);
+          }}
+          onClose={() => setSessionsOf(null)}
+          notify={notify}
+        />
+      )}
     </div>
   );
 }
 
-function SnippetsPanel() {
-  const notify = useApp((s) => s.notify);
-  const [snippets, setSnippets] = useState<Snippet[]>([]);
-  const [editing, setEditing] = useState<Snippet | null>(null);
-  const reload = () => void api.snippets().then(setSnippets);
-  useEffect(reload, []);
+function BroadcastPicker({ onClose }: { onClose: () => void }) {
+  const { panes, setActive } = useBroadcast();
+  const ids = Object.keys(panes).filter((id) => panes[id].termId != null);
+  const [selected, setSelected] = useState<Set<string>>(new Set(ids));
+  return (
+    <Modal
+      title="Diffuser la saisie"
+      onClose={onClose}
+      footer={
+        <Button
+          variant="danger"
+          icon={<Radio size={14} />}
+          disabled={selected.size < 2}
+          onClick={() => {
+            setActive(true, [...selected]);
+            onClose();
+          }}
+        >
+          Diffuser à {selected.size} terminaux
+        </Button>
+      }
+    >
+      <p className="mb-3 text-sm text-muted">
+        Tout ce que tu taperas dans l'un de ces terminaux sera envoyé à tous. Les commandes sensibles (rm -rf, reboot, docker rm…) demanderont une confirmation. La diffusion s'arrête quand tu quittes le terminal.
+      </p>
+      <ul className="flex flex-col gap-1">
+        {ids.map((id) => (
+          <li key={id}>
+            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-white/5">
+              <input
+                type="checkbox"
+                checked={selected.has(id)}
+                onChange={(e) => {
+                  const next = new Set(selected);
+                  if (e.target.checked) next.add(id);
+                  else next.delete(id);
+                  setSelected(next);
+                }}
+              />
+              <span className="text-sm">{panes[id].label}</span>
+            </label>
+          </li>
+        ))}
+        {ids.length < 2 && <li className="text-sm text-muted">Ouvre et connecte au moins deux terminaux.</li>}
+      </ul>
+    </Modal>
+  );
+}
 
-  const run = (s: Snippet) => {
-    if (focusedTerminal.id == null) {
-      notify("Clique d'abord dans un terminal connecté.", "info");
-      return;
-    }
-    void api.termWrite(focusedTerminal.id, s.command + "\r");
-  };
+function SessionsModal({
+  serverId,
+  openNames,
+  onOpen,
+  onClose,
+  notify,
+}: {
+  serverId: string;
+  openNames: string[];
+  onOpen: (name: string) => void;
+  onClose: () => void;
+  notify: (m: string, k?: "info" | "error" | "success") => void;
+}) {
+  const server = useApp((s) => s.servers.find((x) => x.id === serverId));
+  const [list, setList] = useState<TmuxSession[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api.tmuxSessions(serverId).then(setList, (e) => setError(errorMessage(e)));
+  }, [serverId]);
+  useEffect(load, [load]);
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-border bg-panel">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-xs font-semibold tracking-wide text-muted uppercase">Snippets</span>
-        <IconButton title="Nouveau snippet" onClick={() => setEditing({ id: "", name: "", command: "" })}>
-          <Plus size={14} />
-        </IconButton>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2">
-        {snippets.length === 0 && (
-          <p className="p-2 text-xs text-muted">Enregistre ici les commandes que tu tapes souvent. Un clic les envoie au terminal actif.</p>
-        )}
-        {snippets.map((s) => (
-          <div key={s.id} className="group flex items-center rounded-md hover:bg-white/5">
-            <button className="min-w-0 flex-1 px-2 py-1.5 text-left" onClick={() => run(s)} title={s.command}>
-              <div className="truncate text-sm">{s.name}</div>
-              <div className="truncate font-mono text-[11px] text-muted">{s.command}</div>
-            </button>
-            <div className="hidden pr-1 group-hover:flex">
-              <IconButton title="Modifier" onClick={() => setEditing(s)}>
-                <Pencil size={12} />
-              </IconButton>
-              <IconButton
-                title="Supprimer"
-                onClick={async () => {
-                  await api.deleteSnippet(s.id);
-                  reload();
-                }}
-              >
-                <Trash2 size={12} />
-              </IconButton>
-            </div>
-          </div>
-        ))}
-      </div>
-      {editing && (
-        <Modal
-          title={editing.id ? "Modifier le snippet" : "Nouveau snippet"}
-          onClose={() => setEditing(null)}
-          footer={
-            <Button
-              variant="primary"
-              disabled={!editing.command.trim()}
+    <Modal title={`Sessions persistantes sur ${server?.name}`} width="max-w-2xl" onClose={onClose}>
+      <p className="mb-3 text-sm text-muted">
+        Ces terminaux continuent de tourner sur le serveur, même app fermée. Rouvre-les pour reprendre exactement là où tu en étais.
+      </p>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {list && list.length === 0 && <p className="text-sm text-muted">Aucune session Helm sur ce serveur.</p>}
+      <ul className="flex flex-col gap-2">
+        {list?.map((s) => (
+          <li key={s.name} className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
+            <span className="font-mono text-xs">{s.name}</span>
+            <Badge tone={SHELLS.includes(s.command) ? "muted" : "accent"}>{s.command}</Badge>
+            {openNames.includes(s.name) ? <Badge tone="ok">ouverte</Badge> : s.attached ? <Badge tone="warn">ouverte ailleurs</Badge> : null}
+            <span className="ml-auto text-xs text-muted">{new Date(s.created * 1000).toLocaleString("fr-FR")}</span>
+            <Button size="sm" onClick={() => onOpen(s.name)}>
+              Ouvrir
+            </Button>
+            <IconButton
+              title="Fermer la session"
               onClick={async () => {
-                await api.saveSnippet({ ...editing, name: editing.name.trim() || editing.command.trim() });
-                setEditing(null);
-                reload();
+                try {
+                  await api.tmuxKill(serverId, s.name);
+                  load();
+                } catch (e) {
+                  notify(errorMessage(e), "error");
+                }
               }}
             >
-              Enregistrer
-            </Button>
-          }
-        >
-          <div className="flex flex-col gap-3">
-            <Field label="Nom">
-              <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Logs nginx" autoFocus />
-            </Field>
-            <Field label="Commande">
-              <Input
-                className="font-mono"
-                value={editing.command}
-                onChange={(e) => setEditing({ ...editing, command: e.target.value })}
-                placeholder="tail -f /var/log/nginx/error.log"
-              />
-            </Field>
-          </div>
-        </Modal>
-      )}
-    </aside>
+              <X size={14} />
+            </IconButton>
+          </li>
+        ))}
+      </ul>
+    </Modal>
   );
 }

@@ -90,6 +90,35 @@ impl Evaluator {
         out
     }
 
+    /// Contrôle du résultat de la dernière sauvegarde Helm (`/var/lib/helm-backup/last.json`).
+    /// `last` = (réussie, fin en secondes Unix, message). `None` si les sauvegardes ne sont pas configurées.
+    pub fn backup_result(&mut self, last: Option<(bool, i64, String)>, now_secs: i64, server: &str) -> Option<Transition> {
+        const KEY: &str = "backup";
+        const STALE_SECS: i64 = 36 * 3600;
+        let problem = match &last {
+            None => None,
+            Some((false, _, msg)) => Some(format!("La dernière sauvegarde a échoué : {msg}")),
+            Some((true, finished, _)) if now_secs - finished > STALE_SECS => {
+                Some(format!("Aucune sauvegarde réussie depuis {} h", (now_secs - finished) / 3600))
+            }
+            _ => None,
+        };
+        match problem {
+            Some(message) if !self.active.contains_key(KEY) => {
+                let alert =
+                    ActiveAlert { key: KEY.into(), title: format!("{server} : sauvegardes en échec"), message, since: now_secs * 1000 };
+                self.active.insert(KEY.into(), alert.clone());
+                Some(Transition::Fired(alert))
+            }
+            None => self.active.remove(KEY).map(|mut a| {
+                a.title = format!("{server} : sauvegardes rétablies");
+                a.message = "La dernière sauvegarde s'est bien déroulée.".into();
+                Transition::Resolved(a)
+            }),
+            _ => None,
+        }
+    }
+
     pub fn http_result(&mut self, name: &str, url: &str, result: Result<u16, String>, now: i64, server: &str) -> Option<Transition> {
         let key = format!("http:{name}");
         match result {
@@ -163,6 +192,19 @@ mod tests {
         e.evaluate(&c, &m(0, 95.0), "vps");
         e.evaluate(&c, &m(30_000, 10.0), "vps");
         assert!(e.evaluate(&c, &m(70_000, 95.0), "vps").is_empty());
+    }
+
+    #[test]
+    fn backup_alerts() {
+        let mut e = Evaluator::default();
+        assert!(e.backup_result(None, 1000, "vps").is_none());
+        assert!(matches!(e.backup_result(Some((false, 900, "dump".into())), 1000, "vps"), Some(Transition::Fired(_))));
+        assert!(e.backup_result(Some((false, 900, "dump".into())), 1100, "vps").is_none(), "pas de doublon");
+        assert!(matches!(e.backup_result(Some((true, 1200, "ok".into())), 1300, "vps"), Some(Transition::Resolved(_))));
+        let old = 1300 - 40 * 3600;
+        assert!(
+            matches!(e.backup_result(Some((true, old, "ok".into())), 1300, "vps"), Some(Transition::Fired(a)) if a.message.contains("40 h"))
+        );
     }
 
     #[test]

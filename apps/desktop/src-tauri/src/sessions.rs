@@ -8,12 +8,12 @@ use base64::Engine;
 use helm_core::russh::client::Msg;
 use helm_core::russh::{ChannelMsg, ChannelWriteHalf};
 use helm_core::russh_sftp::client::SftpSession;
-use helm_core::{Auth, ConnectParams, Connection};
+use helm_core::Connection;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tokio::sync::Mutex;
 
-use crate::store::{secrets, AuthKind, Store};
+use crate::store::Store;
 
 /// Événements envoyés à l'UI pour un terminal.
 #[derive(Clone, Serialize)]
@@ -101,25 +101,7 @@ impl Sessions {
                 return Ok(c.clone());
             }
         }
-        let profile = store.server(server_id)?;
-        let host_key = format!("{}:{}", profile.host, profile.port);
-        let auth = match profile.auth_kind {
-            AuthKind::Password => Auth::Password {
-                password: secrets::get(server_id, "password").ok_or("NEED_PASSWORD: aucun mot de passe enregistré pour ce serveur")?,
-            },
-            AuthKind::Key => Auth::KeyFile {
-                path: profile.key_path.clone().ok_or("aucune clé privée configurée")?,
-                passphrase: secrets::get(server_id, "passphrase"),
-            },
-            AuthKind::Agent => Auth::Agent,
-        };
-        let params = ConnectParams {
-            host: profile.host.clone(),
-            port: profile.port,
-            username: profile.username.clone(),
-            auth,
-            known_fingerprint: store.read(|d| d.known_hosts.get(&host_key).cloned()),
-        };
+        let params = store.connect_params(server_id)?;
         let conn = Connection::connect(params).await.map_err(|e| e.to_string())?;
         conns.insert(server_id.to_string(), conn.clone());
         Ok(conn)

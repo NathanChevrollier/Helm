@@ -3,8 +3,11 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::commands::track;
 use crate::sessions::Sessions;
-use crate::store::{secrets, AuthKind, ServerProfile, Snippet, Store};
+use crate::store::AuditLog;
+use crate::store::{secrets, ServerProfile, Snippet, Store};
+use helm_profiles::AuthKind;
 
 /// Secrets transmis avec un profil : `None` = inchangé, `Some("")` = supprimé.
 #[derive(Deserialize)]
@@ -82,11 +85,12 @@ pub async fn server_delete(store: State<'_, Store>, sessions: State<'_, Sessions
 
 /// Approuve la clé d'hôte présentée par le serveur (premier contact ou changement confirmé).
 #[tauri::command]
-pub fn host_trust(store: State<'_, Store>, id: String, fingerprint: String) -> Result<(), String> {
+pub fn host_trust(audit: State<'_, AuditLog>, store: State<'_, Store>, id: String, fingerprint: String) -> Result<(), String> {
     let s = store.server(&id)?;
-    store.write(|d| {
-        d.known_hosts.insert(format!("{}:{}", s.host, s.port), fingerprint);
-    })
+    let r = store.write(|d| {
+        d.known_hosts.insert(format!("{}:{}", s.host, s.port), fingerprint.clone());
+    });
+    track(&audit, &store, &id, "ssh.trust_host", &fingerprint, r)
 }
 
 #[derive(Serialize)]
@@ -184,6 +188,7 @@ fn read_putty_sessions() -> Option<Vec<ServerProfile>> {
             key_path: (!key_file.is_empty()).then_some(key_file),
             color: None,
             group: None,
+            ai_access: false,
         });
     }
     Some(out)
@@ -207,4 +212,15 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Autorise (ou non) le serveur MCP à lire ce serveur. Ne touche pas à la connexion en cours.
+#[tauri::command]
+pub fn server_set_ai_access(audit: State<'_, AuditLog>, store: State<'_, Store>, id: String, enabled: bool) -> Result<(), String> {
+    let r = store.write(|d| {
+        if let Some(s) = d.servers.iter_mut().find(|s| s.id == id) {
+            s.ai_access = enabled;
+        }
+    });
+    track(&audit, &store, &id, "ai.access", if enabled { "activé" } else { "désactivé" }, r)
 }

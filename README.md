@@ -8,12 +8,31 @@ Tout passe par SSH : aucun panneau web ni port supplémentaire n'est ouvert sur 
 
 | Section | Ce qu'elle fait |
 |---|---|
-| **Serveurs** | Profils SSH (mot de passe, clé OpenSSH/PuTTY `.ppk`, agent OpenSSH ou Pageant). Secrets dans le coffre-fort de l'OS. Import des sessions PuTTY. Vérification de la clé d'hôte (approbation au premier contact, alerte si elle change). |
-| **Terminal** | Onglets, écran divisé, reconnexion par Entrée, copier/coller (Ctrl+Maj+C/V, clic droit comme PuTTY), liens cliquables, snippets. |
-| **Fichiers** | Explorateur SFTP : navigation, glisser-déposer depuis Windows, envoi/téléchargement récursif avec progression, renommage, suppression, chmod, « terminal ici ». Édition dans Monaco (l'éditeur de VS Code) avec aperçu des modifications, écriture atomique, repli sudo pour les fichiers système. |
-| **Monitoring** | CPU, mémoire, disques, réseau, charge en direct. Processus (tri, arrêt). Services systemd (démarrer, arrêter, redémarrer, journaux). Avec l'agent `helmd` : historique 30 jours, alertes (seuils soutenus, hystérésis) et supervision HTTP des sites, notifiées sur Discord, ntfy ou webhook, même PC éteint. |
-| **Docker** | Conteneurs avec stats en direct, logs en direct et shell dans un onglet terminal, inspection, projets compose (up, mise à jour, restart, down, édition du fichier), images et nettoyage. Signale les ports publiés sur toutes les interfaces. |
-| **Sites** | Carte de chaque site : domaine → nginx → port → conteneur. Certificats et leurs expirations. Éditeur de vhost sûr. Assistant « Nouveau site » (conteneur + vhost + HTTPS Let's Encrypt + vérification). |
+| **Accueil** | Santé de tous les serveurs d'un coup d'œil : CPU, mémoire, disque, alertes, conteneurs arrêtés, certificats qui expirent bientôt. |
+| **Serveurs** | Profils SSH (mot de passe, clé OpenSSH/PuTTY `.ppk`, agent OpenSSH ou Pageant). Secrets dans le coffre-fort de l'OS. Import des sessions PuTTY. Vérification de la clé d'hôte. |
+| **Terminal** | Sessions **persistantes tmux** : elles survivent aux coupures et à la fermeture de l'app, avec reconnexion automatique. Onglets et écran divisé restaurés au démarrage. **Diffusion de la saisie** à plusieurs terminaux, avec confirmation des commandes sensibles. Snippets, copier/coller comme PuTTY. |
+| **Fichiers** | Explorateur SFTP, **double panneau** pour copier d'un serveur à l'autre (flux via le PC), glisser-déposer, transferts annulables, édition dans Monaco, repli sudo. |
+| **Monitoring** | CPU, mémoire, disques, réseau, processus, services systemd. Avec l'agent `helmd` : 30 jours d'historique, alertes (seuils, sites injoignables, sauvegardes en échec) sur Discord, ntfy ou webhook, même PC éteint. |
+| **Docker** | Conteneurs et stats, logs et shell en terminal, projets compose, images et nettoyage. **Déploiement** (pull → up → vérification → retour arrière automatique), **déploiement depuis GitHub** par clé restreinte, **restriction des ports exposés** à 127.0.0.1, accès depuis le PC par tunnel. |
+| **Sites** | Domaine → nginx → port → conteneur, certificats, éditeur de vhost sûr, assistant « Nouveau site », **historique des configurations** avec diff et restauration. |
+| **Journaux** | Logs Docker, systemd et fichiers suivis en direct, fusionnés, filtrables (texte, regex, niveau), exportables. |
+| **Tunnels** | Tunnels SSH locaux (127.0.0.1 uniquement) pour accéder à une base ou une interface d'admin sans l'exposer. |
+| **Sauvegardes** | restic chiffré et dédupliqué : dumps MySQL/PostgreSQL cohérents, volumes, dossiers, vers le serveur ou un stockage S3. Planification quotidienne, rétention, vérification, restauration (téléchargement, remise en place, réimport d'une base). |
+| **Sécurité** | Audit (SSH, pare-feu, fail2ban, mises à jour, ports exposés, comptes UID 0) et corrections guidées. Pour SSH et le pare-feu, une connexion de contrôle est ouverte et la modification annulée automatiquement si elle échoue. |
+| **Réglages** | Journal de toutes les actions, accès IA (MCP) serveur par serveur, préférences. |
+
+Palette de commandes : **Ctrl+K**.
+
+### Serveur MCP (lecture seule)
+
+`Helm --mcp` expose aux assistants IA (Claude Code, Claude Desktop…) 14 outils **en lecture seule** : état, historique, alertes, conteneurs, logs, sites, configuration nginx, audit, sauvegardes.
+
+- Aucun outil ne peut modifier un serveur ni exécuter une commande libre.
+- Seuls les serveurs autorisés dans Réglages → Accès IA sont visibles.
+- Les secrets sont masqués et les clés privées refusées.
+- Chaque appel est inscrit au journal d'actions.
+
+La configuration à copier se trouve dans Réglages → Accès IA.
 
 ### Sécurité des modifications nginx
 
@@ -39,9 +58,11 @@ nginx n'est jamais rechargé avec une configuration invalide, et les autres site
 | Dossier | Rôle |
 |---|---|
 | `apps/desktop` | App Tauri 2 : UI React/TypeScript (`src/`) + commandes Rust (`src-tauri/`) |
-| `crates/core` | SSH (russh), SFTP, sudo, Docker, nginx, systemd, installation de l'agent |
+| `crates/core` | SSH, SFTP, tmux, Docker, nginx, systemd, audit, sauvegardes, déploiement, agent |
 | `crates/protocol` | Parseurs `/proc`, types et protocole partagés entre l'app et l'agent |
 | `crates/agent` | `helmd`, l'agent de monitoring installé sur le VPS |
+| `crates/profiles` | Profils, secrets (keyring) et journal d'actions, partagés par l'app et le MCP |
+| `crates/mcp` | Serveur MCP en lecture seule (aussi intégré à l'app via `--mcp`) |
 | `testenv` | Faux VPS Docker (sshd + nginx + sudo + client Docker) pour les tests |
 
 ## Développement

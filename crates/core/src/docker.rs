@@ -359,9 +359,57 @@ pub async fn prune(conn: &Connection, access: Access, sudo: Option<&str>, what: 
     run_ok(conn, access, sudo, args).await
 }
 
+// ---------- Refermer un port exposé ----------
+
+/// Réécrit, dans un fichier compose, le mapping court du port hôte `port` publié sur toutes les
+/// interfaces (`"8080:80"`, `0.0.0.0:8080:80`, `[::]:8080:80`) pour ne l'exposer que sur 127.0.0.1.
+/// Renvoie `None` si aucun mapping de ce port n'a été trouvé (syntaxe longue non prise en charge).
+pub fn restrict_port_in_compose(text: &str, port: u16) -> Option<String> {
+    let mut changed = false;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let Some(item) = trimmed.strip_prefix("- ") else { return line.to_string() };
+            let indent = &line[..line.len() - trimmed.len()];
+            let value = item.trim().trim_matches(|c| c == '"' || c == '\'');
+            let rest = value
+                .strip_prefix("[::]:")
+                .or_else(|| value.strip_prefix("0.0.0.0:"))
+                .or_else(|| value.strip_prefix("::"))
+                .unwrap_or(value);
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() == 2 && parts[0] == port.to_string() && parts[1].split('/').next().is_some_and(|p| p.parse::<u16>().is_ok()) {
+                changed = true;
+                format!("{indent}- \"127.0.0.1:{}:{}\"", parts[0], parts[1])
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    let mut out = lines.join("\n");
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    changed.then_some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restrict_port_variants() {
+        let src = "services:\n  db:\n    ports:\n      - \"3307:3306\"\n      - 8080:80\n  web:\n    ports:\n      - '0.0.0.0:9000:9000/udp'\n      - \"127.0.0.1:5000:5000\"\n";
+        let out = restrict_port_in_compose(src, 3307).unwrap();
+        assert!(out.contains("      - \"127.0.0.1:3307:3306\"\n"));
+        assert!(out.contains("      - 8080:80\n"), "les autres ports restent intacts");
+        let out = restrict_port_in_compose(src, 9000).unwrap();
+        assert!(out.contains("- \"127.0.0.1:9000:9000/udp\""));
+        assert!(restrict_port_in_compose(src, 5000).is_none(), "déjà restreint");
+        assert!(restrict_port_in_compose(src, 1234).is_none());
+        assert!(restrict_port_in_compose("ports:\n  - [::]:3307:3306\n", 3307).unwrap().contains("127.0.0.1:3307:3306"));
+    }
 
     #[test]
     fn labels_with_commas() {

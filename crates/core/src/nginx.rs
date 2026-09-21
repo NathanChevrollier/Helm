@@ -520,6 +520,71 @@ pub async fn reload(conn: &Connection, sudo: Option<&str>) -> Result<String> {
     Ok(out.into_result()?.stdout)
 }
 
+// ---------- Historique des sauvegardes ----------
+
+pub const BACKUP_ROOT: &str = "/var/backups/helm/nginx";
+
+/// Nom de sauvegarde valide (`AAAAMMJJ-HHMMSS`), seul format accepté dans les chemins.
+pub fn valid_backup_name(name: &str) -> bool {
+    name.len() == 15 && name.as_bytes()[8] == b'-' && name.chars().enumerate().all(|(i, c)| i == 8 || c.is_ascii_digit())
+}
+
+/// Sauvegardes disponibles, de la plus récente à la plus ancienne.
+pub async fn backups(conn: &Connection, sudo: Option<&str>) -> Result<Vec<String>> {
+    let out = conn.exec_sudo(&format!("ls -1 {BACKUP_ROOT} 2>/dev/null || true"), sudo, None).await?.into_result()?;
+    let mut list: Vec<String> = out.stdout.lines().map(str::trim).filter(|n| valid_backup_name(n)).map(str::to_string).collect();
+    list.sort_unstable_by(|a, b| b.cmp(a));
+    Ok(list)
+}
+
+/// Différences entre une sauvegarde et la configuration actuelle (format diff unifié).
+pub async fn backup_diff(conn: &Connection, sudo: Option<&str>, name: &str) -> Result<String> {
+    if !valid_backup_name(name) {
+        return Err(Error::Other("nom de sauvegarde invalide".into()));
+    }
+    // `diff` renvoie 1 quand il trouve des différences : ce n'est pas une erreur.
+    let out = conn.exec_sudo(&format!("diff -ruN {BACKUP_ROOT}/{name}/nginx /etc/nginx | head -c 800000; true"), sudo, None).await?;
+    Ok(out.stdout)
+}
+
+/// Restaure une sauvegarde complète de /etc/nginx. L'état actuel est lui-même sauvegardé, la
+/// configuration restaurée est testée, et l'état actuel revient si le test ou le reload échoue.
+pub const RESTORE_SCRIPT: &str = r#"set -u
+SRC="/var/backups/helm/nginx/$1/nginx"
+[ -d "$SRC" ] || { echo "@@FAILED sauvegarde introuvable"; exit 1; }
+TS=$(date +%Y%m%d-%H%M%S)
+BK="/var/backups/helm/nginx/$TS"
+mkdir -p "$BK" && cp -a /etc/nginx "$BK/" || { echo "@@FAILED sauvegarde de l'état actuel impossible"; exit 1; }
+rm -rf /etc/nginx.helm-restore /etc/nginx.helm-old
+cp -a "$SRC" /etc/nginx.helm-restore || { echo "@@FAILED copie impossible"; exit 1; }
+mv /etc/nginx /etc/nginx.helm-old && mv /etc/nginx.helm-restore /etc/nginx
+if nginx -t > "$BK/nginx-t.log" 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; } >> "$BK/nginx-t.log" 2>&1; then
+  rm -rf /etc/nginx.helm-old
+  echo "@@OK $BK"
+  cat "$BK/nginx-t.log"
+else
+  rm -rf /etc/nginx
+  mv /etc/nginx.helm-old /etc/nginx
+  nginx -t >/dev/null 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; }
+  echo "@@FAILED test"
+  cat "$BK/nginx-t.log"
+  exit 2
+fi
+"#;
+
+pub async fn restore_backup(conn: &Connection, sudo: Option<&str>, name: &str) -> Result<ApplyResult> {
+    if !valid_backup_name(name) {
+        return Err(Error::Other("nom de sauvegarde invalide".into()));
+    }
+    let cmd = format!("bash -c {} helm-restore {name}", shell_quote(RESTORE_SCRIPT));
+    let out = conn.exec_sudo(&cmd, sudo, None).await?;
+    let text = format!("{}{}", out.stdout, out.stderr);
+    if !text.contains("@@OK") && !text.contains("@@FAILED") {
+        return Err(Error::Remote(text.trim().to_string()));
+    }
+    Ok(parse_apply(&text))
+}
+
 // ---------- Nouveau site ----------
 
 /// vhost HTTP en reverse proxy vers un port local, prêt à recevoir HTTPS via certbot.
@@ -710,6 +775,14 @@ server {
         let ko = parse_apply("@@FAILED test\nnginx: [emerg] unexpected \"}\"\n");
         assert!(!ko.ok);
         assert!(ko.log.contains("emerg"));
+    }
+
+    #[test]
+    fn backup_names() {
+        assert!(valid_backup_name("20260921-133323"));
+        assert!(!valid_backup_name("20260921-13332"));
+        assert!(!valid_backup_name("../../etc/pass"));
+        assert!(!valid_backup_name("20260921x133323"));
     }
 
     #[test]

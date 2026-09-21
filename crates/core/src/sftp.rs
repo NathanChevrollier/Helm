@@ -54,6 +54,11 @@ pub struct Progress {
     pub total: u64,
 }
 
+/// Erreur renvoyée quand le callback de progression demande l'arrêt du transfert.
+pub fn cancelled() -> Error {
+    Error::Other("CANCELLED: transfert annulé".into())
+}
+
 fn sftp_err(e: impl std::fmt::Display) -> Error {
     Error::Sftp(e.to_string())
 }
@@ -232,7 +237,7 @@ pub async fn download(
     sftp: &SftpSession,
     remote: &str,
     local_dir: &Path,
-    on_progress: &(dyn Fn(Progress) + Send + Sync),
+    on_progress: &(dyn Fn(Progress) -> bool + Send + Sync),
 ) -> Result<PathBuf> {
     let name = remote.trim_end_matches('/').rsplit('/').next().unwrap_or("fichier");
     let target = local_dir.join(name);
@@ -265,7 +270,7 @@ async fn download_file(
     remote: &str,
     local: &Path,
     total: u64,
-    on_progress: &(dyn Fn(Progress) + Send + Sync),
+    on_progress: &(dyn Fn(Progress) -> bool + Send + Sync),
 ) -> Result<()> {
     let mut src = sftp.open(remote).await.map_err(sftp_err)?;
     let mut dst = tokio::fs::File::create(local).await.map_err(|e| Error::Other(e.to_string()))?;
@@ -278,15 +283,22 @@ async fn download_file(
         }
         dst.write_all(&buf[..n]).await.map_err(|e| Error::Other(e.to_string()))?;
         done += n as u64;
-        on_progress(Progress { file: remote.to_string(), done, total });
+        if !on_progress(Progress { file: remote.to_string(), done, total }) {
+            return Err(cancelled());
+        }
     }
     dst.flush().await.map_err(|e| Error::Other(e.to_string()))?;
-    on_progress(Progress { file: remote.to_string(), done, total: total.max(done) });
+    let _ = on_progress(Progress { file: remote.to_string(), done, total: total.max(done) });
     Ok(())
 }
 
 /// Envoie un fichier ou un dossier local dans le dossier distant `remote_dir`.
-pub async fn upload(sftp: &SftpSession, local: &Path, remote_dir: &str, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<()> {
+pub async fn upload(
+    sftp: &SftpSession,
+    local: &Path,
+    remote_dir: &str,
+    on_progress: &(dyn Fn(Progress) -> bool + Send + Sync),
+) -> Result<()> {
     let name = local.file_name().and_then(|n| n.to_str()).ok_or_else(|| Error::Other("nom de fichier invalide".into()))?;
     let target = join(remote_dir, name);
     if local.is_dir() {
@@ -312,7 +324,7 @@ pub async fn upload(sftp: &SftpSession, local: &Path, remote_dir: &str, on_progr
     }
 }
 
-async fn upload_file(sftp: &SftpSession, local: &Path, remote: &str, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<()> {
+async fn upload_file(sftp: &SftpSession, local: &Path, remote: &str, on_progress: &(dyn Fn(Progress) -> bool + Send + Sync)) -> Result<()> {
     let mut src = tokio::fs::File::open(local).await.map_err(|e| Error::Other(e.to_string()))?;
     let total = src.metadata().await.map(|m| m.len()).unwrap_or(0);
     let mut dst = sftp.open_with_flags(remote, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
@@ -326,9 +338,90 @@ async fn upload_file(sftp: &SftpSession, local: &Path, remote: &str, on_progress
         }
         dst.write_all(&buf[..n]).await.map_err(sftp_err)?;
         done += n as u64;
-        on_progress(Progress { file: label.clone(), done, total });
+        if !on_progress(Progress { file: label.clone(), done, total }) {
+            return Err(cancelled());
+        }
     }
     dst.shutdown().await.map_err(sftp_err)?;
+    Ok(())
+}
+
+/// Copie un fichier ou un dossier d'un serveur à un autre, en flux (A → PC → B) par blocs :
+/// la mémoire utilisée reste bornée quelle que soit la taille, et aucune clé n'est transmise aux serveurs.
+/// Si la cible existe déjà et que `overwrite` est faux, renvoie une erreur `EXISTS:<chemin>`.
+pub async fn copy_between(
+    src: &SftpSession,
+    src_path: &str,
+    dst: &SftpSession,
+    dst_dir: &str,
+    overwrite: bool,
+    on_progress: &(dyn Fn(Progress) -> bool + Send + Sync),
+) -> Result<String> {
+    let name = src_path.trim_end_matches('/').rsplit('/').next().unwrap_or("fichier").to_string();
+    let target = join(dst_dir, &name);
+    if !overwrite && dst.try_exists(&target).await.map_err(sftp_err)? {
+        return Err(Error::Other(format!("EXISTS:{target}")));
+    }
+    let meta = src.metadata(src_path).await.map_err(sftp_err)?;
+    if !meta.is_dir() {
+        copy_file(src, src_path, dst, &target, meta.size.unwrap_or(0), meta.permissions, on_progress).await?;
+        return Ok(target);
+    }
+    let mut stack = vec![(src_path.to_string(), target.clone())];
+    while let Some((sdir, ddir)) = stack.pop() {
+        if !dst.try_exists(&ddir).await.map_err(sftp_err)? {
+            dst.create_dir(&ddir).await.map_err(sftp_err)?;
+        }
+        for e in src.read_dir(&sdir).await.map_err(sftp_err)? {
+            let n = e.file_name();
+            if n == "." || n == ".." {
+                continue;
+            }
+            let (s, d) = (join(&sdir, &n), join(&ddir, &n));
+            let m = e.metadata();
+            match m.file_type() {
+                FileType::Dir => stack.push((s, d)),
+                FileType::File => copy_file(src, &s, dst, &d, m.size.unwrap_or(0), m.permissions, on_progress).await?,
+                // Les liens symboliques et fichiers spéciaux ne sont pas recopiés.
+                _ => {}
+            }
+        }
+    }
+    Ok(target)
+}
+
+async fn copy_file(
+    src: &SftpSession,
+    from: &str,
+    dst: &SftpSession,
+    to: &str,
+    total: u64,
+    mode: Option<u32>,
+    on_progress: &(dyn Fn(Progress) -> bool + Send + Sync),
+) -> Result<()> {
+    let mut r = src.open(from).await.map_err(sftp_err)?;
+    let mut w = dst.open_with_flags(to, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
+    let mut buf = vec![0u8; CHUNK];
+    let mut done = 0u64;
+    loop {
+        let n = r.read(&mut buf).await.map_err(sftp_err)?;
+        if n == 0 {
+            break;
+        }
+        w.write_all(&buf[..n]).await.map_err(sftp_err)?;
+        done += n as u64;
+        if !on_progress(Progress { file: from.to_string(), done, total }) {
+            let _ = w.shutdown().await;
+            let _ = dst.remove_file(to).await;
+            return Err(cancelled());
+        }
+    }
+    w.shutdown().await.map_err(sftp_err)?;
+    if let Some(m) = mode {
+        let mut attrs = FileAttributes::empty();
+        attrs.permissions = Some(m & 0o7777);
+        let _ = dst.set_metadata(to, attrs).await;
+    }
     Ok(())
 }
 

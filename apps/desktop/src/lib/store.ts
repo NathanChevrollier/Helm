@@ -21,14 +21,40 @@ export interface Toast {
 }
 
 export interface TermTab {
+  /** Identifiant stable (survit au redémarrage de l'app). */
   key: string;
   serverId: string;
   title: string;
   /** Commande interactive à lancer à la place du shell (ex. `docker exec -it`). */
   command?: string;
+  /** Session tmux du panneau principal (sessions persistantes). */
+  tmux?: string;
+  /** Écran divisé : session tmux du second panneau, ou "" pour un shell simple. */
+  split?: string | null;
+}
+
+export interface Settings {
+  /** Ouvrir les terminaux dans des sessions tmux persistantes. */
+  persistentSessions: boolean;
+  /** Serveurs pour lesquels l'installation de tmux a été refusée. */
+  tmuxDeclined: Record<string, boolean>;
+}
+
+/** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
+interface Persisted {
+  v: 1;
+  section: SectionId;
+  tabs: TermTab[];
+  activeTab: string | null;
+  filesPaths: Record<string, string>;
+  settings: Settings;
+  recent: string[];
 }
 
 interface State {
+  hydrated: boolean;
+  hydrate: () => Promise<void>;
+
   section: SectionId;
   setSection: (s: SectionId) => void;
 
@@ -44,16 +70,35 @@ interface State {
   toasts: Toast[];
   notify: (message: string, kind?: Toast["kind"]) => void;
 
+  settings: Settings;
+  setSettings: (patch: Partial<Settings>) => void;
+
   tabs: TermTab[];
   activeTab: string | null;
-  openTab: (serverId: string, opts?: { title?: string; command?: string }) => void;
+  openTab: (serverId: string, opts?: { title?: string; command?: string; tmux?: string }) => void;
   closeTab: (key: string) => void;
   setActiveTab: (key: string) => void;
+  updateTab: (key: string, patch: Partial<TermTab>) => void;
+
+  /** Dernier dossier ouvert dans l'explorateur, par serveur. */
+  filesPaths: Record<string, string>;
+  setFilesPath: (serverId: string, path: string) => void;
+
+  /** Identifiants des dernières actions de la palette (les plus récentes d'abord). */
+  recent: string[];
+  pushRecent: (id: string) => void;
 }
 
 const ACTIVE_SERVER_KEY = "helm.activeServer";
 let toastSeq = 0;
-let tabSeq = 0;
+
+export function newId(): string {
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
+export function newTmuxName(): string {
+  return `helm-${newId()}`;
+}
 
 function readActiveServer(): string | null {
   try {
@@ -64,17 +109,39 @@ function readActiveServer(): string | null {
 }
 
 export const useApp = create<State>((set, get) => ({
-  section: "servers",
+  hydrated: false,
+  hydrate: async () => {
+    try {
+      const raw = (await api.uiStateGet()) as Partial<Persisted> | null;
+      if (raw && raw.v === 1) {
+        set({
+          section: raw.section ?? "servers",
+          tabs: raw.tabs ?? [],
+          activeTab: raw.activeTab ?? null,
+          filesPaths: raw.filesPaths ?? {},
+          settings: { ...get().settings, ...raw.settings },
+          recent: raw.recent ?? [],
+        });
+      }
+    } catch {
+      /* état illisible : on repart d'un espace de travail vide */
+    }
+    set({ hydrated: true });
+  },
+
+  section: "home",
   setSection: (section) => set({ section }),
 
   servers: [],
   refreshServers: async () => {
     const servers = await api.servers();
     const active = get().activeServerId;
-    set({
+    set((s) => ({
       servers,
-      activeServerId: active && servers.some((s) => s.id === active) ? active : (servers[0]?.id ?? null),
-    });
+      activeServerId: active && servers.some((x) => x.id === active) ? active : (servers[0]?.id ?? null),
+      // Les onglets d'un serveur supprimé disparaissent.
+      tabs: s.tabs.filter((t) => servers.some((x) => x.id === t.serverId)),
+    }));
   },
   activeServerId: readActiveServer(),
   setActiveServer: (id) => {
@@ -100,13 +167,19 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
+  settings: { persistentSessions: true, tmuxDeclined: {} },
+  setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
+
   tabs: [],
   activeTab: null,
   openTab: (serverId, opts = {}) => {
-    const server = get().servers.find((s) => s.id === serverId);
-    const key = `t${++tabSeq}`;
+    const { servers, settings } = get();
+    const server = servers.find((s) => s.id === serverId);
+    const key = newId();
     const title = opts.title ?? server?.name ?? "Terminal";
-    set((s) => ({ tabs: [...s.tabs, { key, serverId, title, command: opts.command }], activeTab: key, section: "terminal" }));
+    // Un shell simple devient persistant ; une commande (logs, exec…) reste éphémère.
+    const tmux = opts.tmux ?? (!opts.command && settings.persistentSessions && !settings.tmuxDeclined[serverId] ? newTmuxName() : undefined);
+    set((s) => ({ tabs: [...s.tabs, { key, serverId, title, command: opts.command, tmux }], activeTab: key, section: "terminal" }));
   },
   closeTab: (key) =>
     set((s) => {
@@ -115,13 +188,44 @@ export const useApp = create<State>((set, get) => ({
       return { tabs, activeTab };
     }),
   setActiveTab: (activeTab) => set({ activeTab }),
+  updateTab: (key, patch) => set((s) => ({ tabs: s.tabs.map((t) => (t.key === key ? { ...t, ...patch } : t)) })),
+
+  filesPaths: {},
+  setFilesPath: (serverId, path) => set((s) => ({ filesPaths: { ...s.filesPaths, [serverId]: path } })),
+
+  recent: [],
+  pushRecent: (id) => set((s) => ({ recent: [id, ...s.recent.filter((x) => x !== id)].slice(0, 30) })),
 }));
+
+// Sauvegarde de l'espace de travail, regroupée pour ne pas écrire à chaque frappe.
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let lastSaved = "";
+useApp.subscribe((s) => {
+  if (!s.hydrated) return;
+  const snapshot: Persisted = {
+    v: 1,
+    section: s.section,
+    tabs: s.tabs,
+    activeTab: s.activeTab,
+    filesPaths: s.filesPaths,
+    settings: s.settings,
+    recent: s.recent,
+  };
+  const json = JSON.stringify(snapshot);
+  if (json === lastSaved) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    lastSaved = json;
+    void api.uiStateSet(snapshot).catch(() => {});
+  }, 500);
+});
 
 /**
  * Connecte le serveur en gérant les cas qui demandent l'avis de l'utilisateur :
  * clé d'hôte inconnue ou modifiée, mot de passe absent.
  */
-export async function ensureConnected(serverId: string): Promise<boolean> {
+export async function ensureConnected(serverId: string, opts: { interactive?: boolean } = {}): Promise<boolean> {
+  const interactive = opts.interactive ?? true;
   const { ask, notify, refreshServers } = useApp.getState();
   const server = () => useApp.getState().servers.find((s) => s.id === serverId);
 
@@ -132,6 +236,8 @@ export async function ensureConnected(serverId: string): Promise<boolean> {
       return true;
     } catch (e) {
       const msg = errorMessage(e);
+      // En arrière-plan (reconnexion, vue d'ensemble), on n'ouvre jamais de dialogue.
+      if (!interactive) return false;
       if (msg.startsWith("UNKNOWN_HOST_KEY:")) {
         const fp = msg.slice("UNKNOWN_HOST_KEY:".length);
         const ok = await ask({

@@ -12,6 +12,8 @@ export interface ServerProfile {
   keyPath?: string | null;
   color?: string | null;
   group?: string | null;
+  /** Accessible au serveur MCP (lecture seule). */
+  aiAccess?: boolean;
 }
 
 export interface ServerView extends ServerProfile {
@@ -292,14 +294,163 @@ export interface AppSpec {
   env: [string, string][];
 }
 
+export interface TunnelDef {
+  id: string;
+  serverId: string;
+  name: string;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+  autoStart: boolean;
+}
+
+export interface TunnelView extends TunnelDef {
+  running: boolean;
+  activeConnections: number;
+  totalConnections: number;
+  lastError: string | null;
+}
+
+export interface LogSource {
+  kind: "docker" | "unit" | "file";
+  name: string;
+}
+
+export type LogEvent = { type: "lines"; lines: { source: number; text: string }[] } | { type: "ended"; source: number; error: string | null };
+
+export type Severity = "critical" | "high" | "medium" | "low" | "ok";
+
+export interface Finding {
+  id: string;
+  severity: Severity;
+  title: string;
+  detail: string;
+  fix: string | null;
+  fixLabel: string | null;
+}
+
+export interface SecurityReport {
+  os: string;
+  sshPorts: number[];
+  findings: Finding[];
+}
+
+export interface FixPlan {
+  id: string;
+  description: string;
+  script: string;
+  needsVerification: boolean;
+}
+
+export type BackupDestination =
+  | { kind: "local"; path: string }
+  | { kind: "s3"; endpoint: string; bucket: string; prefix: string; accessKeyId: string };
+
+export interface DbSource {
+  container: string;
+  kind: "mysql" | "postgres";
+}
+
+export interface BackupConfig {
+  destination: BackupDestination;
+  schedule: string;
+  keepDaily: number;
+  keepWeekly: number;
+  keepMonthly: number;
+  paths: string[];
+  volumes: string[];
+  databases: DbSource[];
+}
+
+export interface BackupOverview {
+  status: {
+    restic: string | null;
+    config: BackupConfig | null;
+    last: { startedAt: number; finishedAt: number; ok: boolean; message: string } | null;
+    nextRun: string | null;
+  };
+  defaultConfig: BackupConfig;
+  volumes: string[];
+  databases: DbSource[];
+  passwordInKeyring: boolean;
+}
+
+export interface Snapshot {
+  short_id: string;
+  time: string;
+  paths: string[];
+  hostname: string;
+}
+
+export interface SnapshotNode {
+  path: string;
+  name: string;
+  kind: string;
+  size: number;
+}
+
+export interface DeployKey {
+  project: string;
+  privateKey: string;
+  knownHosts: string;
+  user: string;
+  workflow: string;
+}
+
+export interface McpConfig {
+  command: string;
+  claudeDesktop: string;
+  claudeCode: string;
+}
+
 function progressChannel(onProgress: (p: Progress) => void) {
   const channel = new Channel<Progress>();
   channel.onmessage = onProgress;
   return channel;
 }
 
+export interface DashboardSummary {
+  connected: boolean;
+  error: string | null;
+  metrics: Metrics | null;
+  agent: boolean;
+  alerts: ActiveAlert[];
+  docker: boolean;
+  containersRunning: number;
+  containersStopped: number;
+  stoppedNames: string[];
+  certificates: { domains: string[]; notAfter: number }[];
+}
+
+export interface AuditEntry {
+  t: number;
+  origin: string;
+  serverId: string;
+  serverName: string;
+  action: string;
+  detail: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface TmuxSession {
+  name: string;
+  attached: boolean;
+  created: number;
+  windows: number;
+  command: string;
+}
+
 export const api = {
   version: () => invoke<string>("app_version"),
+
+  uiStateGet: () => invoke<unknown>("ui_state_get"),
+  uiStateSet: (state: unknown) => invoke<void>("ui_state_set", { state }),
+  auditList: (limit = 500) => invoke<AuditEntry[]>("audit_list", { limit }),
+  tmuxCheck: (serverId: string) => invoke<string | null>("tmux_check", { serverId }),
+  tmuxInstall: (serverId: string) => invoke<string>("tmux_install", { serverId }),
+  tmuxSessions: (serverId: string) => invoke<TmuxSession[]>("tmux_sessions", { serverId }),
+  tmuxKill: (serverId: string, name: string) => invoke<void>("tmux_kill", { serverId, name }),
 
   servers: () => invoke<ServerView[]>("servers_list"),
   saveServer: (profile: ServerProfile, secretsInput: SecretsInput) =>
@@ -309,15 +460,22 @@ export const api = {
   connect: (id: string) => invoke<ConnectInfo>("ssh_connect", { id }),
   disconnect: (id: string) => invoke<void>("ssh_disconnect", { id }),
   puttySessions: () => invoke<ServerProfile[]>("putty_sessions"),
+  setAiAccess: (id: string, enabled: boolean) => invoke<void>("server_set_ai_access", { id, enabled }),
 
   snippets: () => invoke<Snippet[]>("snippets_list"),
   saveSnippet: (snippet: Snippet) => invoke<void>("snippet_save", { snippet }),
   deleteSnippet: (id: string) => invoke<void>("snippet_delete", { id }),
 
-  termOpen: (serverId: string, cols: number, rows: number, onEvent: (e: TermEvent) => void, command?: string) => {
+  termOpen: (
+    serverId: string,
+    cols: number,
+    rows: number,
+    onEvent: (e: TermEvent) => void,
+    opts: { command?: string; tmuxSession?: string } = {},
+  ) => {
     const channel = new Channel<TermEvent>();
     channel.onmessage = onEvent;
-    return invoke<number>("term_open", { serverId, cols, rows, command, onEvent: channel });
+    return invoke<number>("term_open", { serverId, cols, rows, command: opts.command, tmuxSession: opts.tmuxSession, onEvent: channel });
   },
   termWrite: (id: number, data: string) => invoke<void>("term_write", { id, data }),
   termResize: (id: number, cols: number, rows: number) => invoke<void>("term_resize", { id, cols, rows }),
@@ -333,10 +491,21 @@ export const api = {
   fsRename: (serverId: string, from: string, to: string) => invoke<void>("fs_rename", { serverId, from, to }),
   fsRemove: (serverId: string, paths: string[]) => invoke<void>("fs_remove", { serverId, paths }),
   fsChmod: (serverId: string, path: string, mode: number) => invoke<void>("fs_chmod", { serverId, path, mode }),
-  fsDownload: (serverId: string, paths: string[], localDir: string | null, onProgress: (p: Progress) => void) =>
-    invoke<string>("fs_download", { serverId, paths, localDir, onProgress: progressChannel(onProgress) }),
-  fsUpload: (serverId: string, localPaths: string[], remoteDir: string, onProgress: (p: Progress) => void) =>
-    invoke<void>("fs_upload", { serverId, localPaths, remoteDir, onProgress: progressChannel(onProgress) }),
+  fsDownload: (serverId: string, paths: string[], localDir: string | null, transferId: number, onProgress: (p: Progress) => void) =>
+    invoke<string>("fs_download", { serverId, paths, localDir, transferId, onProgress: progressChannel(onProgress) }),
+  fsUpload: (serverId: string, localPaths: string[], remoteDir: string, transferId: number, onProgress: (p: Progress) => void) =>
+    invoke<void>("fs_upload", { serverId, localPaths, remoteDir, transferId, onProgress: progressChannel(onProgress) }),
+  fsCopyBetween: (
+    srcServer: string,
+    paths: string[],
+    dstServer: string,
+    dstDir: string,
+    overwrite: boolean,
+    transferId: number,
+    onProgress: (p: Progress) => void,
+  ) => invoke<void>("fs_copy_between", { srcServer, paths, dstServer, dstDir, overwrite, transferId, onProgress: progressChannel(onProgress) }),
+  fsCancel: (transferId: number) => invoke<void>("fs_cancel", { transferId }),
+  dashboardSummary: (serverId: string) => invoke<DashboardSummary>("dashboard_summary", { serverId }),
 
   metrics: (serverId: string) => invoke<Metrics>("mon_metrics", { serverId }),
   processes: (serverId: string) => invoke<Process[]>("mon_processes", { serverId }),
@@ -381,6 +550,56 @@ export const api = {
   sitesCheck: (serverId: string, domain: string) => invoke<string>("sites_check", { serverId, domain }),
   sitesPreview: (domain: string, hostPort: number, app?: AppSpec) =>
     invoke<{ vhost: string; compose: string | null }>("sites_preview", { domain, hostPort, app }),
+  tunnels: () => invoke<TunnelView[]>("tunnels_list"),
+  tunnelSave: (def: TunnelDef) => invoke<string>("tunnel_save", { def }),
+  tunnelDelete: (id: string) => invoke<void>("tunnel_delete", { id }),
+  tunnelStart: (id: string) => invoke<void>("tunnel_start", { id }),
+  tunnelStop: (id: string) => invoke<void>("tunnel_stop", { id }),
+  tunnelFreePort: (start: number) => invoke<number>("tunnel_free_port", { start }),
+
+  logSources: (serverId: string) => invoke<{ containers: string[]; units: string[]; files: string[] }>("logs_sources", { serverId }),
+  logsStart: (serverId: string, sources: LogSource[], lines: number, onEvent: (e: LogEvent) => void) => {
+    const channel = new Channel<LogEvent>();
+    channel.onmessage = onEvent;
+    return invoke<number>("logs_start", { serverId, sources, lines, onEvent: channel });
+  },
+  logsStop: (id: number) => invoke<void>("logs_stop", { id }),
+
+  restrictPreview: (serverId: string, project: ComposeProject, hostPort: number) =>
+    invoke<{ file: string; before: string; after: string }>("docker_restrict_preview", { serverId, project, hostPort }),
+  restrictApply: (serverId: string, project: ComposeProject, hostPort: number) =>
+    invoke<string>("docker_restrict_apply", { serverId, project, hostPort }),
+
+  nginxBackups: (serverId: string) => invoke<string[]>("nginx_backups", { serverId }),
+  nginxBackupDiff: (serverId: string, name: string) => invoke<string>("nginx_backup_diff", { serverId, name }),
+  nginxBackupRestore: (serverId: string, name: string) => invoke<ApplyResult>("nginx_backup_restore", { serverId, name }),
+
+  securityAudit: (serverId: string) => invoke<SecurityReport>("security_audit", { serverId }),
+  securityFixPlan: (id: string) => invoke<FixPlan>("security_fix_plan", { id }),
+  securityFixApply: (serverId: string, id: string) =>
+    invoke<{ ok: boolean; output: string; rollback: string | null }>("security_fix_apply", { serverId, id }),
+
+  backupOverview: (serverId: string) => invoke<BackupOverview>("backup_overview", { serverId }),
+  backupSave: (serverId: string, config: BackupConfig, resticPassword?: string, s3Secret?: string) =>
+    invoke<{ log: string; generatedPassword: string | null }>("backup_save", { serverId, config, resticPassword, s3Secret }),
+  backupSnapshots: (serverId: string) => invoke<Snapshot[]>("backup_snapshots", { serverId }),
+  backupList: (serverId: string, snapshot: string, path: string) => invoke<SnapshotNode[]>("backup_list", { serverId, snapshot, path }),
+  backupRestore: (serverId: string, snapshot: string, path: string) => invoke<string>("backup_restore", { serverId, snapshot, path }),
+  backupPutBack: (serverId: string, restored: string, original: string) => invoke<string>("backup_put_back", { serverId, restored, original }),
+  backupImportDump: (serverId: string, dump: string, database: DbSource) => invoke<string>("backup_import_dump", { serverId, dump, database }),
+  backupStageDownload: (serverId: string, restored: string) => invoke<string>("backup_stage_download", { serverId, restored }),
+  backupCheck: (serverId: string) => invoke<string>("backup_check", { serverId }),
+
+  deploySuggestHost: (serverId: string, project: string) => invoke<string | null>("deploy_suggest_host", { serverId, project }),
+  deployPrepare: (serverId: string, project: ComposeProject, checkHost: string | null) =>
+    invoke<string>("deploy_prepare", { serverId, project, checkHost }),
+  deployKeys: (serverId: string) => invoke<string[]>("deploy_keys", { serverId }),
+  deployKeyCreate: (serverId: string, project: ComposeProject, checkHost: string | null) =>
+    invoke<DeployKey>("deploy_key_create", { serverId, project, checkHost }),
+  deployKeyRevoke: (serverId: string, project: string) => invoke<void>("deploy_key_revoke", { serverId, project }),
+
+  mcpConfig: () => invoke<McpConfig>("mcp_config"),
+  saveTextFile: (path: string, content: string) => invoke<void>("save_text_file", { path, content }),
 };
 
 export function formatDuration(secs: number): string {

@@ -220,6 +220,30 @@ impl Connection {
         Ok(channel)
     }
 
+    /// Comme [`open_exec`](Self::open_exec), mais en root (sudo) pour les commandes longues
+    /// (`journalctl -f`, `tail -F` sur des logs protégés…). Le mot de passe passe par stdin.
+    pub async fn open_exec_sudo(&self, command: &str, sudo_password: Option<&str>) -> Result<Channel<Msg>> {
+        let q = shell_quote(command);
+        match sudo_password {
+            Some(pw) => {
+                let cmd = format!("if [ \"$(id -u)\" = 0 ]; then read -r _; exec sh -c {q}; else exec sudo -S -p '' sh -c {q}; fi");
+                let channel = self.open_exec(&cmd, None).await?;
+                channel.data(format!("{pw}\n").as_bytes()).await?;
+                Ok(channel)
+            }
+            None => {
+                let cmd = format!("if [ \"$(id -u)\" = 0 ]; then exec sh -c {q}; else exec sudo -n sh -c {q}; fi");
+                self.open_exec(&cmd, None).await
+            }
+        }
+    }
+
+    /// Ouvre un canal vers `host:port` vu depuis le serveur (tunnel local, équivalent de `ssh -L`).
+    pub async fn open_direct_tcpip(&self, host: &str, port: u16, local_port: u16) -> Result<russh::ChannelStream<Msg>> {
+        let channel = self.handle.channel_open_direct_tcpip(host, port as u32, "127.0.0.1", local_port as u32).await?;
+        Ok(channel.into_stream())
+    }
+
     /// Ouvre une session SFTP.
     pub async fn sftp(&self) -> Result<russh_sftp::client::SftpSession> {
         let channel = self.handle.channel_open_session().await?;

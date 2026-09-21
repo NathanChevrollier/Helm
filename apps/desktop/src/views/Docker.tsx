@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box, Container as ContainerIcon, FileCode2, FileSearch, Layers, Pause, Play, RefreshCw, RotateCw, ScrollText,
-  Square, SquareTerminal, Trash2, UploadCloud,
+  Cable, GitBranch, Lock, Rocket, Square, SquareTerminal, Trash2, UploadCloud,
 } from "lucide-react";
 import {
   api, errorMessage, shellQuote, type ComposeProject, type Container, type ContainerStats, type DockerDiskUsage,
@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
+import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../components/DockerExtras";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
@@ -113,6 +114,7 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [inspect, setInspect] = useState<{ name: string; json: string } | null>(null);
+  const [restrict, setRestrict] = useState<{ project: ComposeProject; port: number } | null>(null);
 
   useEffect(() => {
     let stop = false;
@@ -186,11 +188,26 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
                     {c.ports.length === 0 ? (
                       <span className="text-muted">—</span>
                     ) : (
-                      c.ports.map((p) => (
-                        <div key={`${p.hostPort}/${p.protocol}`} title={p.hostIp === "0.0.0.0" ? "Exposé sur toutes les interfaces (accessible depuis Internet si le pare-feu le permet)" : "Accessible uniquement en local"}>
-                          <span className={p.hostIp === "0.0.0.0" ? "text-warn" : "text-muted"}>{p.hostIp === "0.0.0.0" ? "*" : p.hostIp}</span>:{p.hostPort} → {p.containerPort}
-                        </div>
-                      ))
+                      c.ports.map((p) => {
+                        const project = data.projects.find((x) => x.name === c.composeProject);
+                        return (
+                          <div key={`${p.hostPort}/${p.protocol}`} className="group/port flex items-center gap-1">
+                            <span title={p.hostIp === "0.0.0.0" ? "Exposé sur toutes les interfaces (accessible depuis Internet si le pare-feu le permet)" : "Accessible uniquement en local"}>
+                              <span className={p.hostIp === "0.0.0.0" ? "text-warn" : "text-muted"}>{p.hostIp === "0.0.0.0" ? "*" : p.hostIp}</span>:{p.hostPort} → {p.containerPort}
+                            </span>
+                            {p.protocol === "tcp" && (
+                              <button className="invisible rounded p-0.5 text-muted group-hover/port:visible hover:text-fg" title="Accéder depuis mon PC (tunnel)" onClick={() => void tunnelTo(serverId, c, p.hostPort)}>
+                                <Cable size={12} />
+                              </button>
+                            )}
+                            {p.hostIp === "0.0.0.0" && project && (
+                              <button className="rounded p-0.5 text-warn hover:text-fg" title="Restreindre au serveur (127.0.0.1)" onClick={() => setRestrict({ project, port: p.hostPort })}>
+                                <Lock size={12} />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
                   </td>
                   <td className="px-3 py-2 text-right text-xs tabular-nums">{s && isRunning ? `${s.cpu.toFixed(1)} %` : ""}</td>
@@ -252,6 +269,18 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
           </tbody>
         </table>
       </div>
+      {restrict && (
+        <RestrictPortDialog
+          serverId={serverId}
+          project={restrict.project}
+          port={restrict.port}
+          onClose={() => setRestrict(null)}
+          onDone={() => {
+            setRestrict(null);
+            void reload();
+          }}
+        />
+      )}
       {inspect && (
         <Modal title={`Inspection de ${inspect.name}`} width="max-w-5xl" onClose={() => setInspect(null)}>
           <pre className="h-[65vh] overflow-auto rounded-md bg-bg p-3 font-mono text-xs select-text">{inspect.json}</pre>
@@ -266,6 +295,7 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
   const [busy, setBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [github, setGithub] = useState<ComposeProject | null>(null);
 
   if (data.projects.length === 0) {
     return <EmptyState icon={<Layers size={36} />} title="Aucun projet docker compose">Les projets lancés avec docker compose apparaîtront ici.</EmptyState>;
@@ -317,12 +347,14 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
             </div>
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" variant="primary" icon={<Play size={12} />} loading={b("up")} onClick={() => void act(p, "up", "Démarrer (up -d)")}>Up</Button>
+              <Button size="sm" variant="primary" icon={<Rocket size={12} />} onClick={() => void deployProject(serverId, p)}>Déployer</Button>
               <Button size="sm" icon={<UploadCloud size={12} />} loading={b("update")} onClick={() => void act(p, "update", "Mettre à jour (pull + up)")}>Mettre à jour</Button>
               <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>Redémarrer</Button>
               <Button size="sm" icon={<ScrollText size={12} />} onClick={async () => openTab(serverId, { title: `${p.name} (logs)`, command: (await api.composeCommand(p, "logs -f --tail 200")).replace(/^docker /, `${docker} `) })}>
                 Logs
               </Button>
               <Button size="sm" icon={<FileCode2 size={12} />} onClick={() => setEditing(file)}>Éditer</Button>
+              <Button size="sm" icon={<GitBranch size={12} />} onClick={() => setGithub(p)}>GitHub</Button>
               <Button size="sm" variant="danger" icon={<Square size={12} />} loading={b("down")} onClick={() => void act(p, "down", "Arrêter et supprimer (down)", "Les conteneurs du projet seront arrêtés et supprimés (les volumes nommés sont conservés). Le site sera indisponible.")}>
                 Down
               </Button>
@@ -340,6 +372,7 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
           <FileEditor serverId={serverId} path={editing} onClose={() => setEditing(null)} />
         </Suspense>
       )}
+      {github && <GithubDeployDialog serverId={serverId} project={github} onClose={() => setGithub(null)} />}
     </div>
   );
 }

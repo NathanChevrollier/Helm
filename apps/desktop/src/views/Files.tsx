@@ -1,37 +1,163 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { create } from "zustand";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowUp, Download, Eye, EyeOff, File, FilePlus, Folder, FolderOpen, FolderPlus, House, Link2, Pencil,
-  RefreshCw, Shield, SquareTerminal, Trash2, Upload,
+  ArrowLeftRight, ArrowUp, Columns2, Download, Eye, EyeOff, File, FilePlus, Folder, FolderOpen, FolderPlus, House, Link2,
+  Pencil, RefreshCw, Shield, SquareTerminal, Trash2, Upload, X,
 } from "lucide-react";
-import { api, errorMessage, formatBytes, shellQuote, type FsEntry, type Listing, type Progress } from "../lib/api";
+import { api, errorMessage, formatBytes, shellQuote, type FsEntry, type Listing } from "../lib/api";
+import { cancel, track, useTransfers } from "../lib/transfers";
 import { ensureConnected, useApp } from "../lib/store";
 import { Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
-interface Transfer {
-  id: number;
-  label: string;
-  progress: Progress | null;
-  state: "running" | "done" | "error";
-  message?: string;
-}
-let transferSeq = 0;
-
 const isDir = (e: FsEntry) => e.kind === "dir" || e.targetIsDir;
 
-export default function FilesView() {
-  const serverId = useApp((s) => s.activeServerId);
-  if (!serverId) {
-    return <EmptyState icon={<FolderOpen size={40} />} title="Aucun serveur sélectionné">Choisis un serveur dans la liste à gauche.</EmptyState>;
-  }
-  return <Explorer key={serverId} serverId={serverId} />;
+type PaneId = "left" | "right";
+
+/** État partagé des deux panneaux : serveur, dossier courant, glisser en cours. */
+interface PanesState {
+  cwd: Record<PaneId, { serverId: string; path: string }>;
+  /** Incrémenté pour demander à un panneau de se rafraîchir. */
+  version: Record<PaneId, number>;
+  drag: { from: PaneId; serverId: string; paths: string[]; label: string; x: number; y: number } | null;
+  setCwd: (pane: PaneId, serverId: string, path: string) => void;
+  bump: (pane: PaneId) => void;
+  setDrag: (drag: PanesState["drag"]) => void;
 }
 
-function Explorer({ serverId }: { serverId: string }) {
-  const { notify, ask, openTab } = useApp();
+const usePanes = create<PanesState>((set) => ({
+  cwd: { left: { serverId: "", path: "" }, right: { serverId: "", path: "" } },
+  version: { left: 0, right: 0 },
+  drag: null,
+  setCwd: (pane, serverId, path) => set((s) => ({ cwd: { ...s.cwd, [pane]: { serverId, path } } })),
+  bump: (pane) => set((s) => ({ version: { ...s.version, [pane]: s.version[pane] + 1 } })),
+  setDrag: (drag) => set({ drag }),
+}));
+
+/**
+ * Copie des éléments vers l'autre panneau (autre serveur ou autre dossier), en flux via le PC.
+ * Demande confirmation avant d'écraser un élément existant.
+ */
+async function copyToOther(from: PaneId, serverId: string, paths: string[]) {
+  const to: PaneId = from === "left" ? "right" : "left";
+  const target = usePanes.getState().cwd[to];
+  if (!target.serverId || !target.path) return;
+  const { servers, ask } = useApp.getState();
+  const dstName = servers.find((s) => s.id === target.serverId)?.name ?? "";
+  const label = `Copie de ${paths.length} élément(s) vers ${dstName}:${target.path}`;
+  let overwrite = false;
+  for (;;) {
+    let exists: string | null = null;
+    const ok = await track(label, (id, onProgress) =>
+      api.fsCopyBetween(serverId, paths, target.serverId, target.path, overwrite, id, onProgress).catch((e) => {
+        const msg = errorMessage(e);
+        if (msg.startsWith("EXISTS:")) exists = msg.slice(7);
+        throw e;
+      }),
+    );
+    if (ok || !exists || overwrite) break;
+    const confirm = await ask({
+      title: "Élément déjà présent",
+      body: `« ${exists} » existe déjà sur ${dstName}. Le remplacer ?`,
+      confirmLabel: "Remplacer",
+      danger: true,
+    });
+    if (!confirm) break;
+    overwrite = true;
+  }
+  usePanes.getState().bump(to);
+}
+
+export default function FilesView() {
+  const { activeServerId, servers } = useApp();
+  const [dual, setDual] = useState(false);
+  const [rightServer, setRightServer] = useState<string | null>(null);
+  const drag = usePanes((s) => s.drag);
+
+  if (!activeServerId) {
+    return <EmptyState icon={<FolderOpen size={40} />} title="Aucun serveur sélectionné">Choisis un serveur dans la liste à gauche.</EmptyState>;
+  }
+  const right = rightServer && servers.some((s) => s.id === rightServer) ? rightServer : activeServerId;
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1">
+          <Explorer key={`l-${activeServerId}`} serverId={activeServerId} pane="left" dual={dual} onToggleDual={() => setDual((v) => !v)} />
+        </div>
+        {dual && (
+          <div className="min-w-0 flex-1 border-l border-border">
+            <Explorer key={`r-${right}`} serverId={right} pane="right" dual onToggleDual={() => setDual(false)} onServerChange={setRightServer} />
+          </div>
+        )}
+      </div>
+      <TransfersBar />
+      {drag && (
+        <div className="pointer-events-none fixed z-50 rounded-md border border-accent bg-panel px-2 py-1 text-xs shadow-xl" style={{ left: drag.x + 12, top: drag.y + 12 }}>
+          {drag.label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TransfersBar() {
+  const list = useTransfers((s) => s.list);
+  const remove = useTransfers((s) => s.remove);
+  if (list.length === 0) return null;
+  return (
+    <div className="shrink-0 border-t border-border bg-panel px-3 py-2">
+      {list.map((t) => {
+        const pct = t.progress && t.progress.total ? Math.round((t.progress.done / t.progress.total) * 100) : null;
+        return (
+          <div key={t.id} className="flex items-center gap-3 py-1 text-xs">
+            <span className="w-80 truncate" title={t.label}>{t.label}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded bg-border">
+              <div
+                className={`h-full transition-all ${t.state === "error" ? "bg-danger" : t.state === "done" ? "bg-ok" : t.state === "cancelled" ? "bg-muted" : "bg-accent"}`}
+                style={{ width: t.state === "done" ? "100%" : `${pct ?? 5}%` }}
+              />
+            </div>
+            <span className="w-64 truncate text-muted" title={t.message}>
+              {t.state === "error" || t.state === "cancelled" ? t.message : t.state === "done" ? "Terminé" : t.progress ? `${t.progress.file.split(/[\\/]/).pop()} · ${formatBytes(t.progress.done)}` : "…"}
+            </span>
+            {t.state === "running" ? (
+              <IconButton title="Annuler" onClick={() => cancel(t.id)}>
+                <X size={13} />
+              </IconButton>
+            ) : t.state === "error" ? (
+              <IconButton title="Masquer" onClick={() => remove(t.id)}>
+                <X size={13} />
+              </IconButton>
+            ) : (
+              <span className="w-7" />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Explorer({
+  serverId,
+  pane,
+  dual,
+  onToggleDual,
+  onServerChange,
+}: {
+  serverId: string;
+  pane: PaneId;
+  dual: boolean;
+  onToggleDual: () => void;
+  onServerChange?: (id: string) => void;
+}) {
+  const { notify, ask, openTab, servers, filesPaths, setFilesPath } = useApp();
+  const root = useRef<HTMLDivElement>(null);
+  const version = usePanes((s) => s.version[pane]);
   const [listing, setListing] = useState<Listing | null>(null);
   const [pathInput, setPathInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,7 +168,6 @@ function Explorer({ serverId }: { serverId: string }) {
   const [filter, setFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [chmodOf, setChmodOf] = useState<FsEntry | null>(null);
-  const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [dragOver, setDragOver] = useState(false);
 
   const load = useCallback(
@@ -59,21 +184,33 @@ function Explorer({ serverId }: { serverId: string }) {
         setListing(l);
         setPathInput(l.path);
         setSelected(new Set());
+        usePanes.getState().setCwd(pane, serverId, l.path);
+        if (pane === "left") setFilesPath(serverId, l.path);
       } catch (e) {
         setError(errorMessage(e));
       } finally {
         setLoading(false);
       }
     },
-    [serverId],
+    [serverId, pane, setFilesPath],
   );
 
+  // Reprend le dernier dossier ouvert sur ce serveur (panneau principal).
   useEffect(() => {
-    void load("");
+    void load(pane === "left" ? (filesPaths[serverId] ?? "") : "");
+    // Chargement initial uniquement.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
+  // Rafraîchissement demandé par l'autre panneau (après une copie vers celui-ci).
+  const cwdRef = useRef("");
+
   const cwd = listing?.path ?? "";
+  cwdRef.current = cwd;
   const refresh = () => void load(cwd);
+  useEffect(() => {
+    if (version > 0) void load(cwdRef.current);
+  }, [version, load]);
   const join = (name: string) => (cwd.endsWith("/") ? cwd + name : `${cwd}/${name}`);
   const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, "") || "/";
 
@@ -85,23 +222,10 @@ function Explorer({ serverId }: { serverId: string }) {
 
   const selectedEntries = entries.filter((e) => selected.has(e.path));
 
-  const track = async (label: string, run: (onProgress: (p: Progress) => void) => Promise<unknown>) => {
-    const id = ++transferSeq;
-    setTransfers((t) => [...t, { id, label, progress: null, state: "running" }]);
-    const update = (patch: Partial<Transfer>) => setTransfers((t) => t.map((x) => (x.id === id ? { ...x, ...patch } : x)));
-    try {
-      await run((progress) => update({ progress }));
-      update({ state: "done" });
-      setTimeout(() => setTransfers((t) => t.filter((x) => x.id !== id)), 4000);
-    } catch (e) {
-      update({ state: "error", message: errorMessage(e) });
-    }
-  };
-
   const upload = async (paths: string[]) => {
     if (!paths.length || !cwd) return;
     const dir = cwd;
-    await track(`Envoi de ${paths.length} élément(s) vers ${dir}`, (p) => api.fsUpload(serverId, paths, dir, p));
+    await track(`Envoi de ${paths.length} élément(s) vers ${dir}`, (id, p) => api.fsUpload(serverId, paths, dir, id, p));
     if (dir === cwd) refresh();
   };
 
@@ -109,8 +233,8 @@ function Explorer({ serverId }: { serverId: string }) {
     if (!items.length) return;
     const dir = await open({ directory: true, title: "Dossier de destination" });
     if (typeof dir !== "string") return;
-    await track(`Téléchargement de ${items.length} élément(s)`, async (p) => {
-      const where = await api.fsDownload(serverId, items.map((i) => i.path), dir, p);
+    await track(`Téléchargement de ${items.length} élément(s)`, async (id, p) => {
+      const where = await api.fsDownload(serverId, items.map((i) => i.path), dir, id, p);
       notify(`Téléchargé dans ${where}`, "success");
     });
   };
@@ -121,6 +245,15 @@ function Explorer({ serverId }: { serverId: string }) {
     void getCurrentWebview()
       .onDragDropEvent((event) => {
         if (useApp.getState().section !== "files") return;
+        if (event.payload.type === "over" || event.payload.type === "enter" || event.payload.type === "drop") {
+          const { x, y } = event.payload.position;
+          const el = document.elementFromPoint(x / window.devicePixelRatio, y / window.devicePixelRatio);
+          const mine = !!el && root.current?.contains(el);
+          if (!mine) {
+            setDragOver(false);
+            return;
+          }
+        }
         if (event.payload.type === "over" || event.payload.type === "enter") setDragOver(true);
         else if (event.payload.type === "leave") setDragOver(false);
         else if (event.payload.type === "drop") {
@@ -137,6 +270,29 @@ function Explorer({ serverId }: { serverId: string }) {
   const activate = (e: FsEntry) => {
     if (isDir(e)) void load(e.path);
     else setEditing(e.path);
+  };
+
+  const onRowMouseDown = (ev: React.MouseEvent, e: FsEntry) => {
+    if (!dual || ev.button !== 0) return;
+    const start = { x: ev.clientX, y: ev.clientY };
+    const paths = selected.has(e.path) ? [...selected] : [e.path];
+    const { setDrag } = usePanes.getState();
+    let dragging = false;
+    const move = (m: MouseEvent) => {
+      if (!dragging && Math.hypot(m.clientX - start.x, m.clientY - start.y) < 6) return;
+      dragging = true;
+      setDrag({ from: pane, serverId, paths, label: paths.length > 1 ? `${paths.length} éléments` : e.name, x: m.clientX, y: m.clientY });
+    };
+    const up = (m: MouseEvent) => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      setDrag(null);
+      if (!dragging) return;
+      const target = document.elementFromPoint(m.clientX, m.clientY)?.closest("[data-pane]")?.getAttribute("data-pane");
+      if (target && target !== pane) void copyToOther(pane, serverId, paths);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   };
 
   const onRowClick = (ev: React.MouseEvent, e: FsEntry) => {
@@ -195,7 +351,7 @@ function Explorer({ serverId }: { serverId: string }) {
   const single = selectedEntries.length === 1 ? selectedEntries[0] : null;
 
   return (
-    <div className="relative flex h-full flex-col" onKeyDown={(e) => {
+    <div ref={root} data-pane={pane} className="relative flex h-full flex-col" onKeyDown={(e) => {
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === "Delete") void remove(selectedEntries);
       if (e.key === "F2" && single) void rename(single);
@@ -203,6 +359,20 @@ function Explorer({ serverId }: { serverId: string }) {
       if (e.key === "F5") refresh();
     }} tabIndex={-1}>
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+        {onServerChange && (
+          <select
+            className="mr-1 h-8 max-w-40 rounded-md border border-border bg-bg px-2 text-xs"
+            value={serverId}
+            onChange={(e) => onServerChange(e.target.value)}
+            aria-label="Serveur du panneau"
+          >
+            {servers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
         <IconButton title="Dossier parent" onClick={() => void load(parentOf(cwd))} disabled={cwd === "/"}>
           <ArrowUp size={15} />
         </IconButton>
@@ -224,6 +394,9 @@ function Explorer({ serverId }: { serverId: string }) {
         <Input className="!w-44" placeholder="Filtrer…" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <IconButton title={showHidden ? "Masquer les fichiers cachés" : "Afficher les fichiers cachés"} onClick={() => setShowHidden((v) => !v)}>
           {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
+        </IconButton>
+        <IconButton title={dual ? "Fermer le double panneau" : "Double panneau (copie entre serveurs)"} className={dual ? "text-accent" : ""} onClick={onToggleDual}>
+          <Columns2 size={15} />
         </IconButton>
       </div>
 
@@ -266,11 +439,16 @@ function Explorer({ serverId }: { serverId: string }) {
       <div className={`flex h-10 shrink-0 items-center gap-1 border-b border-border px-3 text-xs ${selectedEntries.length ? "bg-accent/5" : ""}`}>
         {selectedEntries.length === 0 ? (
           <span className="text-muted">
-            {entries.length} élément(s) · double-clic pour ouvrir · glisse des fichiers ici pour les envoyer
+            {entries.length} élément(s) · double-clic pour ouvrir · glisse des fichiers ici pour les envoyer{dual ? " ou vers l'autre panneau pour les copier" : ""}
           </span>
         ) : (
         <>
           <span className="mr-2 text-muted">{selectedEntries.length} sélectionné(s)</span>
+          {dual && (
+            <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={13} />} onClick={() => void copyToOther(pane, serverId, selectedEntries.map((e) => e.path))}>
+              Copier vers l'autre panneau
+            </Button>
+          )}
           <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => void download(selectedEntries)}>Télécharger</Button>
           {single && !isDir(single) && (
             <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(single.path)}>Éditer</Button>
@@ -300,6 +478,7 @@ function Explorer({ serverId }: { serverId: string }) {
               {entries.map((e) => (
                 <tr
                   key={e.path}
+                  onMouseDown={(ev) => onRowMouseDown(ev, e)}
                   onClick={(ev) => onRowClick(ev, e)}
                   onDoubleClick={() => activate(e)}
                   className={`cursor-default border-b border-border/40 ${selected.has(e.path) ? "bg-accent/15" : "hover:bg-white/[0.03]"}`}
@@ -329,28 +508,6 @@ function Explorer({ serverId }: { serverId: string }) {
         )}
         {!error && listing && entries.length === 0 && <p className="p-6 text-center text-sm text-muted">Dossier vide</p>}
       </div>
-
-      {transfers.length > 0 && (
-        <div className="shrink-0 border-t border-border bg-panel px-3 py-2">
-          {transfers.map((t) => {
-            const pct = t.progress && t.progress.total ? Math.round((t.progress.done / t.progress.total) * 100) : null;
-            return (
-              <div key={t.id} className="flex items-center gap-3 py-1 text-xs">
-                <span className="w-72 truncate">{t.label}</span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded bg-border">
-                  <div
-                    className={`h-full transition-all ${t.state === "error" ? "bg-danger" : t.state === "done" ? "bg-ok" : "bg-accent"}`}
-                    style={{ width: t.state === "done" ? "100%" : `${pct ?? 5}%` }}
-                  />
-                </div>
-                <span className="w-64 truncate text-muted">
-                  {t.state === "error" ? t.message : t.state === "done" ? "Terminé" : t.progress ? `${t.progress.file.split(/[\\/]/).pop()} · ${formatBytes(t.progress.done)}` : "…"}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {dragOver && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-accent bg-accent/10">

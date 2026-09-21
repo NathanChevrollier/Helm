@@ -6,8 +6,9 @@ use helm_core::ssh::shell_quote;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::commands::admin;
+use crate::commands::{admin, track};
 use crate::sessions::Sessions;
+use crate::store::AuditLog;
 use crate::store::Store;
 
 fn err(e: impl ToString) -> String {
@@ -35,6 +36,7 @@ pub async fn sites_read(store: State<'_, Store>, sessions: State<'_, Sessions>, 
 
 #[tauri::command]
 pub async fn sites_write(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
@@ -42,12 +44,18 @@ pub async fn sites_write(
     content: String,
     enable_link: Option<String>,
 ) -> Result<ApplyResult, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::write_config(&conn, pw.as_deref(), &path, &content, enable_link.as_deref()).await.map_err(err)
+    let detail = path.clone();
+    let r: Result<ApplyResult, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::write_config(&conn, pw.as_deref(), &path, &content, enable_link.as_deref()).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "nginx.write", &detail, r)
 }
 
 #[tauri::command]
 pub async fn sites_set_enabled(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
@@ -55,20 +63,31 @@ pub async fn sites_set_enabled(
     link: String,
     enabled: bool,
 ) -> Result<ApplyResult, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::set_enabled(&conn, pw.as_deref(), &available, &link, enabled).await.map_err(err)
+    let detail = format!("{} {available}", if enabled { "activer" } else { "désactiver" });
+    let r: Result<ApplyResult, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::set_enabled(&conn, pw.as_deref(), &available, &link, enabled).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "nginx.enable", &detail, r)
 }
 
 #[tauri::command]
 pub async fn sites_delete(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
     available: String,
     link: String,
 ) -> Result<ApplyResult, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::delete_site(&conn, pw.as_deref(), &available, &link).await.map_err(err)
+    let detail = available.clone();
+    let r: Result<ApplyResult, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::delete_site(&conn, pw.as_deref(), &available, &link).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "nginx.delete", &detail, r)
 }
 
 #[derive(Serialize)]
@@ -85,9 +104,19 @@ pub async fn sites_test(store: State<'_, Store>, sessions: State<'_, Sessions>, 
 }
 
 #[tauri::command]
-pub async fn sites_reload(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<String, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::reload(&conn, pw.as_deref()).await.map_err(err)
+pub async fn sites_reload(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+) -> Result<String, String> {
+    let detail = String::new();
+    let r: Result<String, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::reload(&conn, pw.as_deref()).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "nginx.reload", &detail, r)
 }
 
 #[derive(Serialize)]
@@ -161,56 +190,82 @@ pub struct AppSpec {
 /// Crée /opt/sites/<nom>/docker-compose.yml et lance le conteneur.
 #[tauri::command]
 pub async fn sites_create_app(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
     spec: AppSpec,
 ) -> Result<String, String> {
-    let name_ok = !spec.name.is_empty() && spec.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    let image_ok = !spec.image.is_empty() && spec.image.chars().all(|c| c.is_ascii_alphanumeric() || "._-:/@".contains(c));
-    if !name_ok || !image_ok {
-        return Err("nom ou image invalide".into());
+    let detail = format!("{} ({})", spec.name, spec.image);
+    let r: Result<String, String> = async {
+        let name_ok = !spec.name.is_empty() && spec.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        let image_ok = !spec.image.is_empty() && spec.image.chars().all(|c| c.is_ascii_alphanumeric() || "._-:/@".contains(c));
+        if !name_ok || !image_ok {
+            return Err("nom ou image invalide".into());
+        }
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        let (access, _) = docker::access(&conn, pw.as_deref()).await.map_err(err)?;
+        if access == Access::Unavailable {
+            return Err("Docker n'est pas accessible sur ce serveur".into());
+        }
+        let dir = format!("/opt/sites/{}", spec.name);
+        let file = format!("{dir}/docker-compose.yml");
+        let exists = conn.exec(&format!("test -e {}", shell_quote(&file)), None).await.map_err(err)?.success();
+        if exists {
+            return Err(format!("{file} existe déjà : choisis un autre nom"));
+        }
+        conn.exec_sudo(&format!("mkdir -p {}", shell_quote(&dir)), pw.as_deref(), None).await.map_err(err)?.into_result().map_err(err)?;
+        let compose = nginx::site_compose(&spec.name, &spec.image, spec.host_port, spec.container_port, &spec.env);
+        conn.write_file_sudo(&file, &compose, pw.as_deref()).await.map_err(err)?;
+        let out = docker::run(
+            &conn,
+            access,
+            pw.as_deref(),
+            &format!("compose -f {} -p {} up -d 2>&1", shell_quote(&file), shell_quote(&spec.name)),
+        )
+        .await
+        .map_err(err)?;
+        if !out.success() {
+            return Err(format!("docker compose up a échoué :\n{}{}", out.stdout, out.stderr));
+        }
+        Ok(format!("{file}\n{}", out.stdout))
     }
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    let (access, _) = docker::access(&conn, pw.as_deref()).await.map_err(err)?;
-    if access == Access::Unavailable {
-        return Err("Docker n'est pas accessible sur ce serveur".into());
-    }
-    let dir = format!("/opt/sites/{}", spec.name);
-    let file = format!("{dir}/docker-compose.yml");
-    let exists = conn.exec(&format!("test -e {}", shell_quote(&file)), None).await.map_err(err)?.success();
-    if exists {
-        return Err(format!("{file} existe déjà : choisis un autre nom"));
-    }
-    conn.exec_sudo(&format!("mkdir -p {}", shell_quote(&dir)), pw.as_deref(), None).await.map_err(err)?.into_result().map_err(err)?;
-    let compose = nginx::site_compose(&spec.name, &spec.image, spec.host_port, spec.container_port, &spec.env);
-    conn.write_file_sudo(&file, &compose, pw.as_deref()).await.map_err(err)?;
-    let out =
-        docker::run(&conn, access, pw.as_deref(), &format!("compose -f {} -p {} up -d 2>&1", shell_quote(&file), shell_quote(&spec.name)))
-            .await
-            .map_err(err)?;
-    if !out.success() {
-        return Err(format!("docker compose up a échoué :\n{}{}", out.stdout, out.stderr));
-    }
-    Ok(format!("{file}\n{}", out.stdout))
+    .await;
+    track(&audit, &store, &server_id, "site.create_app", &detail, r)
 }
 
 #[tauri::command]
 pub async fn sites_certbot(
+    audit: State<'_, AuditLog>,
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
     domain: String,
     email: String,
 ) -> Result<String, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::certbot(&conn, pw.as_deref(), &domain, &email).await.map_err(err)
+    let detail = domain.clone();
+    let r: Result<String, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::certbot(&conn, pw.as_deref(), &domain, &email).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "site.certbot", &detail, r)
 }
 
 #[tauri::command]
-pub async fn sites_renew(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<String, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::renew_certificates(&conn, pw.as_deref()).await.map_err(err)
+pub async fn sites_renew(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+) -> Result<String, String> {
+    let detail = String::new();
+    let r: Result<String, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::renew_certificates(&conn, pw.as_deref()).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "site.renew", &detail, r)
 }
 
 /// Code HTTP renvoyé par nginx pour ce domaine, en interrogeant le serveur lui-même.
@@ -246,4 +301,37 @@ pub fn sites_preview(domain: String, host_port: u16, app: Option<AppSpec>) -> Pr
         vhost: nginx::proxy_vhost(&domain, host_port),
         compose: app.map(|a| nginx::site_compose(&a.name, &a.image, a.host_port, a.container_port, &a.env)),
     }
+}
+
+#[tauri::command]
+pub async fn nginx_backups(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<String>, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    nginx::backups(&conn, pw.as_deref()).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn nginx_backup_diff(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    name: String,
+) -> Result<String, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    nginx::backup_diff(&conn, pw.as_deref(), &name).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn nginx_backup_restore(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    name: String,
+) -> Result<ApplyResult, String> {
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        nginx::restore_backup(&conn, pw.as_deref(), &name).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "nginx.restore", &name, r)
 }
