@@ -139,6 +139,7 @@ pub fn run() {
             sites::sites_certbot,
             sites::sites_renew,
             sites::sites_check,
+            sites::domains_check,
             sites::sites_preview,
             workspace::ui_state_get,
             workspace::ui_state_set,

@@ -156,6 +156,15 @@ export interface Schedule {
   systemd: boolean;
 }
 
+export interface DomainInfo {
+  domain: string;
+  ips: string[];
+  dns: "ok" | "elsewhere" | "missing" | "unknown";
+  dnsDetail: string;
+  registrable: string;
+  expires: string | null;
+}
+
 export interface DiagnosisCheck {
   label: string;
   ok: boolean;
@@ -576,6 +585,7 @@ export const api = {
   scheduleList: (serverId: string) => invoke<Schedule>("schedule_list", { serverId }),
   crontabSave: (serverId: string, user: string, content: string) => invoke<void>("crontab_save", { serverId, user, content }),
   timerRun: (serverId: string, service: string) => invoke<void>("timer_run", { serverId, service }),
+  domainsCheck: (serverId: string, domains: string[]) => invoke<DomainInfo[]>("domains_check", { serverId, domains }),
   diagnose: (id: string) => invoke<Diagnosis>("ssh_diagnose", { id }),
   settingsExport: (path: string, password: string, includeSecrets: boolean) => invoke<void>("settings_export", { path, password, includeSecrets }),
   settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),

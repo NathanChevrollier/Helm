@@ -4,7 +4,7 @@ import {
   ArrowRight, CircleCheck, CircleX, ExternalLink, FileCode2, Globe, Lock, LockOpen, Plus, Power, PowerOff,
   History, RefreshCw, ShieldCheck, Trash2, Zap,
 } from "lucide-react";
-import { api, errorMessage, type Certificate, type Container, type NginxState, type ServerBlock, type SiteFile } from "../lib/api";
+import { api, errorMessage, type Certificate, type Container, type NginxState, type DomainInfo, type ServerBlock, type SiteFile } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 
@@ -54,6 +54,7 @@ function Sites({ serverId }: { serverId: string }) {
   const [history, setHistory] = useState(false);
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   const [checks, setChecks] = useState<Record<string, string>>({});
+  const [dns, setDns] = useState<Record<string, DomainInfo>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,6 +85,16 @@ function Sites({ serverId }: { serverId: string }) {
   const containerOnPort = (port: number) => containers.find((c) => c.ports.some((p) => p.hostPort === port));
   const sites = useMemo(() => sitesOf(state?.files ?? []), [state]);
   const disabled = useMemo(() => sitesOf(state?.disabled ?? []), [state]);
+
+  // DNS et expiration des domaines, vérifiés depuis le PC après l'affichage (sans le ralentir).
+  const domainList = useMemo(() => sites.map((s) => s.domain).filter((d) => d.includes(".")).join(","), [sites]);
+  useEffect(() => {
+    if (!domainList) return;
+    void api
+      .domainsCheck(serverId, domainList.split(","))
+      .then((list) => setDns(Object.fromEntries(list.map((d) => [d.domain, d]))))
+      .catch(() => {});
+  }, [serverId, domainList]);
 
   const runApply = async (label: string, fn: () => Promise<{ ok: boolean; log: string; backup: string | null }>) => {
     try {
@@ -185,6 +196,7 @@ function Sites({ serverId }: { serverId: string }) {
                     <div className="mt-0.5 truncate font-mono text-[11px] text-muted">{site.file.realPath}</div>
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    <DomainBadges info={dns[site.domain]} />
                     {cert ? (
                       <Badge tone={certTone(cert)}>{days! < 0 ? "certificat expiré" : `certificat ${days} j`}</Badge>
                     ) : httpsBlock ? (
@@ -353,5 +365,27 @@ function Sites({ serverId }: { serverId: string }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** DNS du domaine (pointe-t-il vers ce serveur ?) et expiration de son enregistrement. */
+function DomainBadges({ info }: { info?: DomainInfo }) {
+  if (!info) return null;
+  const days = info.expires ? Math.floor((Date.parse(info.expires) - Date.now()) / 86_400_000) : null;
+  const dnsBadge =
+    info.dns === "ok" ? null : (
+      <span title={`${info.dnsDetail}${info.ips.length ? ` (${info.ips.join(", ")})` : ""}`}>
+        <Badge tone={info.dns === "missing" ? "danger" : "warn"}>{info.dns === "missing" ? "DNS absent" : info.dns === "elsewhere" ? "DNS ailleurs" : "DNS ?"}</Badge>
+      </span>
+    );
+  return (
+    <>
+      {dnsBadge}
+      {days !== null && days < 60 && (
+        <span title={`${info.registrable} expire le ${new Date(info.expires!).toLocaleDateString("fr-FR")} : pense à le renouveler chez ton registrar`}>
+          <Badge tone={days < 15 ? "danger" : "warn"}>{days < 0 ? "domaine expiré" : `domaine ${days} j`}</Badge>
+        </span>
+      )}
+    </>
   );
 }
