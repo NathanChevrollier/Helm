@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use helm_core::fail2ban;
 use helm_core::security::{self, FixOutcome, FixPlan, Report};
 use helm_core::Connection;
 use helm_profiles::AuthKind;
@@ -97,4 +98,53 @@ pub async fn security_fix_apply(
         other => other,
     };
     track(&audit, &store, &server_id, "security.fix", &id, r)
+}
+
+// ---------- fail2ban ----------
+
+#[tauri::command]
+pub async fn f2b_state(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<fail2ban::State, String> {
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    fail2ban::state(&conn, sudo.as_deref()).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn f2b_unban(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    jail: String,
+    ip: String,
+) -> Result<(), String> {
+    let detail = format!("{jail} {ip}");
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        fail2ban::unban(&conn, sudo.as_deref(), &jail, &ip).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "fail2ban.unban", &detail, r)
+}
+
+#[tauri::command]
+pub async fn f2b_set_ignore(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    addresses: Vec<String>,
+) -> Result<String, String> {
+    let detail = addresses.join(" ");
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        fail2ban::set_ignore(&conn, sudo.as_deref(), &addresses).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "fail2ban.ignoreip", &detail, r)
+}
+
+/// IP publique du PC (pour « Ajouter mon IP »).
+#[tauri::command]
+pub async fn my_public_ip() -> Option<String> {
+    helm_core::diagnose::public_ip().await
 }

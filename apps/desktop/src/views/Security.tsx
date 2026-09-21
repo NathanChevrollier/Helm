@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Info, OctagonAlert, RefreshCw, ShieldCheck
 import { api, errorMessage, type Finding, type FixPlan, type SecurityReport, type Severity } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import Fail2ban from "./security/Fail2ban";
 
 const LABEL: Record<Severity, string> = { critical: "critique", high: "élevé", medium: "moyen", low: "faible", ok: "OK" };
 const TONE: Record<Severity, "danger" | "warn" | "accent" | "muted" | "ok"> = { critical: "danger", high: "danger", medium: "warn", low: "muted", ok: "ok" };
@@ -20,8 +21,15 @@ export default function SecurityView() {
   return <Security key={serverId} serverId={serverId} />;
 }
 
+const TABS = [
+  { id: "audit", label: "Audit" },
+  { id: "f2b", label: "fail2ban" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
+
 function Security({ serverId }: { serverId: string }) {
   const { openTab } = useApp();
+  const [tab, setTab] = useState<TabId>("audit");
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
   const [report, setReport] = useState<SecurityReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,16 +66,34 @@ function Security({ serverId }: { serverId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
+      <header className="flex items-center gap-4 border-b border-border px-6 py-4">
         <div>
           <h1 className="text-lg font-semibold">Sécurité de {server?.name}</h1>
           <p className="text-sm text-muted">{report ? `${report.os} · SSH sur le port ${report.sshPorts.join(", ") || "?"}` : "Audit en lecture seule : rien n'est modifié sans ton accord."}</p>
         </div>
-        <IconButton title="Relancer l'audit" onClick={() => void load()}>
-          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-        </IconButton>
+        <nav className="ml-auto flex items-center gap-1">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`rounded-md px-3 py-1.5 text-sm ${tab === t.id ? "bg-accent/15 text-fg" : "text-muted hover:text-fg"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+          {tab === "audit" && (
+            <IconButton title="Relancer l'audit" onClick={() => void load()}>
+              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+            </IconButton>
+          )}
+        </nav>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+      {tab === "f2b" && (
+        <div className="min-h-0 flex-1 overflow-auto p-6">
+          <Fail2ban serverId={serverId} />
+        </div>
+      )}
+      <div className={`min-h-0 flex-1 overflow-auto p-6 ${tab === "audit" ? "" : "hidden"}`}>
         {error && <div className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
         {!report && !error && <EmptyState icon={<ShieldCheck size={36} className="animate-pulse" />} title="Audit en cours…" />}
         {report && (

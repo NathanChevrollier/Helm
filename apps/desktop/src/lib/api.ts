@@ -59,6 +59,26 @@ export interface FsEntry {
   group: string | null;
 }
 
+export interface F2bJail {
+  name: string;
+  currentlyFailed: number;
+  totalFailed: number;
+  currentlyBanned: number;
+  totalBanned: number;
+  banned: string[];
+  bantime: number;
+  findtime: number;
+  maxretry: number;
+  ignoreip: string[];
+}
+
+export interface F2bState {
+  installed: boolean;
+  running: boolean;
+  version: string | null;
+  jails: F2bJail[];
+}
+
 export interface DiagnosisCheck {
   label: string;
   ok: boolean;
@@ -466,6 +486,10 @@ export const api = {
 
   uiStateGet: () => invoke<unknown>("ui_state_get"),
   storeWarning: () => invoke<string | null>("store_warning"),
+  f2bState: (serverId: string) => invoke<F2bState>("f2b_state", { serverId }),
+  f2bUnban: (serverId: string, jail: string, ip: string) => invoke<void>("f2b_unban", { serverId, jail, ip }),
+  f2bSetIgnore: (serverId: string, addresses: string[]) => invoke<string>("f2b_set_ignore", { serverId, addresses }),
+  myPublicIp: () => invoke<string | null>("my_public_ip"),
   diagnose: (id: string) => invoke<Diagnosis>("ssh_diagnose", { id }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
   appLockGet: () => invoke<string | null>("app_lock_get"),

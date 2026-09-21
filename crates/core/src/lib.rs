@@ -5,6 +5,7 @@ pub mod backup;
 pub mod deploy;
 pub mod diagnose;
 pub mod docker;
+pub mod fail2ban;
 pub mod nginx;
 pub mod security;
 pub mod sftp;
