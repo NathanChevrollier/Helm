@@ -3,7 +3,7 @@ import Editor, { DiffEditor, type OnMount } from "@monaco-editor/react";
 import { FileDiff, Save, ShieldAlert } from "lucide-react";
 import "../lib/monaco";
 import { languageFor } from "../lib/monaco";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, type FileStamp } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Badge, Button, Modal } from "./ui";
 
@@ -19,12 +19,15 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
   const [showDiff, setShowDiff] = useState(false);
   const dirty = original !== null && value !== original;
   const saveRef = useRef<() => void>(() => {});
+  /** État du fichier à l'ouverture (ou au dernier enregistrement) : sert à détecter une modification concurrente. */
+  const stampRef = useRef<FileStamp | null>(null);
 
   const load = useCallback(
     async (withSudo: boolean) => {
       setError(null);
       try {
         const text = await api.fsRead(serverId, path, withSudo);
+        stampRef.current = await api.fsStat(serverId, path, withSudo).catch(() => null);
         setOriginal(text);
         setValue(text);
         setSudo(withSudo);
@@ -39,17 +42,38 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
     void load(false);
   }, [load]);
 
+  const write = async (withSudo: boolean, force = false) => {
+    stampRef.current = await api.fsWrite(serverId, path, value, withSudo, force ? null : stampRef.current);
+  };
+
   const save = async () => {
     if (!dirty) return;
     setSaving(true);
     try {
-      await api.fsWrite(serverId, path, value, sudo);
+      await write(sudo);
       setOriginal(value);
       setShowDiff(false);
       notify(`${path} enregistré`, "success");
     } catch (e) {
       const msg = errorMessage(e);
-      if (!sudo && /permission|denied|refus/i.test(msg)) {
+      if (msg.startsWith("CONFLICT")) {
+        const ok = await ask({
+          title: "Le fichier a changé sur le serveur",
+          body: "Quelqu'un ou quelque chose (déploiement, autre session, certbot…) l'a modifié depuis que tu l'as ouvert. L'écraser fera disparaître ces changements. Pour les récupérer, annule, copie tes modifications, puis rouvre le fichier.",
+          confirmLabel: "Écraser la version du serveur",
+          danger: true,
+        });
+        if (ok) {
+          try {
+            await write(sudo, true);
+            setOriginal(value);
+            setShowDiff(false);
+            notify(`${path} enregistré`, "success");
+          } catch (e2) {
+            notify(errorMessage(e2), "error");
+          }
+        }
+      } else if (!sudo && /permission|denied|refus/i.test(msg)) {
         const ok = await ask({
           title: "Permission refusée",
           body: "Ce fichier appartient à un autre utilisateur. Enregistrer en root avec sudo ?",
@@ -57,7 +81,7 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
         });
         if (ok) {
           try {
-            await api.fsWrite(serverId, path, value, true);
+            await write(true);
             setSudo(true);
             setOriginal(value);
             notify(`${path} enregistré (sudo)`, "success");

@@ -79,9 +79,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ envoi/téléchargement récursif (3 Mo) identiques, suppression récursive");
 
     // 6c. Écriture atomique en conservant les permissions.
-    fs::write_text(&sftp, "/tmp/perm.txt", "v1").await?;
+    fs::write_text(&sftp, None, "/tmp/perm.txt", "v1").await?;
     fs::chmod(&sftp, "/tmp/perm.txt", 0o640).await?;
-    fs::write_text(&sftp, "/tmp/perm.txt", "v2").await?;
+    fs::write_text(&sftp, None, "/tmp/perm.txt", "v2").await?;
     assert_eq!(fs::read_text(&sftp, "/tmp/perm.txt").await?, "v2");
     assert_eq!(sftp.metadata("/tmp/perm.txt").await?.permissions.unwrap() & 0o777, 0o640);
     println!("✓ écriture atomique, permissions conservées");

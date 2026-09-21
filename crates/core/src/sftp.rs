@@ -7,7 +7,8 @@ use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::{Error, Result};
+use crate::ssh::shell_quote;
+use crate::{Connection, Error, Result};
 
 const CHUNK: usize = 256 * 1024;
 /// Taille maximale d'un fichier ouvert dans l'éditeur.
@@ -160,24 +161,55 @@ pub fn decode_text(bytes: Vec<u8>) -> Result<String> {
     String::from_utf8(bytes).map_err(|_| Error::Other("fichier non UTF-8 : impossible de l'ouvrir dans l'éditeur".into()))
 }
 
-/// Écrit un fichier en conservant ses permissions : écriture dans un fichier temporaire
-/// voisin puis renommage, pour ne jamais laisser un fichier à moitié écrit.
-pub async fn write_text(sftp: &SftpSession, path: &str, content: &str) -> Result<()> {
-    let existing = sftp.metadata(path).await.ok();
-    let tmp = format!("{path}.helm-tmp");
-    {
-        let mut f = sftp.open_with_flags(&tmp, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
-        f.write_all(content.as_bytes()).await.map_err(sftp_err)?;
-        f.shutdown().await.map_err(sftp_err)?;
+/// Écrit un fichier en conservant ses permissions, son propriétaire et ses liens.
+///
+/// - Un lien symbolique est suivi : c'est sa cible qui est modifiée, le lien reste intact.
+/// - Le contenu est écrit dans un fichier temporaire voisin, puis remplace l'original
+///   atomiquement (`mv -f` via `conn`), pour ne jamais laisser un fichier à moitié écrit.
+/// - Si le propriétaire d'origine ne peut pas être conservé (fichier d'un autre utilisateur),
+///   l'écriture se fait en place : le fichier garde son propriétaire et ses liens physiques.
+pub async fn write_text(sftp: &SftpSession, conn: Option<&Connection>, path: &str, content: &str) -> Result<()> {
+    let target = match sftp.symlink_metadata(path).await {
+        Ok(m) if m.file_type() == FileType::Symlink => sftp.canonicalize(path).await.map_err(sftp_err)?,
+        _ => path.to_string(),
+    };
+    let Some(existing) = sftp.metadata(&target).await.ok() else {
+        return write_in_place(sftp, &target, content).await;
+    };
+    let tmp = format!("{}/.{}.helm-tmp", parent(&target), target.rsplit('/').next().unwrap_or("fichier"));
+    write_in_place(sftp, &tmp, content).await?;
+    let mut attrs = FileAttributes::empty();
+    attrs.permissions = existing.permissions.map(|p| p & 0o7777);
+    let _ = sftp.set_metadata(&tmp, attrs).await;
+    let mut owner = FileAttributes::empty();
+    (owner.uid, owner.gid) = (existing.uid, existing.gid);
+    let _ = sftp.set_metadata(&tmp, owner).await;
+    let written = sftp.metadata(&tmp).await.map_err(sftp_err)?;
+    if (written.uid, written.gid) != (existing.uid, existing.gid) {
+        let _ = sftp.remove_file(&tmp).await;
+        return write_in_place(sftp, &target, content).await;
     }
-    if let Some(meta) = existing {
-        let mut attrs = FileAttributes::empty();
-        attrs.permissions = meta.permissions.map(|p| p & 0o7777);
-        let _ = sftp.set_metadata(&tmp, attrs).await;
-        // SFTP v3 refuse de renommer par-dessus un fichier existant.
-        sftp.remove_file(path).await.map_err(sftp_err)?;
+    match conn {
+        Some(c) => {
+            let out = c.exec(&format!("mv -f -- {} {}", shell_quote(&tmp), shell_quote(&target)), None).await?;
+            if !out.success() {
+                let _ = sftp.remove_file(&tmp).await;
+                return Err(Error::Remote(out.stderr.trim().to_string()));
+            }
+            Ok(())
+        }
+        // Sans shell : SFTP v3 refuse de renommer par-dessus un fichier existant.
+        None => {
+            sftp.remove_file(&target).await.map_err(sftp_err)?;
+            sftp.rename(&tmp, &target).await.map_err(sftp_err)
+        }
     }
-    sftp.rename(&tmp, path).await.map_err(sftp_err)
+}
+
+async fn write_in_place(sftp: &SftpSession, path: &str, content: &str) -> Result<()> {
+    let mut f = sftp.open_with_flags(path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
+    f.write_all(content.as_bytes()).await.map_err(sftp_err)?;
+    f.shutdown().await.map_err(sftp_err)
 }
 
 pub async fn mkdir(sftp: &SftpSession, path: &str) -> Result<()> {
@@ -232,6 +264,41 @@ pub async fn remove(sftp: &SftpSession, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Nom de fichier Linux rendu valide sous Windows (`: ? * " < > | \` et caractères de contrôle
+/// remplacés, noms réservés comme `CON` ou `NUL` préfixés, points et espaces finaux retirés).
+pub fn local_name(name: &str) -> String {
+    let mut out: String = name.chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+    while out.ends_with(['.', ' ']) {
+        out.pop();
+    }
+    let stem = out.split('.').next().unwrap_or("").to_ascii_uppercase();
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4",
+        "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if RESERVED.contains(&stem.as_str()) {
+        out.insert(0, '_');
+    }
+    if out.is_empty() {
+        "fichier".into()
+    } else {
+        out
+    }
+}
+
+/// Premier chemin libre parmi `nom.ext`, `nom (1).ext`, `nom (2).ext`…
+fn unique_local(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    (1..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap_or(first)
+}
+
 /// Télécharge un fichier ou un dossier distant vers `local_dir`.
 pub async fn download(
     sftp: &SftpSession,
@@ -240,7 +307,8 @@ pub async fn download(
     on_progress: &(dyn Fn(Progress) -> bool + Send + Sync),
 ) -> Result<PathBuf> {
     let name = remote.trim_end_matches('/').rsplit('/').next().unwrap_or("fichier");
-    let target = local_dir.join(name);
+    // Jamais d'écrasement silencieux d'un fichier local : « nom (1).ext » si besoin.
+    let target = unique_local(local_dir, &local_name(name));
     let meta = sftp.metadata(remote).await.map_err(sftp_err)?;
     if meta.is_dir() {
         let mut stack = vec![(remote.to_string(), target.clone())];
@@ -251,7 +319,7 @@ pub async fn download(
                 if n == "." || n == ".." {
                     continue;
                 }
-                let (r, l) = (join(&rdir, &n), ldir.join(&n));
+                let (r, l) = (join(&rdir, &n), ldir.join(local_name(&n)));
                 match e.file_type() {
                     FileType::Dir => stack.push((r, l)),
                     FileType::File => download_file(sftp, &r, &l, e.metadata().size.unwrap_or(0), on_progress).await?,
@@ -428,6 +496,14 @@ async fn copy_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_safe_names() {
+        assert_eq!(local_name("rapport:2026?.log"), "rapport_2026_.log");
+        assert_eq!(local_name("con.txt"), "_con.txt");
+        assert_eq!(local_name("fin. "), "fin");
+        assert_eq!(local_name("normal.tar.gz"), "normal.tar.gz");
+    }
 
     #[test]
     fn permissions() {

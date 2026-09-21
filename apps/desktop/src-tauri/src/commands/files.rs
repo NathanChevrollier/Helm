@@ -54,14 +54,59 @@ pub async fn fs_read(
 ) -> Result<String, String> {
     if sudo {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        let text = conn.read_file_sudo(&path, pw.as_deref()).await.map_err(err)?;
+        // Mêmes garde-fous que la lecture SFTP : taille limitée, fichiers binaires refusés.
+        let cmd = format!("head -c {} -- {}", sftp::MAX_EDIT_SIZE + 1, shell_quote(&path));
+        let text = conn.exec_sudo(&cmd, pw.as_deref(), None).await.map_err(err)?.into_result().map_err(err)?.stdout;
+        if text.len() as u64 > sftp::MAX_EDIT_SIZE {
+            return Err("fichier trop volumineux pour l'éditeur (> 5 Mo)".into());
+        }
+        if text.contains('\0') {
+            return Err("fichier binaire : impossible de l'ouvrir dans l'éditeur".into());
+        }
         return Ok(text);
     }
     let sftp = sessions.sftp(&store, &server_id).await?;
     sftp::read_text(&sftp, &path).await.map_err(err)
 }
 
+/// Date de modification et taille d'un fichier, pour détecter une modification concurrente.
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Clone, Copy, Debug)]
+pub struct FileStamp {
+    mtime: u64,
+    size: u64,
+}
+
+async fn stamp(store: &Store, sessions: &Sessions, server_id: &str, path: &str, sudo: bool) -> Result<Option<FileStamp>, String> {
+    let cmd = format!("stat -L -c '%Y %s' -- {} 2>/dev/null", shell_quote(path));
+    let out = if sudo {
+        let (conn, pw) = admin(store, sessions, server_id).await?;
+        conn.exec_sudo(&cmd, pw.as_deref(), None).await
+    } else {
+        sessions.get(store, server_id).await?.exec(&cmd, None).await
+    }
+    .map_err(err)?;
+    let mut parts = out.stdout.split_whitespace().map(|x| x.parse::<u64>());
+    Ok(match (parts.next(), parts.next()) {
+        (Some(Ok(mtime)), Some(Ok(size))) => Some(FileStamp { mtime, size }),
+        _ => None,
+    })
+}
+
 #[tauri::command]
+pub async fn fs_stat(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+    sudo: bool,
+) -> Result<Option<FileStamp>, String> {
+    stamp(&store, &sessions, &server_id, &path, sudo).await
+}
+
+/// Écrit un fichier. Si `expected` est fourni et que le fichier a changé depuis (autre session,
+/// déploiement, certbot…), rien n'est écrit et l'erreur commence par `CONFLICT`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_write(
     audit: State<'_, AuditLog>,
     store: State<'_, Store>,
@@ -70,18 +115,28 @@ pub async fn fs_write(
     path: String,
     content: String,
     sudo: bool,
-) -> Result<(), String> {
+    expected: Option<FileStamp>,
+) -> Result<Option<FileStamp>, String> {
     let detail = path.clone();
     let r: Result<(), String> = async {
+        if let Some(expected) = expected {
+            let current = stamp(&store, &sessions, &server_id, &path, sudo).await?;
+            if current.is_some_and(|c| c != expected) {
+                return Err("CONFLICT: le fichier a été modifié sur le serveur depuis son ouverture".into());
+            }
+        }
         if sudo {
             let (conn, pw) = admin(&store, &sessions, &server_id).await?;
             return conn.write_file_sudo(&path, &content, pw.as_deref()).await.map_err(err);
         }
+        let conn = sessions.get(&store, &server_id).await?;
         let sftp = sessions.sftp(&store, &server_id).await?;
-        sftp::write_text(&sftp, &path, &content).await.map_err(err)
+        sftp::write_text(&sftp, Some(&conn), &path, &content).await.map_err(err)
     }
     .await;
-    track(&audit, &store, &server_id, "file.write", &detail, r)
+    track(&audit, &store, &server_id, "file.write", &detail, r)?;
+    // Nouvel état du fichier, référence pour le prochain enregistrement.
+    Ok(stamp(&store, &sessions, &server_id, &path, sudo).await.unwrap_or(None))
 }
 
 #[tauri::command]
