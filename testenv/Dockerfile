@@ -1,4 +1,5 @@
-# Faux VPS de test : sshd + nginx + sudo + client Docker (branché sur le démon de l'hôte).
+# Faux VPS de test : sshd + nginx + sudo + client Docker (branché sur un démon Docker privé, voir docker-compose.yml).
+# tmux, restic et ufw ne sont volontairement PAS installés : ça permet de tester les installations depuis Helm.
 FROM ubuntu:24.04
 
 RUN apt-get update \
@@ -25,6 +26,9 @@ RUN ln -s /etc/nginx/sites-available/demo.example.com /etc/nginx/sites-enabled/ 
     && openssl req -x509 -newkey rsa:2048 -nodes -days 45 -subj "/CN=demo.example.com" \
        -keyout /etc/letsencrypt/live/demo.example.com/privkey.pem \
        -out /etc/letsencrypt/live/demo.example.com/fullchain.pem
+
+# Projet compose de démo (port publié sur toutes les interfaces, à « restreindre » depuis Helm).
+COPY whoami-compose.yml /opt/whoami/docker-compose.yml
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

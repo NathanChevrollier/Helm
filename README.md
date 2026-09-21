@@ -89,7 +89,7 @@ cargo run -p helm-core --example smoke        # SSH, sudo, SFTP, shell
 cargo run -p helm-core --example nginx_smoke  # application sûre nginx (valide, cassée, restauration)
 ```
 
-⚠ Le faux VPS pilote le démon Docker de la machine hôte : ses actions Docker s'appliquent aux vrais conteneurs de l'hôte.
+Le faux VPS a son propre démon Docker (Docker-in-Docker) : il ne voit jamais les conteneurs de ta machine. Il embarque 3 applications de démo : `demo-app`, `whoami` (port 8082 exposé) et `demo-db` (MariaDB, mot de passe root `demo`). Pour tout supprimer : `docker compose -f testenv/docker-compose.yml down -v`.
 
 ## CI
 
