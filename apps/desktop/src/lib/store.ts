@@ -33,6 +33,12 @@ export interface TermTab {
   split?: string | null;
 }
 
+/** Raccourci vers un dossier du serveur, dans l'explorateur de fichiers. */
+export interface Bookmark {
+  path: string;
+  name: string;
+}
+
 export interface Settings {
   /** Ouvrir les terminaux dans des sessions tmux persistantes. */
   persistentSessions: boolean;
@@ -51,6 +57,7 @@ interface Persisted {
   filesPaths: Record<string, string>;
   settings: Settings;
   recent: string[];
+  bookmarks?: Record<string, Bookmark[]>;
 }
 
 interface State {
@@ -85,6 +92,12 @@ interface State {
   /** Dernier dossier ouvert dans l'explorateur, par serveur. */
   filesPaths: Record<string, string>;
   setFilesPath: (serverId: string, path: string) => void;
+
+  /** Raccourcis de dossiers, par serveur. */
+  bookmarks: Record<string, Bookmark[]>;
+  addBookmark: (serverId: string, path: string, name?: string) => void;
+  removeBookmark: (serverId: string, path: string) => void;
+  renameBookmark: (serverId: string, path: string, name: string) => void;
 
   /** Identifiants des dernières actions de la palette (les plus récentes d'abord). */
   recent: string[];
@@ -123,6 +136,7 @@ export const useApp = create<State>((set, get) => ({
           filesPaths: raw.filesPaths ?? {},
           settings: { ...get().settings, ...raw.settings },
           recent: raw.recent ?? [],
+          bookmarks: raw.bookmarks ?? {},
         });
       }
     } catch {
@@ -195,6 +209,19 @@ export const useApp = create<State>((set, get) => ({
   filesPaths: {},
   setFilesPath: (serverId, path) => set((s) => ({ filesPaths: { ...s.filesPaths, [serverId]: path } })),
 
+  bookmarks: {},
+  addBookmark: (serverId, path, name) =>
+    set((s) => {
+      const list = s.bookmarks[serverId] ?? [];
+      if (list.some((b) => b.path === path)) return {};
+      const label = name ?? (path.split("/").filter(Boolean).pop() || "/");
+      return { bookmarks: { ...s.bookmarks, [serverId]: [...list, { path, name: label }] } };
+    }),
+  removeBookmark: (serverId, path) =>
+    set((s) => ({ bookmarks: { ...s.bookmarks, [serverId]: (s.bookmarks[serverId] ?? []).filter((b) => b.path !== path) } })),
+  renameBookmark: (serverId, path, name) =>
+    set((s) => ({ bookmarks: { ...s.bookmarks, [serverId]: (s.bookmarks[serverId] ?? []).map((b) => (b.path === path ? { ...b, name } : b)) } })),
+
   recent: [],
   pushRecent: (id) => set((s) => ({ recent: [id, ...s.recent.filter((x) => x !== id)].slice(0, 30) })),
 }));
@@ -212,6 +239,7 @@ useApp.subscribe((s) => {
     filesPaths: s.filesPaths,
     settings: s.settings,
     recent: s.recent,
+    bookmarks: s.bookmarks,
   };
   const json = JSON.stringify(snapshot);
   if (json === lastSaved) return;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Box, Cable, FolderOpen, Globe, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Stethoscope, Zap } from "lucide-react";
+import { Box, Cable, FolderOpen, Globe, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
 import { useDoctor } from "./ConnectionDoctor";
 import { api, errorMessage, shellQuote, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
 import { SECTIONS } from "../sections";
@@ -160,6 +160,20 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
         icon: <Cable size={15} />,
         run: () => void (t.running ? api.tunnelStop(t.id) : api.tunnelStart(t.id)).catch((e) => notify(errorMessage(e), "error")),
       });
+    }
+    if (server) {
+      for (const b of useApp.getState().bookmarks[server.id] ?? []) {
+        list.push({
+          id: `bookmark:${server.id}:${b.path}`,
+          label: `Raccourci : ${b.name}`,
+          hint: b.path,
+          icon: <Star size={15} />,
+          run: () => {
+            setFilesPath(server.id, b.path);
+            setSection("files");
+          },
+        });
+      }
     }
     if (query.startsWith("/") && server) {
       list.unshift({

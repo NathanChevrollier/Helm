@@ -4,7 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeftRight, ArrowUp, Columns2, Download, Eye, EyeOff, File, FilePlus, Folder, FolderOpen, FolderPlus, House, Link2,
-  Pencil, RefreshCw, Shield, SquareTerminal, Trash2, Upload, X,
+  Pencil, RefreshCw, Shield, SquareTerminal, Star, Trash2, Upload, X,
 } from "lucide-react";
 import { api, errorMessage, formatBytes, shellQuote, type FsEntry, type Listing } from "../lib/api";
 import { cancel, track, useTransfers } from "../lib/transfers";
@@ -155,7 +155,8 @@ function Explorer({
   onToggleDual: () => void;
   onServerChange?: (id: string) => void;
 }) {
-  const { notify, ask, openTab, servers, filesPaths, setFilesPath } = useApp();
+  const { notify, ask, openTab, servers, filesPaths, setFilesPath, addBookmark, removeBookmark, renameBookmark } = useApp();
+  const bookmarks = useApp((s) => s.bookmarks[serverId]) ?? [];
   const root = useRef<HTMLDivElement>(null);
   const version = usePanes((s) => s.version[pane]);
   const [listing, setListing] = useState<Listing | null>(null);
@@ -211,6 +212,12 @@ function Explorer({
   useEffect(() => {
     if (version > 0) void load(cwdRef.current);
   }, [version, load]);
+
+  // Dossier demandé depuis ailleurs (palette Ctrl+K, raccourci) alors que l'explorateur est déjà ouvert.
+  const requested = pane === "left" ? filesPaths[serverId] : undefined;
+  useEffect(() => {
+    if (requested && cwdRef.current && requested !== cwdRef.current) void load(requested);
+  }, [requested, load]);
   const join = (name: string) => (cwd.endsWith("/") ? cwd + name : `${cwd}/${name}`);
   const parentOf = (p: string) => p.replace(/\/[^/]+\/?$/, "") || "/";
 
@@ -379,6 +386,14 @@ function Explorer({
         <IconButton title="Dossier personnel" onClick={() => void load("")}>
           <House size={15} />
         </IconButton>
+        <IconButton
+          title={bookmarks.some((b) => b.path === cwd) ? "Retirer ce dossier des raccourcis" : "Ajouter ce dossier aux raccourcis"}
+          className={bookmarks.some((b) => b.path === cwd) ? "text-warn" : ""}
+          disabled={!cwd}
+          onClick={() => (bookmarks.some((b) => b.path === cwd) ? removeBookmark(serverId, cwd) : addBookmark(serverId, cwd))}
+        >
+          <Star size={15} fill={bookmarks.some((b) => b.path === cwd) ? "currentColor" : "none"} />
+        </IconButton>
         <IconButton title="Actualiser (F5)" onClick={refresh}>
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
         </IconButton>
@@ -399,6 +414,33 @@ function Explorer({
           <Columns2 size={15} />
         </IconButton>
       </div>
+
+      {bookmarks.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-3 py-1.5" aria-label="Raccourcis">
+          <Star size={12} className="mr-1 shrink-0 text-warn" fill="currentColor" />
+          {bookmarks.map((b) => (
+            <span
+              key={b.path}
+              className={`group flex shrink-0 items-center rounded-md border text-xs ${b.path === cwd ? "border-accent/50 bg-accent/10 text-fg" : "border-border text-muted hover:text-fg"}`}
+            >
+              <button
+                className="flex items-center gap-1 py-0.5 pr-1 pl-2"
+                title={`${b.path} · double-clic pour renommer`}
+                onClick={() => void load(b.path)}
+                onDoubleClick={async () => {
+                  const name = await ask({ title: "Renommer le raccourci", body: b.path, input: { label: "Nom", initial: b.name }, confirmLabel: "Renommer" });
+                  if (typeof name === "string" && name.trim()) renameBookmark(serverId, b.path, name.trim());
+                }}
+              >
+                <Folder size={12} /> {b.name}
+              </button>
+              <button className="invisible px-1 text-muted group-hover:visible hover:text-danger" title="Retirer le raccourci" onClick={() => removeBookmark(serverId, b.path)}>
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5">
         <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden font-mono text-xs text-muted">
@@ -452,6 +494,11 @@ function Explorer({
           <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => void download(selectedEntries)}>Télécharger</Button>
           {single && !isDir(single) && (
             <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(single.path)}>Éditer</Button>
+          )}
+          {single && isDir(single) && !bookmarks.some((b) => b.path === single.path) && (
+            <Button size="sm" variant="ghost" icon={<Star size={13} />} onClick={() => addBookmark(serverId, single.path)}>
+              Raccourci
+            </Button>
           )}
           {single && <Button size="sm" variant="ghost" onClick={() => void rename(single)}>Renommer (F2)</Button>}
           {single && <Button size="sm" variant="ghost" icon={<Shield size={13} />} onClick={() => setChmodOf(single)}>Permissions</Button>}
