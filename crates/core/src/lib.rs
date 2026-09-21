@@ -1,11 +1,13 @@
 //! Logique métier de Helm, indépendante de l'interface.
 
+pub mod access;
 pub mod agent;
 pub mod backup;
 pub mod deploy;
 pub mod diagnose;
 pub mod docker;
 pub mod fail2ban;
+pub mod firewall;
 pub mod nginx;
 pub mod security;
 pub mod sftp;

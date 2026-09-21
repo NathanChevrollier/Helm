@@ -438,7 +438,7 @@ pub fn public_key_from_file(path: &str) -> Option<keys::PublicKey> {
     keys::decode_secret_key(&text, None).ok().map(|k| k.public_key().clone())
 }
 
-fn expand_home(path: &str) -> String {
+pub fn expand_home(path: &str) -> String {
     match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         Some(rest) => {
             let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
