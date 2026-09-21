@@ -154,6 +154,9 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
           <p className="text-muted">
             Helm crée une clé SSH dédiée qui ne peut faire <strong className="text-fg">qu'une seule chose</strong> : lancer le déploiement de ce projet (pull, redémarrage, vérification, retour arrière). Pas de shell, pas de redirection, pas de port supplémentaire ouvert.
           </p>
+          <p className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+            À savoir : le déploiement tourne en root et démarre les images que ton dépôt désigne. Quiconque peut modifier le dépôt (ou ses secrets GitHub) peut donc faire tourner du code sur ce serveur. Protège la branche déployée, limite les collaborateurs, et régénère la clé si un accès est compromis.
+          </p>
           <Field label="Domaine à vérifier après déploiement (optionnel)" hint="Le déploiement est annulé si ce site ne répond pas en 2xx/3xx.">
             <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="app.mondomaine.fr" />
           </Field>
