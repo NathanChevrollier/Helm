@@ -53,6 +53,8 @@ export interface Settings {
   alertNotifications: boolean;
   /** Thème de l'interface. */
   theme: ThemeSetting;
+  /** Raccourcis personnalisés (les autres gardent leur valeur par défaut). */
+  shortcuts?: Record<string, string>;
 }
 
 /** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */

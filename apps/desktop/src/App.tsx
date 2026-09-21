@@ -10,6 +10,7 @@ import ConnectionDoctor from "./components/ConnectionDoctor";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
 import { applyTheme } from "./lib/theme";
+import { display, matches, shortcutOf } from "./lib/shortcuts";
 import HomeView from "./views/Home";
 import TerminalView from "./views/Terminal";
 
@@ -58,12 +59,12 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (useLock.getState().locked) return;
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyL") {
+      if (matches(e, "lock")) {
         e.preventDefault();
         useLock.getState().lock();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === "KeyK") {
+      if (matches(e, "palette")) {
         e.preventDefault();
         setPalette((v) => !v);
       }
@@ -103,7 +104,7 @@ export default function App() {
             >
               <Search size={13} />
               Rechercher une action
-              <kbd className="ml-auto rounded border border-border px-1 font-sans text-[10px]">Ctrl K</kbd>
+              <kbd className="ml-auto rounded border border-border px-1 font-sans text-[10px]">{display(shortcutOf("palette"))}</kbd>
             </button>
           </div>
           <div className="flex min-h-0 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
@@ -159,7 +160,7 @@ export default function App() {
         </span>
         <span className="flex items-center gap-3">
           {lockConfigured && (
-            <button className="flex items-center gap-1 hover:text-fg" title="Verrouiller Helm (Ctrl+Maj+L)" onClick={() => useLock.getState().lock()}>
+            <button className="flex items-center gap-1 hover:text-fg" title={`Verrouiller Helm (${display(shortcutOf("lock"))})`} onClick={() => useLock.getState().lock()}>
               <Lock size={11} /> Verrouiller
             </button>
           )}

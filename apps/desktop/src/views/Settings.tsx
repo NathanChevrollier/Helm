@@ -4,6 +4,7 @@ import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useApp } from "../lib/store";
 import { hashPassword, useLock } from "../lib/lock";
 import type { ThemeSetting } from "../lib/theme";
+import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Badge, Button, Input } from "../components/ui";
 
@@ -222,6 +223,7 @@ function Preferences() {
           </span>
         </span>
       </label>
+      <Shortcuts />
       <AppLock />
       <ExportImport />
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
@@ -421,6 +423,59 @@ function ExportImport() {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Raccourcis clavier : clique sur un raccourci puis appuie sur la nouvelle combinaison. */
+function Shortcuts() {
+  const { settings, setSettings, notify } = useApp();
+  const [recording, setRecording] = useState<ShortcutId | null>(null);
+
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") return setRecording(null);
+      const combo = comboOf(e);
+      if (!combo) return;
+      if (!/Ctrl|Alt/.test(combo) && !/^F\d+$/.test(combo)) return notify("Utilise Ctrl ou Alt (ou une touche F1–F12), pour ne pas gêner la saisie.", "error");
+      const taken = (Object.keys(SHORTCUTS) as ShortcutId[]).find((id) => id !== recording && shortcutOf(id) === combo);
+      if (taken) return notify(`${display(combo)} est déjà utilisé par « ${SHORTCUTS[taken].label} ».`, "error");
+      setSettings({ shortcuts: { ...settings.shortcuts, [recording]: combo } });
+      setRecording(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [recording, settings.shortcuts, setSettings, notify]);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-panel p-4">
+      <div className="flex items-center">
+        <span className="flex-1">
+          <span className="font-medium">Raccourcis clavier</span>
+          <span className="block text-sm text-muted">Clique sur un raccourci puis appuie sur la nouvelle combinaison (Échap pour annuler).</span>
+        </span>
+        {settings.shortcuts && Object.keys(settings.shortcuts).length > 0 && (
+          <Button size="sm" onClick={() => setSettings({ shortcuts: {} })}>
+            Tout réinitialiser
+          </Button>
+        )}
+      </div>
+      <ul className="flex flex-col">
+        {(Object.keys(SHORTCUTS) as ShortcutId[]).map((id) => (
+          <li key={id} className="flex items-center gap-3 py-1 text-sm">
+            <span className="flex-1">{SHORTCUTS[id].label}</span>
+            <button
+              className={`min-w-36 rounded-md border px-2 py-1 font-mono text-xs ${recording === id ? "border-accent text-accent" : "border-border hover:bg-hover"}`}
+              onClick={() => setRecording(recording === id ? null : id)}
+            >
+              {recording === id ? "Appuie sur les touches…" : display(shortcutOf(id))}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

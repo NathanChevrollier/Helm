@@ -1,0 +1,41 @@
+import { useApp } from "./store";
+
+/** Raccourcis de Helm, modifiables dans Réglages → Préférences. */
+export const SHORTCUTS = {
+  palette: { label: "Palette de commandes", default: "Ctrl+K" },
+  lock: { label: "Verrouiller Helm", default: "Ctrl+Shift+L" },
+  newTab: { label: "Nouvel onglet de terminal", default: "Ctrl+Shift+T" },
+  closeTab: { label: "Fermer l'onglet de terminal", default: "Ctrl+Shift+W" },
+  nextTab: { label: "Onglet suivant", default: "Ctrl+Tab" },
+  prevTab: { label: "Onglet précédent", default: "Ctrl+Shift+Tab" },
+  termSearch: { label: "Rechercher dans le terminal", default: "Ctrl+Shift+F" },
+} as const;
+
+export type ShortcutId = keyof typeof SHORTCUTS;
+
+/** Combinaison d'une touche, indépendante de la disposition du clavier (« Ctrl+Shift+K »). */
+export function comboOf(e: KeyboardEvent): string | null {
+  const key = e.code.startsWith("Key") ? e.code.slice(3) : e.code.startsWith("Digit") ? e.code.slice(5) : e.code;
+  if (["ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"].includes(e.code)) return null;
+  const parts = [e.ctrlKey || e.metaKey ? "Ctrl" : "", e.altKey ? "Alt" : "", e.shiftKey ? "Shift" : "", key].filter(Boolean);
+  return parts.join("+");
+}
+
+export function shortcutOf(id: ShortcutId): string {
+  return useApp.getState().settings.shortcuts?.[id] ?? SHORTCUTS[id].default;
+}
+
+export function matches(e: KeyboardEvent, id: ShortcutId): boolean {
+  return e.type === "keydown" && comboOf(e) === shortcutOf(id);
+}
+
+/** Raccourci de l'app (à ne pas transmettre au shell quand un terminal a le focus). */
+export function isAppShortcut(e: KeyboardEvent): boolean {
+  const c = comboOf(e);
+  return !!c && (Object.keys(SHORTCUTS) as ShortcutId[]).some((id) => shortcutOf(id) === c);
+}
+
+/** Affichage lisible (« Ctrl+Maj+K »). */
+export function display(combo: string): string {
+  return combo.replace("Shift", "Maj");
+}

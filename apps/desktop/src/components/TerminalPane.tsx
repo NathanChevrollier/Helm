@@ -11,6 +11,7 @@ import { api, errorMessage, type TermEvent } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { broadcastInput, isBroadcasting, useBroadcast } from "../lib/broadcast";
 import { useTheme } from "../lib/theme";
+import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 
 /** Terminal actuellement focalisé : cible des snippets. */
 export const focusedTerminal: { id: number | null; focus?: () => void } = { id: null };
@@ -333,7 +334,14 @@ export default function TerminalPane({
 
     // Ctrl+Shift+C / Ctrl+Shift+V, comme dans les terminaux Linux ; Ctrl+C reste SIGINT.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown" || !e.ctrlKey) return true;
+      if (e.type !== "keydown") return true;
+      if (matches(e, "termSearch")) {
+        openSearchRef.current();
+        return false;
+      }
+      // Raccourcis de l'app (palette, onglets, verrouillage…) : pour Helm, pas pour le shell.
+      if (isAppShortcut(e)) return false;
+      if (!e.ctrlKey) return true;
       if (!e.shiftKey && !e.altKey) {
         if (e.code === "Equal" || e.code === "NumpadAdd") return (zoom(1), false);
         if (e.code === "Minus" || e.code === "NumpadSubtract") return (zoom(-1), false);
@@ -341,17 +349,11 @@ export default function TerminalPane({
         return true;
       }
       if (!e.shiftKey) return true;
-      if (e.code === "KeyF") {
-        openSearchRef.current();
-        return false;
-      }
       if (e.code === "KeyC") {
         const sel = term.getSelection();
         if (sel) void navigator.clipboard.writeText(sel);
         return false;
       }
-      // Ctrl+Maj+L verrouille Helm : ne pas l'envoyer au shell (il effacerait l'écran).
-      if (e.code === "KeyL") return false;
       if (e.code === "KeyV") {
         void navigator.clipboard.readText().then(safePaste);
         return false;
@@ -484,7 +486,7 @@ export default function TerminalPane({
             </button>
           </span>
         ) : (
-          <button className="rounded bg-panel/90 p-1 text-muted hover:text-fg" title="Rechercher dans le terminal (Ctrl+Maj+F)" onClick={() => openSearchRef.current()}>
+          <button className="rounded bg-panel/90 p-1 text-muted hover:text-fg" title={`Rechercher dans le terminal (${display(shortcutOf("termSearch"))})`} onClick={() => openSearchRef.current()}>
             <Search size={13} />
           </button>
         )}

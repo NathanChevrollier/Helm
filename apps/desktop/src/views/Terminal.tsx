@@ -6,6 +6,7 @@ import { api, errorMessage, type TmuxSession } from "../lib/api";
 import { useBroadcast } from "../lib/broadcast";
 import { newTmuxName, useApp, type TermTab } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import { matches } from "../lib/shortcuts";
 
 const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
 
@@ -53,22 +54,26 @@ export default function TerminalView({ visible }: { visible: boolean }) {
     [ask, closeTab],
   );
 
-  // Raccourcis : Ctrl+Shift+T nouvel onglet, Ctrl+Shift+W fermer.
+  // Raccourcis (modifiables dans les réglages) : nouvel onglet, fermer, onglet suivant / précédent.
   useEffect(() => {
     if (!visible) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || !e.shiftKey) return;
-      if (e.code === "KeyT" && activeServerId) {
+      if (matches(e, "newTab") && activeServerId) {
         e.preventDefault();
         openTab(current?.serverId ?? activeServerId);
-      } else if (e.code === "KeyW" && current) {
+      } else if (matches(e, "closeTab") && current) {
         e.preventDefault();
         void close(current);
+      } else if ((matches(e, "nextTab") || matches(e, "prevTab")) && tabs.length > 1 && current) {
+        e.preventDefault();
+        const i = tabs.findIndex((t) => t.key === current.key);
+        const next = tabs[(i + (matches(e, "nextTab") ? 1 : tabs.length - 1)) % tabs.length];
+        setActiveTab(next.key);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visible, activeServerId, current, openTab, close]);
+  }, [visible, activeServerId, current, openTab, close, tabs, setActiveTab]);
 
   const toggleSplit = () => {
     if (!current) return;
