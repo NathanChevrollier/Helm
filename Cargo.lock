@@ -1997,6 +1997,7 @@ dependencies = [
  "helm-core",
  "helm-profiles",
  "helm-protocol",
+ "regex",
  "rmcp",
  "serde",
  "serde_json",

@@ -102,6 +102,17 @@ fn readable(path: &str) -> bool {
         && !READ_DENY.iter().any(|d| path.contains(d))
 }
 
+/// Chemin réel (liens symboliques résolus) : un lien placé dans un dossier autorisé ne doit pas
+/// ouvrir l'accès à un fichier qui ne l'est pas (`/opt/x -> /etc/shadow`).
+async fn real_path(c: &Connection, sudo: Option<&str>, path: &str) -> Result<String, String> {
+    let out = c.exec_sudo(&format!("readlink -f -- {}", helm_core::ssh::shell_quote(path)), sudo, None).await.map_err(e)?;
+    let real = out.stdout.trim();
+    if !out.success() || !real.starts_with('/') {
+        return Err("fichier introuvable".into());
+    }
+    Ok(real.to_string())
+}
+
 impl Helm {
     fn new() -> Self {
         let dir = helm_profiles::config_dir();
@@ -300,7 +311,11 @@ impl Helm {
         }
         let path = a.path.clone();
         self.with(&a.server, "nginx_config", &a.path, |c, sudo| async move {
-            let content = c.read_file_sudo(&path, sudo.as_deref()).await.map_err(e)?;
+            let real = real_path(&c, sudo.as_deref(), &path).await?;
+            if !(real.starts_with("/etc/nginx/") && !READ_DENY.iter().any(|d| real.contains(d))) && !readable(&real) {
+                return Err(format!("{path} pointe vers {real}, qui n'est pas autorisé pour l'IA"));
+            }
+            let content = c.read_file_sudo(&real, sudo.as_deref()).await.map_err(e)?;
             text(mask::mask(&content, false)).map_err(|_| String::new())
         })
         .await
@@ -337,7 +352,11 @@ impl Helm {
         }
         let path = a.path.clone();
         self.with(&a.server, "read_file", &a.path, |c, sudo| async move {
-            let q = helm_core::ssh::shell_quote(&path);
+            let real = real_path(&c, sudo.as_deref(), &path).await?;
+            if !readable(&real) {
+                return Err(format!("{path} pointe vers {real}, qui n'est pas autorisé pour l'IA"));
+            }
+            let q = helm_core::ssh::shell_quote(&real);
             let direct = c.exec(&format!("head -c 300000 -- {q}"), None).await.map_err(e)?;
             let content = if direct.success() {
                 direct.stdout
