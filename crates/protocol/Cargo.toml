@@ -7,3 +7,6 @@ description = "Types partagés entre l'app desktop et l'agent helmd"
 
 [dependencies]
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -204,6 +204,9 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.3.0(react@19.3.0)
+      uplot:
+        specifier: ^1.6.32
+        version: 1.6.32
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)
@@ -836,6 +839,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  uplot@1.6.32:
+    resolution: {integrity: sha512-KIMVnG68zvu5XXUbC4LQEPnhwOxBuLyW1AHtpm6IKTXImkbLgkMy+jabjLgSLMasNuGGzQm/ep3tOkyTxpiQIw==}
+
   vite@8.3.0:
     resolution: {integrity: sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1320,6 +1326,8 @@ snapshots:
       picomatch: 4.0.7
 
   typescript@6.0.3: {}
+
+  uplot@1.6.32: {}
 
   vite@8.3.0(jiti@2.7.0):
     dependencies:

@@ -1,4 +1,5 @@
 pub mod files;
+pub mod monitoring;
 pub mod servers;
 pub mod terminal;
 

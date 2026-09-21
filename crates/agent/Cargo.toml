@@ -7,3 +7,9 @@ description = "Agent de monitoring Helm, exécuté sur le VPS"
 
 [dependencies]
 helm-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq = "3.4.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"

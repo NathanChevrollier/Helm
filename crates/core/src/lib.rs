@@ -1,7 +1,9 @@
 //! Logique métier de Helm, indépendante de l'interface.
 
+pub mod agent;
 pub mod sftp;
 pub mod ssh;
+pub mod system;
 
 pub use russh;
 pub use russh_sftp;

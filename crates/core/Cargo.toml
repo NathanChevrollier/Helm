@@ -12,6 +12,7 @@ helm-protocol.workspace = true
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "3.0.0"
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true

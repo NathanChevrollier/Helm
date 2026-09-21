@@ -6,6 +6,7 @@ import { DialogHost, EmptyState, Toasts } from "./components/ui";
 import ServersView from "./views/Servers";
 import TerminalView from "./views/Terminal";
 import FilesView from "./views/Files";
+import MonitoringView from "./views/Monitoring";
 
 export default function App() {
   const { section, setSection, servers, activeServerId, setActiveServer, refreshServers } = useApp();
@@ -66,6 +67,8 @@ export default function App() {
                 <ServersView />
               ) : section === "files" ? (
                 <FilesView />
+              ) : section === "monitoring" ? (
+                <MonitoringView />
               ) : (
                 <EmptyState icon={<current.icon size={40} />} title={current.label}>
                   {current.description}

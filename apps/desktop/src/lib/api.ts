@@ -68,6 +68,103 @@ export interface Progress {
   total: number;
 }
 
+export interface Disk {
+  mount: string;
+  device: string;
+  total: number;
+  used: number;
+}
+
+export interface Metrics {
+  timestamp: number;
+  cpuPercent: number;
+  cpuCount: number;
+  memUsed: number;
+  memTotal: number;
+  swapUsed: number;
+  swapTotal: number;
+  load: [number, number, number];
+  uptimeSecs: number;
+  netRxRate: number;
+  netTxRate: number;
+  disks: Disk[];
+}
+
+export interface HistoryPoint {
+  t: number;
+  cpu: number;
+  mem: number;
+  disk: number;
+  load: number;
+  rx: number;
+  tx: number;
+}
+
+export interface Process {
+  pid: number;
+  user: string;
+  cpu: number;
+  mem: number;
+  rss: number;
+  elapsed: number;
+  name: string;
+  command: string;
+}
+
+export interface Service {
+  unit: string;
+  load: string;
+  active: string;
+  sub: string;
+  description: string;
+  enabled: string;
+}
+
+export type AlertMetric = "cpu" | "memory" | "disk" | "load";
+
+export interface AgentConfig {
+  serverName?: string | null;
+  sampleIntervalSecs: number;
+  rules: { metric: AlertMetric; threshold: number; forSecs: number; enabled: boolean }[];
+  httpChecks: { name: string; url: string; enabled: boolean }[];
+  httpCheckIntervalSecs: number;
+  notifiers: { discordWebhook?: string | null; ntfyUrl?: string | null; webhookUrl?: string | null };
+}
+
+export interface ActiveAlert {
+  key: string;
+  title: string;
+  message: string;
+  since: number;
+}
+
+export interface AlertEvent {
+  t: number;
+  key: string;
+  title: string;
+  message: string;
+  resolved: boolean;
+}
+
+export interface AgentStatus {
+  version: string;
+  protocol: number;
+  startedAt: number;
+  hostname: string;
+  config: AgentConfig;
+  configError: string | null;
+  activeAlerts: ActiveAlert[];
+  recentEvents: AlertEvent[];
+  latest: Metrics | null;
+}
+
+export interface AgentInfo {
+  installed: boolean;
+  running: boolean;
+  status: AgentStatus | null;
+  error: string | null;
+}
+
 function progressChannel(onProgress: (p: Progress) => void) {
   const channel = new Channel<Progress>();
   channel.onmessage = onProgress;
@@ -113,7 +210,30 @@ export const api = {
     invoke<string>("fs_download", { serverId, paths, localDir, onProgress: progressChannel(onProgress) }),
   fsUpload: (serverId: string, localPaths: string[], remoteDir: string, onProgress: (p: Progress) => void) =>
     invoke<void>("fs_upload", { serverId, localPaths, remoteDir, onProgress: progressChannel(onProgress) }),
+
+  metrics: (serverId: string) => invoke<Metrics>("mon_metrics", { serverId }),
+  processes: (serverId: string) => invoke<Process[]>("mon_processes", { serverId }),
+  kill: (serverId: string, pid: number, force: boolean) => invoke<void>("mon_kill", { serverId, pid, force }),
+  services: (serverId: string) => invoke<Service[] | null>("mon_services", { serverId }),
+  serviceAction: (serverId: string, unit: string, action: string) => invoke<void>("mon_service_action", { serverId, unit, action }),
+  serviceLogs: (serverId: string, unit: string, lines = 300) => invoke<string>("mon_service_logs", { serverId, unit, lines }),
+  agentInfo: (serverId: string) => invoke<AgentInfo>("agent_info", { serverId }),
+  agentHistory: (serverId: string, rangeSecs: number, points = 400) =>
+    invoke<HistoryPoint[]>("agent_history", { serverId, rangeSecs, points }),
+  agentInstall: (serverId: string) => invoke<string>("agent_install", { serverId }),
+  agentUninstall: (serverId: string) => invoke<void>("agent_uninstall", { serverId }),
+  agentSaveConfig: (serverId: string, config: AgentConfig) => invoke<void>("agent_save_config", { serverId, config }),
+  agentTestNotify: (serverId: string) => invoke<string>("agent_test_notify", { serverId }),
 };
+
+export function formatDuration(secs: number): string {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d) return `${d} j ${h} h`;
+  if (h) return `${h} h ${m} min`;
+  return `${m} min`;
+}
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} o`;
