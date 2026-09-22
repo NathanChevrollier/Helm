@@ -146,6 +146,8 @@ pub fn run() {
             docker::docker_logs,
             docker::docker_compose_action,
             docker::docker_compose_command,
+            docker::docker_compose_create,
+            docker::docker_compose_template,
             docker::docker_storage,
             docker::docker_remove_image,
             docker::docker_prune,

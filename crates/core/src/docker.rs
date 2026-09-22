@@ -47,6 +47,24 @@ pub async fn access(conn: &Connection, sudo: Option<&str>) -> Result<(Access, St
 }
 
 /// Exécute une commande docker selon le mode d'accès.
+/// Dossier par défaut des projets compose créés par Helm.
+pub const STACKS_DIR: &str = "/opt/stacks";
+
+/// Nom de projet compose acceptable (et donc utilisable dans un chemin et une commande).
+pub fn valid_project_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 40
+        && name.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Modèle de départ d'un nouveau projet compose : un service, un port publié en local seulement.
+pub fn compose_template(name: &str, image: &str, host_port: u16, container_port: u16) -> String {
+    format!(
+        "# {name} — créé par Helm\nservices:\n  app:\n    image: {image}\n    container_name: {name}\n    restart: unless-stopped\n    ports:\n      # Publié sur la boucle locale : le reverse proxy (nginx/Apache) y accède, pas Internet.\n      - \"127.0.0.1:{host_port}:{container_port}\"\n    environment:\n      TZ: Europe/Paris\n    volumes:\n      - ./data:/data\n"
+    )
+}
+
 pub async fn run(conn: &Connection, access: Access, sudo: Option<&str>, args: &str) -> Result<ExecOutput> {
     let cmd = format!("{PODMAN_SHIM}docker {args}");
     match access {
@@ -415,6 +433,17 @@ pub fn restrict_port_in_compose(text: &str, port: u16) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_names_and_template() {
+        assert!(valid_project_name("mon-app_2"));
+        assert!(!valid_project_name("Mon App"), "espaces et majuscules refusés");
+        assert!(!valid_project_name("-app"));
+        assert!(!valid_project_name("app;rm"));
+        let t = compose_template("blog", "ghcr.io/moi/blog:latest", 8100, 80);
+        assert!(t.contains("image: ghcr.io/moi/blog:latest"));
+        assert!(t.contains("\"127.0.0.1:8100:80\""), "port publié en local seulement");
+    }
+
     use super::*;
 
     #[test]

@@ -837,6 +837,11 @@ export const api = {
   composeAction: (serverId: string, project: ComposeProject, action: string) =>
     invoke<string>("docker_compose_action", { serverId, project, action }),
   composeCommand: (project: ComposeProject, sub: string) => invoke<string>("docker_compose_command", { project, sub }),
+  /** Crée un projet compose (dossier, docker-compose.yml, .env), vérifié puis démarré si demandé. */
+  dockerComposeCreate: (serverId: string, name: string, directory: string | null, yaml: string, env: string | null, start: boolean) =>
+    invoke<{ file: string; log: string; started: boolean }>("docker_compose_create", { serverId, name, directory, yaml, env, start }),
+  dockerComposeTemplate: (name: string, image: string, hostPort: number, containerPort: number) =>
+    invoke<string>("docker_compose_template", { name, image, hostPort, containerPort }),
   dockerStorage: (serverId: string) => invoke<{ images: DockerImage[]; usage: DockerDiskUsage[] }>("docker_storage", { serverId }),
   dockerRemoveImage: (serverId: string, id: string) => invoke<void>("docker_remove_image", { serverId, id }),
   dockerPrune: (serverId: string, what: string) => invoke<string>("docker_prune", { serverId, what }),

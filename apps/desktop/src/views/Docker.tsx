@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Box, ChevronDown, ChevronRight, Container as ContainerIcon, FileCode2, FileSearch, Folder, FolderInput, FolderOpen, FolderPlus,
+  Box, ChevronDown, ChevronRight, Container as ContainerIcon, FileCode2, FileSearch, Folder, FolderInput, FolderOpen, FolderPlus, Plus,
   Layers, Pause, Play, RefreshCw, RotateCw, ScrollText,
   Cable, GitBranch, Lock, Rocket, Square, SquareTerminal, Trash2, UploadCloud,
 } from "lucide-react";
@@ -19,6 +19,7 @@ import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { startDrag } from "../lib/drag";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
+const NewComposeProject = lazy(() => import("../components/NewComposeProject"));
 
 const TABS = [
   { id: "containers", label: "Conteneurs" },
@@ -412,9 +413,29 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
   const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [github, setGithub] = useState<ComposeProject | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const newProjectButton = (
+    <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating(true)}>
+      Nouveau projet
+    </Button>
+  );
+  const creator = creating && (
+    <Suspense fallback={null}>
+      <NewComposeProject serverId={serverId} onClose={() => setCreating(false)} onDone={() => void reload()} />
+    </Suspense>
+  );
 
   if (data.projects.length === 0) {
-    return <EmptyState icon={<Layers size={36} />} title="Aucun projet docker compose">Les projets lancés avec docker compose apparaîtront ici.</EmptyState>;
+    return (
+      <>
+        <EmptyState icon={<Layers size={36} />} title="Aucun projet docker compose">
+          Les projets lancés avec docker compose apparaîtront ici.
+          <div className="mt-3 flex justify-center">{newProjectButton}</div>
+        </EmptyState>
+        {creator}
+      </>
+    );
   }
 
   const act = async (p: ComposeProject, action: string, label: string, danger?: string) => {
@@ -437,6 +458,11 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
   const containersOf = (name: string) => data.containers.filter((c) => c.composeProject === name);
 
   return (
+    <>
+    <div className="mb-4 flex items-center justify-between">
+      <span className="text-sm text-muted">{data.projects.length} projet(s) compose sur ce serveur.</span>
+      {newProjectButton}
+    </div>
     <div className="grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-4">
       {data.projects.map((p) => {
         const file = p.configFiles.split(",")[0];
@@ -490,6 +516,8 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
       )}
       {github && <GithubDeployDialog serverId={serverId} project={github} onClose={() => setGithub(null)} />}
     </div>
+    {creator}
+    </>
   );
 }
 

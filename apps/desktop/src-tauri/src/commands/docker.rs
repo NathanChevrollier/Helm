@@ -163,6 +163,93 @@ pub async fn docker_compose_action(
     track(&audit, &store, &server_id, "docker.compose", &detail, r)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeCreated {
+    file: String,
+    log: String,
+    started: bool,
+}
+
+/// Crée un projet compose : dossier, `docker-compose.yml`, `.env` éventuel, puis vérification
+/// (`docker compose config`) et démarrage optionnel.
+#[tauri::command]
+pub async fn docker_compose_create(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    name: String,
+    directory: Option<String>,
+    yaml: String,
+    env: Option<String>,
+    start: bool,
+) -> Result<ComposeCreated, String> {
+    let detail = name.clone();
+    let r: Result<ComposeCreated, String> = async {
+        if !docker::valid_project_name(&name) {
+            return Err("nom de projet invalide : lettres minuscules, chiffres, - et _ seulement".into());
+        }
+        let dir =
+            directory.map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(|| format!("{}/{name}", docker::STACKS_DIR));
+        if !dir.starts_with('/') || dir.contains("..") || dir.contains('\n') {
+            return Err("chemin de dossier invalide".into());
+        }
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        let file = format!("{dir}/docker-compose.yml");
+        if c.conn.exec(&format!("test -e {}", shell_quote(&file)), None).await.map_err(err)?.success() {
+            return Err(format!("{file} existe déjà : choisis un autre nom ou un autre dossier"));
+        }
+        c.conn
+            .exec_sudo(&format!("mkdir -p {}", shell_quote(&dir)), c.sudo.as_deref(), None)
+            .await
+            .map_err(err)?
+            .into_result()
+            .map_err(err)?;
+        c.conn.write_file_sudo(&file, &yaml, c.sudo.as_deref()).await.map_err(err)?;
+        if let Some(env) = env.as_deref().filter(|e| !e.trim().is_empty()) {
+            let env_file = format!("{dir}/.env");
+            c.conn.write_file_sudo(&env_file, env, c.sudo.as_deref()).await.map_err(err)?;
+            // Le .env contient souvent des mots de passe : lui seul est restreint.
+            let _ = c.conn.exec_sudo(&format!("chmod 600 {}", shell_quote(&env_file)), c.sudo.as_deref(), None).await;
+        }
+        // Vérification de la syntaxe avant tout démarrage : un fichier invalide n'est pas lancé.
+        let check = docker::run(&c.conn, c.access, c.sudo.as_deref(), &format!("compose -f {} config -q 2>&1", shell_quote(&file)))
+            .await
+            .map_err(err)?;
+        if !check.success() {
+            return Err(format!(
+                "fichier compose refusé par Docker (il est enregistré, corrige-le puis relance) :\n{}{}",
+                check.stdout, check.stderr
+            ));
+        }
+        if !start {
+            return Ok(ComposeCreated { file, log: String::new(), started: false });
+        }
+        let out = helm_core::ssh::long(docker::run(
+            &c.conn,
+            c.access,
+            c.sudo.as_deref(),
+            &format!("compose -f {} -p {} up -d 2>&1", shell_quote(&file), shell_quote(&name)),
+        ))
+        .await
+        .map_err(err)?;
+        if !out.success() {
+            return Err(format!("docker compose up a échoué :\n{}{}", out.stdout, out.stderr));
+        }
+        Ok(ComposeCreated { file, log: out.stdout, started: true })
+    }
+    .await;
+    track(&audit, &store, &server_id, "docker.compose_create", &detail, r)
+}
+
+/// Modèle de départ d'un projet compose.
+#[tauri::command]
+pub fn docker_compose_template(name: String, image: String, host_port: u16, container_port: u16) -> String {
+    docker::compose_template(&name, &image, host_port, container_port)
+}
+
 /// Commande shell à lancer dans un terminal pour un projet compose (logs en direct…).
 #[tauri::command]
 pub fn docker_compose_command(project: ComposeProject, sub: String) -> Result<String, String> {
