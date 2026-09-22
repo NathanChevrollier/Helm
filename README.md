@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/NathanChevrollier/Helm/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Helm/actions/workflows/ci.yml)
 [![Dernière version](https://img.shields.io/github/v/release/NathanChevrollier/Helm?label=version)](https://github.com/NathanChevrollier/Helm/releases/latest)
-[![Licence MIT](https://img.shields.io/badge/licence-MIT-blue)](#licence)
+[![Licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
 Application de bureau (Windows, macOS, Linux) pour administrer ses serveurs Linux : terminal SSH,
 fichiers, supervision, Docker, bases de données, sites web, sauvegardes et audit de sécurité dans
@@ -275,4 +275,4 @@ jour automatiquement.
 
 ## Licence
 
-MIT, comme déclaré dans `Cargo.toml`.
+MIT — voir [LICENSE](LICENSE). © 2026 Nathan Chevrollier.
