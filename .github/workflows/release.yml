@@ -2,7 +2,8 @@ name: Release
 
 # Déclenchée par un tag vX.Y.Z (voir `pnpm release`). Étapes : CI complète, release brouillon,
 # compilation et signature des installeurs sur les trois OS, puis publication. Le latest.json joint à
-# la release sert au module de mise à jour de l'app.
+# la release sert au module de mise à jour de l'app : il est écrit une seule fois, à la fin, car
+# quatre machines qui le mettent à jour en parallèle s'écrasent (et l'une d'elles échoue).
 on:
   push:
     tags: ["v*"]
@@ -106,12 +107,19 @@ jobs:
           releaseId: ${{ needs.draft.outputs.release_id }}
           # Artefacts de mise à jour signés seulement ici : un build local n'a pas la clé privée.
           args: ${{ matrix.args }} --config ${{ github.workspace }}/apps/desktop/src-tauri/tauri.release.conf.json
-          updaterJsonPreferNsis: true
+          # Le manifeste des mises à jour est construit par le job « publish », à partir des
+          # signatures déposées ici : sinon les quatre builds se le disputent.
+          includeUpdaterJson: false
 
   publish:
     needs: [draft, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Manifeste des mises à jour (latest.json)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/latest-json.py "$GITHUB_REF_NAME"
       - name: Publication de la release
         env:
           GH_TOKEN: ${{ github.token }}
