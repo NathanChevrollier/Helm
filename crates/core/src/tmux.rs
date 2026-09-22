@@ -158,17 +158,12 @@ mod tests {
 
     #[test]
     fn install_plans() {
-        assert!(install_plan("pm:apt-get
-").unwrap().contains("apt-get install"));
-        assert!(install_plan("unraid
-pm:un-get
-").unwrap().starts_with("un-get update"));
-        let unraid = install_plan("unraid
-").unwrap_err();
+        assert!(install_plan("pm:apt-get\n").unwrap().contains("apt-get install"));
+        assert!(install_plan("unraid\npm:un-get\n").unwrap().starts_with("un-get update"));
+        let unraid = install_plan("unraid\n").unwrap_err();
         assert!(unraid.starts_with(UNSUPPORTED) && unraid.contains("Unraid"));
         assert!(install_plan("").unwrap_err().starts_with(UNSUPPORTED));
-        assert!(install_plan("pm:inconnu
-").is_err());
+        assert!(install_plan("pm:inconnu\n").is_err());
         assert!(pane_path_command("helm-a").unwrap().contains("pane_current_path"));
         assert!(pane_path_command("x; reboot").is_err());
     }
