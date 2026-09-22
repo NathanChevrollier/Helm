@@ -69,22 +69,28 @@ pub struct Service {
     pub enabled: String,
 }
 
+/// L'état d'activation est demandé à systemd pour les seules unités listées : `list-unit-files`
+/// parcourt tous les fichiers d'unités du disque et coûte environ trois fois plus cher.
 pub const SERVICES_COMMAND: &str = "command -v systemctl >/dev/null && [ -d /run/systemd/system ] || { echo NO_SYSTEMD; exit 0; }; \
-systemctl list-units --type=service --all --no-legend --plain --no-pager; echo @@files; \
-systemctl list-unit-files --type=service --no-legend --plain --no-pager";
+u=$(systemctl list-units --type=service --all --no-legend --plain --no-pager); printf '%s\\n' \"$u\"; echo @@files; \
+n=$(printf '%s\\n' \"$u\" | awk '{for(i=1;i<=NF;i++) if($i ~ /\\.service$/){print $i; break}}'); \
+[ -n \"$n\" ] && systemctl show -p Id,UnitFileState -- $n";
 
 pub fn parse_services(text: &str) -> Option<Vec<Service>> {
     if text.trim() == "NO_SYSTEMD" {
         return None;
     }
     let (units, files) = text.split_once("@@files").unwrap_or((text, ""));
-    let enabled: std::collections::HashMap<&str, &str> = files
-        .lines()
-        .filter_map(|l| {
-            let mut it = l.split_whitespace();
-            Some((it.next()?, it.next()?))
-        })
-        .collect();
+    // Blocs `Id=…` puis `UnitFileState=…`, séparés par une ligne vide.
+    let mut enabled = std::collections::HashMap::new();
+    let mut id = "";
+    for l in files.lines() {
+        if let Some(v) = l.strip_prefix("Id=") {
+            id = v.trim();
+        } else if let Some(v) = l.strip_prefix("UnitFileState=") {
+            enabled.insert(id, v.trim());
+        }
+    }
     Some(
         units
             .lines()
@@ -158,7 +164,7 @@ mod tests {
 
     #[test]
     fn services_merge_enabled_state() {
-        let text = "nginx.service loaded active running A high performance web server\n● foo.service loaded failed failed Foo\nsys-fs.mount loaded active mounted x\n@@files\nnginx.service enabled enabled\nfoo.service disabled enabled\n";
+        let text = "nginx.service loaded active running A high performance web server\n● foo.service loaded failed failed Foo\nsys-fs.mount loaded active mounted x\n@@files\nId=nginx.service\nUnitFileState=enabled\n\nId=foo.service\nUnitFileState=disabled\n";
         let s = parse_services(text).unwrap();
         assert_eq!(s.len(), 2);
         assert_eq!(s[0].description, "A high performance web server");

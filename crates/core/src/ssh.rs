@@ -129,6 +129,9 @@ impl Connection {
             inactivity_timeout: None,
             keepalive_interval: Some(Duration::from_secs(15)),
             keepalive_max: 4,
+            // Sans Nagle : chaque petite commande part tout de suite au lieu d'attendre un accusé de
+            // réception (jusqu'à ~60 ms gagnées par commande sur une connexion à distance).
+            nodelay: true,
             ..Default::default()
         });
         let seen = Arc::new(Mutex::new(None));

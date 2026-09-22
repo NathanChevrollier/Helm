@@ -124,18 +124,19 @@ pub async fn home(sftp: &SftpSession) -> Result<String> {
 /// Liste un dossier : dossiers d'abord, puis tri alphabétique insensible à la casse.
 pub async fn list(sftp: &SftpSession, path: &str) -> Result<Listing> {
     let path = sftp.canonicalize(path).await.map_err(sftp_err)?;
-    let mut entries = Vec::new();
-    for e in sftp.read_dir(&path).await.map_err(sftp_err)? {
+    let items: Vec<_> = sftp.read_dir(&path).await.map_err(sftp_err)?.filter(|e| e.file_name() != "." && e.file_name() != "..").collect();
+    // Les cibles des liens symboliques sont résolues en parallèle : un aller-retour au lieu d'un
+    // par lien (/etc en compte des dizaines).
+    let dir = path.as_str();
+    let mut entries = futures::future::join_all(items.into_iter().map(|e| async move {
         let name = e.file_name();
-        if name == "." || name == ".." {
-            continue;
-        }
         let meta = e.metadata();
-        let full = join(&path, &name);
+        let full = join(dir, &name);
         let target_is_dir =
             if meta.file_type() == FileType::Symlink { sftp.metadata(&full).await.map(|m| m.is_dir()).unwrap_or(false) } else { false };
-        entries.push(to_entry(name, full, &meta, target_is_dir));
-    }
+        to_entry(name, full, &meta, target_is_dir)
+    }))
+    .await;
     entries.sort_by(|a, b| {
         let a_dir = a.kind == EntryKind::Dir || a.target_is_dir;
         let b_dir = b.kind == EntryKind::Dir || b.target_is_dir;

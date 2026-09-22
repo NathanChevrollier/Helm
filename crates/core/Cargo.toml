@@ -8,6 +8,7 @@ description = "SSH, SFTP, tunnels, client Docker et parseur nginx"
 [dependencies]
 async-trait = "0.1.92"
 base64 = "0.23.1"
+futures = { version = "0.3.34", default-features = false, features = ["alloc"] }
 helm-protocol.workspace = true
 ring = "0.17"
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }

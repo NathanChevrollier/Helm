@@ -279,12 +279,15 @@ for f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
   echo "@@FILE enabled $f $(readlink -f "$f")"
   cat "$f"; echo
 done
+enabled_real="
+$(readlink -f /etc/nginx/sites-enabled/* 2>/dev/null)
+"
 for f in /etc/nginx/sites-available/*; do
   [ -f "$f" ] || continue
   real=$(readlink -f "$f")
-  linked=0
-  for e in /etc/nginx/sites-enabled/*; do [ "$(readlink -f "$e")" = "$real" ] && linked=1; done
-  [ $linked = 1 ] && continue
+  case "$enabled_real" in *"
+$real
+"*) continue ;; esac
   echo "@@FILE disabled $f $real"
   cat "$f"; echo
 done
@@ -411,16 +414,20 @@ pub async fn discover(conn: &Connection, sudo: Option<&str>) -> Result<NginxStat
     paths.sort();
     paths.dedup();
     if !paths.is_empty() {
-        // Les certificats Let's Encrypt ne sont lisibles qu'en root.
-        let script: String = paths
-            .iter()
-            .map(|p| {
-                format!(
-                    "echo '@@CERT {p}'; openssl x509 -noout -subject -issuer -enddate -ext subjectAltName -in {} 2>/dev/null\n",
-                    shell_quote(p)
-                )
-            })
-            .collect();
+        // Les certificats Let's Encrypt ne sont lisibles qu'en root. Chaque `openssl` met ~60 ms à
+        // démarrer : ils tournent en parallèle, puis les sorties sont recollées dans l'ordre.
+        let mut script = String::from("d=$(mktemp -d) || exit 1\n");
+        for (i, p) in paths.iter().enumerate() {
+            let q = shell_quote(p);
+            script += &format!(
+                "{{ printf '@@CERT %s\\n' {q}; openssl x509 -noout -subject -issuer -enddate -ext subjectAltName -in {q} 2>/dev/null; }} > \"$d/{i}\" &\n"
+            );
+        }
+        script += "wait\n";
+        for i in 0..paths.len() {
+            script += &format!("cat \"$d/{i}\"\n");
+        }
+        script += "rm -rf \"$d\"\n";
         let certs = conn.exec_sudo(&script, sudo, None).await?;
         state.certificates = parse_certs(&certs.stdout);
     }
