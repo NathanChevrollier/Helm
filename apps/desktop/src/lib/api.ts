@@ -86,6 +86,17 @@ export interface Snippet {
   command: string;
 }
 
+/** Partage d'un terminal : les invités regardent, ou peuvent aussi taper. */
+export type ShareMode = "view" | "control";
+
+export type ShareEvent = { type: "guestJoined" } | { type: "ended"; reason: string };
+
+export interface ShareInfo {
+  termId: number;
+  invite: string;
+  mode: ShareMode;
+}
+
 export type TermEvent = { type: "data"; data: string } | { type: "exit"; code: number | null };
 
 export type EntryKind = "dir" | "file" | "symlink" | "other";
@@ -780,6 +791,24 @@ export const api = {
   termWrite: (id: number, data: string) => invoke<void>("term_write", { id, data }),
   termResize: (id: number, cols: number, rows: number) => invoke<void>("term_resize", { id, cols, rows }),
   termClose: (id: number) => invoke<void>("term_close", { id }),
+  termShareStart: (termId: number, label: string, mode: ShareMode, onEvent: (e: ShareEvent) => void) => {
+    const channel = new Channel<ShareEvent>();
+    channel.onmessage = onEvent;
+    return invoke<ShareInfo>("term_share_start", { termId, label, mode, onEvent: channel });
+  },
+  /** Envoie l'écran courant à un invité qui vient d'arriver. */
+  termShareSend: (termId: number, data: string) => invoke<void>("term_share_send", { termId, data }),
+  termShareStop: (termId: number) => invoke<void>("term_share_stop", { termId }),
+  termShares: () => invoke<ShareInfo[]>("term_shares"),
+  /** Rejoint le terminal partagé d'une invitation. */
+  termJoin: (code: string, onEvent: (e: TermEvent) => void) => {
+    const channel = new Channel<TermEvent>();
+    channel.onmessage = onEvent;
+    return invoke<{ id: number; label: string; mode: ShareMode }>("term_join", { code, onEvent: channel });
+  },
+  termJoinWrite: (id: number, data: string) => invoke<void>("term_join_write", { id, data }),
+  termJoinClose: (id: number) => invoke<void>("term_join_close", { id }),
+
   termCwd: (serverId: string, tmuxSession?: string, pid?: number) => invoke<string | null>("term_cwd", { serverId, tmuxSession, pid }),
 
   fsHome: (serverId: string) => invoke<string>("fs_home", { serverId }),

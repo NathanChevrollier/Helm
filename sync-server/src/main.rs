@@ -11,6 +11,8 @@
 //! - `HELM_SYNC_DATA` : dossier des données (défaut `/data`) ;
 //! - `HELM_SYNC_ADDR` : adresse d'écoute (défaut `0.0.0.0:8080`).
 
+mod relay;
+
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -30,12 +32,14 @@ use tokio::sync::Mutex;
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const MIN_TOKEN_LEN: usize = 24;
 
-struct App {
+pub struct App {
     dir: PathBuf,
     /// Empreintes SHA-256 des jetons autorisés (les jetons eux-mêmes ne sont pas gardés).
     tokens: HashSet<String>,
     /// Sérialise les écritures : la vérification de révision et l'écriture sont atomiques.
     write: Mutex<()>,
+    /// Sessions de terminaux partagés en cours.
+    rooms: relay::Rooms,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,7 +71,7 @@ fn error(status: StatusCode, message: &str) -> Response {
 
 impl App {
     /// Fichier de l'espace du jeton présenté, ou `None` si le jeton est inconnu.
-    fn space(&self, headers: &HeaderMap) -> Option<PathBuf> {
+    pub fn space(&self, headers: &HeaderMap) -> Option<PathBuf> {
         let token = headers.get("authorization")?.to_str().ok()?.strip_prefix("Bearer ")?.trim();
         let hash = sha256_hex(token);
         self.tokens.contains(&hash).then(|| self.dir.join(format!("space-{}.json", &hash[..24])))
@@ -89,7 +93,7 @@ fn is_encrypted_envelope(data: &str) -> bool {
         .is_some_and(|v| v["format"] == "helm-export" && v["encrypted"] == true && v["data"].is_string())
 }
 
-async fn unauthorized() -> Response {
+pub async fn unauthorized() -> Response {
     // Freine les essais de jetons au hasard.
     tokio::time::sleep(Duration::from_millis(400)).await;
     error(StatusCode::UNAUTHORIZED, "jeton invalide")
@@ -133,6 +137,9 @@ fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/state", get(get_state).put(put_state))
+        // Terminaux partagés : ouverture d'une session, puis WebSocket (hôte et invités).
+        .route("/v1/relay", axum::routing::post(relay::create))
+        .route("/v1/relay/{session}", get(relay::connect))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(app)
 }
@@ -182,7 +189,15 @@ async fn main() {
     let addr: SocketAddr =
         std::env::var("HELM_SYNC_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()).parse().expect("HELM_SYNC_ADDR invalide");
     let count = tokens.len();
-    let app = Arc::new(App { dir, tokens, write: Mutex::new(()) });
+    let app = Arc::new(App { dir, tokens, write: Mutex::new(()), rooms: relay::Rooms::default() });
+    // Ménage régulier des sessions de partage expirées.
+    let sweeper = app.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            sweeper.rooms.sweep().await;
+        }
+    });
     let listener = tokio::net::TcpListener::bind(addr).await.expect("écoute impossible");
     println!("helm-sync {} : écoute sur {addr}, {count} jeton(s)", env!("CARGO_PKG_VERSION"));
     axum::serve(listener, router(app)).with_graceful_shutdown(shutdown()).await.expect("serveur arrêté");
@@ -196,20 +211,29 @@ mod tests {
 
     async fn serve() -> (String, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let app = Arc::new(App { dir: dir.path().to_path_buf(), tokens: parse_tokens(TOKEN).unwrap(), write: Mutex::new(()) });
+        let app = Arc::new(App {
+            dir: dir.path().to_path_buf(),
+            tokens: parse_tokens(TOKEN).unwrap(),
+            write: Mutex::new(()),
+            rooms: relay::Rooms::default(),
+        });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, router(app)).await.unwrap() });
         (format!("{addr}"), dir)
     }
 
-    /// Requête HTTP/1.1 minimale (pas de client HTTP en dépendance juste pour les tests).
     async fn request(addr: &str, method: &str, token: &str, body: Option<&str>) -> (u16, String) {
+        request_path(addr, method, "/v1/state", token, body).await
+    }
+
+    /// Requête HTTP/1.1 minimale (pas de client HTTP en dépendance juste pour les tests).
+    async fn request_path(addr: &str, method: &str, path: &str, token: &str, body: Option<&str>) -> (u16, String) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
         let body = body.unwrap_or("");
         let req = format!(
-            "{method} /v1/state HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "{method} {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         s.write_all(req.as_bytes()).await.unwrap();
@@ -239,6 +263,43 @@ mod tests {
         // Contenu en clair refusé.
         let plain = json!({ "baseRev": 1, "data": "{\"format\":\"helm-export\",\"encrypted\":false,\"data\":{}}" }).to_string();
         assert_eq!(request(&addr, "PUT", TOKEN, Some(&plain)).await.0, 422);
+    }
+
+    /// Ouverture d'une session de partage, puis échanges hôte ↔ invité.
+    #[tokio::test]
+    async fn relay_between_host_and_guest() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+
+        let (addr, _dir) = serve().await;
+        let (status, body) = request_path(&addr, "POST", "/v1/relay", TOKEN, Some("")).await;
+        assert_eq!(status, 200);
+        let session = body.split("\"session\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        assert_eq!(request_path(&addr, "POST", "/v1/relay", "mauvais-jeton-mauvais-jeton-x", Some("")).await.0, 401);
+
+        let connect = |role: &str| {
+            let url = format!("ws://{addr}/v1/relay/{session}?role={role}");
+            async move { tokio_tungstenite::connect_async(url).await.unwrap().0 }
+        };
+        let mut host = connect("host").await;
+        let mut guest = connect("guest").await;
+        // Un seul hôte par session.
+        assert!(tokio_tungstenite::connect_async(format!("ws://{addr}/v1/relay/{session}?role=host")).await.is_err());
+
+        host.send(Ws::Text("sortie-chiffrée".into())).await.unwrap();
+        assert_eq!(guest.next().await.unwrap().unwrap().into_text().unwrap().as_str(), "sortie-chiffrée");
+        guest.send(Ws::Text("frappe-chiffrée".into())).await.unwrap();
+        assert_eq!(host.next().await.unwrap().unwrap().into_text().unwrap().as_str(), "frappe-chiffrée");
+
+        // L'hôte parti, la session disparaît : plus personne ne peut la rejoindre.
+        host.close(None).await.unwrap();
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if tokio_tungstenite::connect_async(format!("ws://{addr}/v1/relay/{session}?role=guest")).await.is_err() {
+                return;
+            }
+        }
+        panic!("la session aurait dû être fermée avec le départ de l'hôte");
     }
 
     #[test]

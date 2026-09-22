@@ -1,8 +1,11 @@
 # helm-sync
 
-Petit serveur qui permet à plusieurs installations de Helm (PC fixe, portable…) de partager leurs
-réglages : serveurs, banque d'identifiants, clés d'hôte approuvées, snippets, tunnels et, si tu
-le choisis, les secrets.
+Petit serveur qui rend deux services à Helm :
+
+1. **synchroniser les réglages** de plusieurs installations (PC fixe, portable…) : serveurs, banque
+   d'identifiants, clés d'hôte approuvées, snippets, tunnels et, si tu le choisis, les secrets ;
+2. **relayer les terminaux partagés** : montrer un terminal à quelqu'un d'autre (en lecture seule
+   ou avec le contrôle), sans ouvrir le moindre accès à ton serveur.
 
 Le serveur ne voit jamais rien en clair : Helm chiffre tout (AES-256-GCM) avec ta **phrase de
 passe de synchronisation**, qui ne quitte pas tes PC. Le serveur garde seulement la dernière
@@ -47,8 +50,21 @@ tes PC). Helm synchronise au démarrage, toutes les 5 minutes et sur demande.
 | GET     | `/health`   | État du service (sans jeton).                                        |
 | GET     | `/v1/state` | Dernière version : `{ rev, updated, data }`, 404 s'il n'y a rien.    |
 | PUT     | `/v1/state` | `{ baseRev, data }` : enregistré si `baseRev` est la révision actuelle, sinon 409. |
+| POST    | `/v1/relay` | Ouvre une session de terminal partagé (jeton requis) : `{ session }`. |
+| GET     | `/v1/relay/{session}?role=host\|guest` | WebSocket du partage. L'identifiant suffit aux invités. |
 
 Authentification : en-tête `Authorization: Bearer <jeton>`.
+
+## Terminaux partagés
+
+Quand tu partages un terminal depuis Helm, le serveur ouvre une session et se contente de faire
+suivre les messages entre toi et tes invités. Ce qui s'affiche et ce qui est tapé sont chiffrés de
+bout en bout avec une clé tirée au hasard, présente uniquement dans l'invitation
+(`helm-term:…`) que tu transmets toi-même : le serveur ne peut rien lire. Une session sans hôte est
+fermée au bout de 2 minutes, et toutes expirent après 8 heures.
+
+Deux modes : **lecture seule** (la personne regarde) ou **avec le contrôle** (elle tape dans ton
+terminal, avec tes droits sur le serveur — à réserver à quelqu'un de confiance).
 
 ## Sauvegarde
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Circle, Copy, Eraser, FolderOpen, Search, Square, TextSelect, Upload, X } from "lucide-react";
+import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, Search, Share2, Square, TextSelect, Upload, Users, X } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
@@ -9,7 +9,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { ClipboardAddon, type ClipboardSelectionType } from "@xterm/addon-clipboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, errorMessage, type TermEvent } from "../lib/api";
+import { api, errorMessage, type ShareMode, type TermEvent } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { broadcastInput, isBroadcasting, useBroadcast } from "../lib/broadcast";
 import { useTheme } from "../lib/theme";
@@ -17,6 +17,7 @@ import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
 import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { Button, Modal } from "./ui";
 
 
 const THEME = {
@@ -135,6 +136,7 @@ export default function TerminalPane({
   serverId,
   command,
   tmux,
+  join,
   paneId,
   label,
   visible,
@@ -144,6 +146,8 @@ export default function TerminalPane({
   command?: string;
   /** Session tmux à créer ou rattacher (sessions persistantes). */
   tmux?: string;
+  /** Invitation : ce panneau affiche le terminal partagé par quelqu'un d'autre. */
+  join?: string;
   /** Identifiant du panneau, pour la diffusion de la saisie. */
   paneId: string;
   label: string;
@@ -167,6 +171,7 @@ export default function TerminalPane({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const openSearchRef = useRef<() => void>(() => {});
+  const joinModeRef = useRef<ShareMode | null>(null);
   const safePasteRef = useRef<(text: string) => Promise<void>>(async () => {});
   openSearchRef.current = () => {
     setSearching(true);
@@ -179,6 +184,11 @@ export default function TerminalPane({
   const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
   /** Fichiers du PC glissés au-dessus du panneau : dossier de destination (null : en cours de lecture). */
   const [dropTarget, setDropTarget] = useState<string | null | false>(false);
+  /** Partage en cours de ce terminal (celui qui partage), avec son invitation. */
+  const [share, setShare] = useState<{ invite: string; mode: ShareMode } | null>(null);
+  const [sharePicker, setSharePicker] = useState(false);
+  /** Terminal rejoint : mode du partage (lecture seule ou contrôle). */
+  const [joinMode, setJoinMode] = useState<ShareMode | null>(null);
 
   useEffect(() => {
     const term = new Terminal({
@@ -254,6 +264,36 @@ export default function TerminalPane({
 
     const start = async (interactive = true): Promise<void> => {
       term.write("\x1b[2mConnexion…\x1b[0m\r\n");
+      // Terminal partagé par quelqu'un d'autre : aucun SSH, tout passe par le relais.
+      if (join) {
+        try {
+          const info = await api.termJoin(join, (e: TermEvent) => {
+            if (e.type === "data") {
+              term.write(decode(e.data));
+              return;
+            }
+            setTerm(null);
+            if (disposed) return;
+            term.write("\r\n\x1b[33m[La personne a arrêté le partage]\x1b[0m\r\n");
+          });
+          if (disposed) {
+            void api.termJoinClose(info.id);
+            return;
+          }
+          setTerm(info.id);
+          setJoinMode(info.mode);
+          onTitle?.(info.label || "Terminal partagé");
+          if (visibleRef.current) term.focus();
+          term.write(
+            info.mode === "control"
+              ? "\x1b[2mConnecté : tu peux taper dans ce terminal.\x1b[0m\r\n"
+              : "\x1b[2mConnecté en lecture seule.\x1b[0m\r\n",
+          );
+        } catch (e) {
+          term.write(`\x1b[31m${errorMessage(e)}\x1b[0m\r\n`);
+        }
+        return;
+      }
       if (!(await ensureConnected(serverId, { interactive, force: interactive }))) {
         if (!interactive && tmux) return scheduleRetry();
         term.write("\x1b[31mConnexion annulée ou impossible.\x1b[0m Appuie sur Entrée pour réessayer.\r\n");
@@ -326,7 +366,13 @@ export default function TerminalPane({
         void broadcastInput(data);
         return;
       }
-      if (idRef.current != null) void api.termWrite(idRef.current, data);
+      if (idRef.current == null) return;
+      if (join) {
+        // Lecture seule : les frappes ne partent pas (l'hôte les refuserait de toute façon).
+        if (joinModeRef.current === "control") void api.termJoinWrite(idRef.current, data);
+        return;
+      }
+      void api.termWrite(idRef.current, data);
     });
     term.onResize(({ cols, rows }) => {
       if (idRef.current != null) void api.termResize(idRef.current, cols, rows);
@@ -492,12 +538,12 @@ export default function TerminalPane({
       usePanes.getState().remove(paneId);
       useBroadcast.getState().unregister(paneId);
       // Fermer le canal détache simplement la session tmux : elle continue sur le serveur.
-      if (idRef.current != null) void api.termClose(idRef.current);
+      if (idRef.current != null) void (join ? api.termJoinClose(idRef.current) : api.termClose(idRef.current));
       term.dispose();
     };
     // La session est liée au serveur, à la commande et à la session tmux initiales uniquement.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverId, command, tmux, paneId]);
+  }, [serverId, command, tmux, join, paneId]);
 
   // Connexion différée : un onglet restauré ne se connecte qu'à son premier affichage.
   useEffect(() => {
@@ -510,6 +556,8 @@ export default function TerminalPane({
     }
   }, [visible]);
 
+  joinModeRef.current = joinMode;
+
   useEffect(() => {
     if (termRef.current) termRef.current.options.theme = theme === "light" ? LIGHT_THEME : THEME;
   }, [theme]);
@@ -521,6 +569,42 @@ export default function TerminalPane({
     term.options.fontSize = fontSize;
     fitRef.current?.fit();
   }, [fontSize]);
+
+  /** Écran courant en texte, envoyé à un invité qui vient d'arriver. */
+  const screenText = (): string => {
+    const term = termRef.current;
+    if (!term) return "";
+    const buffer = term.buffer.active;
+    const lines: string[] = [];
+    const first = Math.max(0, buffer.length - term.rows);
+    for (let i = first; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true).trimEnd() ?? "");
+    return `\x1b[2J\x1b[H${lines.join("\r\n")}\r\n`;
+  };
+
+  const startShare = async (mode: ShareMode) => {
+    const id = idRef.current;
+    const { notify } = useApp.getState();
+    if (id == null) return notify("Le terminal n'est pas connecté.", "info");
+    try {
+      const info = await api.termShareStart(id, label, mode, (e) => {
+        if (e.type === "guestJoined") void api.termShareSend(id, screenText()).catch(() => {});
+        else {
+          setShare(null);
+          useApp.getState().notify(`Partage terminé : ${e.reason}`, "info");
+        }
+      });
+      setShare({ invite: info.invite, mode: info.mode });
+      await navigator.clipboard.writeText(info.invite).catch(() => {});
+      notify("Invitation copiée : envoie-la à la personne. Elle la colle dans Terminal → Rejoindre.", "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const stopShare = async () => {
+    if (idRef.current != null) await api.termShareStop(idRef.current).catch(() => {});
+    setShare(null);
+  };
 
   const find = (backwards = false) => {
     if (!query) return;
@@ -632,6 +716,15 @@ export default function TerminalPane({
             <Search size={13} />
           </button>
         )}
+        {!join && (
+          <button
+            className={`rounded bg-panel/90 p-1 hover:text-fg ${share ? "text-accent" : "text-muted"}`}
+            title={share ? "Terminal partagé : cliquer pour arrêter" : "Partager ce terminal avec quelqu'un"}
+            onClick={() => (share ? void stopShare() : setSharePicker(true))}
+          >
+            <Share2 size={13} />
+          </button>
+        )}
         <button
           className={`rounded bg-panel/90 p-1 hover:text-fg ${isRecording ? "text-danger" : "text-muted"}`}
           title={isRecording ? "Arrêter et enregistrer la session" : "Enregistrer la session (asciicast)"}
@@ -652,11 +745,71 @@ export default function TerminalPane({
         setMenu(null);
         termRef.current?.focus();
       }} />}
+      {share && (
+        <div className="absolute top-0 right-0 left-0 z-10 flex items-center justify-center gap-2 bg-accent/85 px-3 py-0.5 text-[11px] font-medium text-accent-fg">
+          <Users size={12} />
+          Partagé ({share.mode === "control" ? "avec le contrôle" : "lecture seule"})
+          <button className="underline" onClick={() => void navigator.clipboard.writeText(share.invite)}>
+            copier l'invitation
+          </button>
+          <button className="underline" onClick={() => void stopShare()}>
+            arrêter
+          </button>
+        </div>
+      )}
+      {join && joinMode === "view" && (
+        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 flex items-center justify-center gap-2 bg-panel/90 px-3 py-0.5 text-[11px] text-muted">
+          <EyeOff size={12} /> Lecture seule : la personne qui partage garde le contrôle
+        </div>
+      )}
+      {sharePicker && (
+        <SharePicker
+          onClose={() => setSharePicker(false)}
+          onPick={(mode) => {
+            setSharePicker(false);
+            void startShare(mode);
+          }}
+        />
+      )}
       {broadcasting && (
         <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 bg-danger/85 px-3 py-0.5 text-center text-[11px] font-medium text-white">
           Saisie diffusée à {broadcastCount} terminaux
         </div>
       )}
     </div>
+  );
+}
+
+/** Choix du mode de partage d'un terminal. */
+function SharePicker({ onClose, onPick }: { onClose: () => void; onPick: (mode: ShareMode) => void }) {
+  return (
+    <Modal
+      title="Partager ce terminal"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button icon={<EyeOff size={14} />} onClick={() => onPick("view")}>
+            Lecture seule
+          </Button>
+          <Button variant="primary" icon={<Users size={14} />} onClick={() => onPick("control")}>
+            Avec le contrôle
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted">
+        Helm crée une session sur ton serveur de synchronisation, qui ne fait que relayer : ce qui s'affiche et ce qui est tapé sont chiffrés
+        de bout en bout, avec une clé présente uniquement dans l'invitation. Elle est copiée dans ton presse-papiers ; transmets-la à la
+        personne, qui la colle dans Terminal → Rejoindre.
+      </p>
+      <p className="mt-3 text-sm text-muted">
+        <span className="font-medium text-fg">Avec le contrôle</span>, la personne tape dans <span className="font-medium text-fg">ton</span>{" "}
+        terminal, avec tes droits sur le serveur : à réserver à quelqu'un de confiance. Le partage s'arrête dès que tu le décides, ou à la
+        fermeture de l'onglet.
+      </p>
+    </Modal>
   );
 }

@@ -37,6 +37,8 @@ export interface TermTab {
   splitServerId?: string;
   /** Onglet multi-serveurs : une grille de panneaux, un par serveur, pour diffuser la saisie. */
   grid?: GridPane[];
+  /** Onglet invité : invitation à un terminal partagé par quelqu'un d'autre. */
+  join?: string;
 }
 
 export interface GridPane {
@@ -128,6 +130,8 @@ interface State {
   openTab: (serverId: string, opts?: { title?: string; command?: string; tmux?: string }) => void;
   /** Ouvre un onglet avec un terminal par serveur, en grille ; renvoie sa clé. */
   openGridTab: (serverIds: string[]) => string;
+  /** Ouvre l'onglet d'un terminal partagé par quelqu'un d'autre (invitation). */
+  openJoinTab: (code: string, title: string) => void;
   closeTab: (key: string) => void;
   setActiveTab: (key: string) => void;
   updateTab: (key: string, patch: Partial<TermTab>) => void;
@@ -177,7 +181,8 @@ export const useApp = create<State>((set, get) => ({
       if (raw && raw.v === 1) {
         set({
           section: raw.section ?? "servers",
-          tabs: raw.tabs ?? [],
+          // Les sessions partagées ne survivent pas à la fermeture de l'app.
+          tabs: (raw.tabs ?? []).filter((t) => !t.join),
           activeTab: raw.activeTab ?? null,
           filesPaths: raw.filesPaths ?? {},
           settings: { ...get().settings, ...raw.settings },
@@ -204,7 +209,8 @@ export const useApp = create<State>((set, get) => ({
       activeServerId: active && servers.some((x) => x.id === active) ? active : (servers[0]?.id ?? null),
       // Les onglets et raccourcis d'un serveur supprimé disparaissent.
       tabs: s.tabs
-        .filter((t) => servers.some((x) => x.id === t.serverId))
+        // Les onglets invités ne dépendent d'aucun serveur local.
+        .filter((t) => !!t.join || servers.some((x) => x.id === t.serverId))
         .map((t) => {
           const known = (id: string) => servers.some((x) => x.id === id);
           if (t.splitServerId && !known(t.splitServerId)) return { ...t, split: null, splitServerId: undefined };
@@ -263,6 +269,10 @@ export const useApp = create<State>((set, get) => ({
     const title = names.length > 2 ? `${names.slice(0, 2).join(" + ")} +${names.length - 2}` : names.join(" + ");
     set((s) => ({ tabs: [...s.tabs, { key, serverId: serverIds[0], title, grid }], activeTab: key, section: "terminal" }));
     return key;
+  },
+  openJoinTab: (code, title) => {
+    const key = newId();
+    set((s) => ({ tabs: [...s.tabs, { key, serverId: "", title, join: code }], activeTab: key, section: "terminal" }));
   },
   closeTab: (key) =>
     set((s) => {

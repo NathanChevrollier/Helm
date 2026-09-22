@@ -10,6 +10,7 @@ pub mod monitoring;
 pub mod rdp;
 pub mod security;
 pub mod servers;
+pub mod share;
 pub mod sites;
 pub mod sync;
 pub mod terminal;

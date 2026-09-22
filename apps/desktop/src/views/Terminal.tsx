@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Columns2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, SquareTerminal, X } from "lucide-react";
+import { Columns2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, Share2, SquareTerminal, Users, X } from "lucide-react";
 import TerminalPane from "../components/TerminalPane";
 import SnippetsPanel from "../components/SnippetsPanel";
 import TerminalFiles from "../components/TerminalFiles";
@@ -10,7 +10,7 @@ import { api, errorMessage, type TmuxSession } from "../lib/api";
 import { useBroadcast } from "../lib/broadcast";
 import { usePanes } from "../lib/panes";
 import { ensureConnected, newTmuxName, useApp, useAppPick, type TermTab } from "../lib/store";
-import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { matches } from "../lib/shortcuts";
 
 const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
@@ -18,6 +18,7 @@ const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
 /** Sessions tmux d'un onglet, avec le serveur de chacune (un onglet peut en couvrir plusieurs). */
 function tabSessions(tab: TermTab): { serverId: string; name: string }[] {
   const out: { serverId: string; name: string }[] = [];
+  if (tab.join) return out;
   if (tab.tmux) out.push({ serverId: tab.serverId, name: tab.tmux });
   if (tab.split) out.push({ serverId: tab.splitServerId ?? tab.serverId, name: tab.split });
   for (const g of tab.grid ?? []) if (g.tmux) out.push({ serverId: g.serverId, name: g.tmux });
@@ -31,12 +32,13 @@ function tabPaneIds(tab: TermTab): string[] {
 }
 
 export default function TerminalView({ visible }: { visible: boolean }) {
-  const { tabs, activeTab, setActiveTab, closeTab, openTab, openGridTab, updateTab, activeServerId, servers, ask, notify, settings } = useAppPick("tabs", "activeTab", "setActiveTab", "closeTab", "openTab", "openGridTab", "updateTab", "activeServerId", "servers", "ask", "notify", "settings");
+  const { tabs, activeTab, setActiveTab, closeTab, openTab, openGridTab, openJoinTab, updateTab, activeServerId, servers, ask, notify, settings } = useAppPick("tabs", "activeTab", "setActiveTab", "closeTab", "openTab", "openGridTab", "openJoinTab", "updateTab", "activeServerId", "servers", "ask", "notify", "settings");
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [showSnippets, setShowSnippets] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [splitMenu, setSplitMenu] = useState<{ x: number; y: number } | null>(null);
   const [multiPicker, setMultiPicker] = useState(false);
+  const [joinPicker, setJoinPicker] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<string | null>(null);
   const [broadcastPicker, setBroadcastPicker] = useState(false);
   const broadcast = useBroadcast();
@@ -134,7 +136,9 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   };
 
   const labelOf = (t: TermTab, right = false) =>
-    right ? `${serverOf(t.splitServerId ?? t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title} (droite)` : `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}`;
+    t.join
+      ? `${titles[t.key] ?? t.title} (partagé)`
+      : right ? `${serverOf(t.splitServerId ?? t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title} (droite)` : `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -152,7 +156,9 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                   active ? "border-accent bg-bg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
                 }`}
               >
-                {t.grid ? (
+                {t.join ? (
+                  <Share2 size={12} className="shrink-0 text-accent" />
+                ) : t.grid ? (
                   <LayoutGrid size={12} className="shrink-0 text-accent" />
                 ) : (
                   <span className="size-[7px] shrink-0 rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
@@ -191,10 +197,11 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           ) : (
             <ToolButton label="Diffuser" title="Diffuser la saisie à plusieurs terminaux" icon={<Radio size={13} />} disabled={Object.keys(broadcast.panes).length < 2} onClick={() => setBroadcastPicker(true)} />
           )}
+          <ToolButton label="Rejoindre" title="Rejoindre le terminal partagé par quelqu'un (invitation helm-term:…)" icon={<Users size={13} />} onClick={() => setJoinPicker(true)} />
           <ToolButton label="Multi-serveurs" title="Un terminal par serveur, côte à côte, avec la saisie diffusée à tous" icon={<LayoutGrid size={13} />} disabled={servers.length < 2} onClick={() => setMultiPicker(true)} />
           <ToolButton label="Sessions" title="Sessions persistantes (tmux)" icon={<History size={13} />} disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)} />
-          <ToolButton label="Diviser" title="Diviser l'écran (même serveur ou un autre)" icon={<Columns2 size={13} />} disabled={!current || !!current.grid} active={current?.split != null} onClick={toggleSplit} />
-          <ToolButton label="Fichiers" title="Fichiers du serveur, au dossier courant du terminal" icon={<FolderTree size={13} />} active={showFiles} disabled={!current} onClick={() => setShowFiles((v) => !v)} />
+          <ToolButton label="Diviser" title="Diviser l'écran (même serveur ou un autre)" icon={<Columns2 size={13} />} disabled={!current || !!current.grid || !!current.join} active={current?.split != null} onClick={toggleSplit} />
+          <ToolButton label="Fichiers" title="Fichiers du serveur, au dossier courant du terminal" icon={<FolderTree size={13} />} active={showFiles} disabled={!current || !!current.join} onClick={() => setShowFiles((v) => !v)} />
           <ToolButton label="Snippets" title="Snippets" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
         </div>
       </div>
@@ -216,7 +223,16 @@ export default function TerminalView({ visible }: { visible: boolean }) {
             const show = visible && t.key === activeTab;
             return (
               <div key={t.key} className={`absolute inset-0 flex ${t.key === activeTab ? "" : "invisible"}`}>
-                {t.grid ? (
+                {t.join ? (
+                  <TerminalPane
+                    serverId=""
+                    join={t.join}
+                    paneId={`${t.key}:0`}
+                    label={labelOf(t)}
+                    visible={show}
+                    onTitle={(title) => setTitles((x) => ({ ...x, [t.key]: title }))}
+                  />
+                ) : t.grid ? (
                   <GridPanes tab={t} visible={show} />
                 ) : (
                   <>
@@ -263,6 +279,15 @@ export default function TerminalView({ visible }: { visible: boolean }) {
               .filter((s) => s.id !== current.serverId)
               .map((s) => ({ label: s.name, hint: s.host, icon: <Server size={14} style={{ color: s.color ?? undefined }} />, onClick: () => void splitWith(s.id) })),
           ]}
+        />
+      )}
+      {joinPicker && (
+        <JoinPicker
+          onClose={() => setJoinPicker(false)}
+          onJoin={(code, title) => {
+            setJoinPicker(false);
+            openJoinTab(code, title);
+          }}
         />
       )}
       {multiPicker && (
@@ -380,6 +405,45 @@ function MultiServerPicker({ onClose, onOpen }: { onClose: () => void; onOpen: (
           <span className="block text-xs text-muted">Les commandes sensibles (rm -rf, reboot…) demandent confirmation. Arrêt avec « Arrêter la diffusion ».</span>
         </span>
       </label>
+    </Modal>
+  );
+}
+
+/** Saisie d'une invitation reçue (terminal partagé par quelqu'un d'autre). */
+function JoinPicker({ onClose, onJoin }: { onClose: () => void; onJoin: (code: string, title: string) => void }) {
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const valid = code.trim().startsWith("helm-term:");
+  return (
+    <Modal
+      title="Rejoindre un terminal partagé"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button variant="primary" icon={<Users size={14} />} disabled={!valid} onClick={() => onJoin(code.trim(), name.trim() || "Terminal partagé")}>
+            Rejoindre
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-sm text-muted">
+        Colle l'invitation reçue (elle commence par <span className="font-mono">helm-term:</span>). Tu verras le terminal de la personne en
+        direct ; si elle a partagé le contrôle, tu pourras aussi y taper.
+      </p>
+      <textarea
+        className="h-28 w-full resize-none rounded-md border border-border bg-bg p-2 font-mono text-xs outline-none focus:border-accent"
+        placeholder="helm-term:…"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+      />
+      <div className="mt-3">
+        <Field label="Nom de l'onglet (facultatif)">
+          <Input value={name} placeholder="Terminal de …" onChange={(e) => setName(e.target.value)} />
+        </Field>
+      </div>
     </Modal>
   );
 }

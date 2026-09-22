@@ -32,6 +32,8 @@ pub struct Sessions {
     connections: Mutex<HashMap<String, Connection>>,
     sftp: Mutex<HashMap<String, (Connection, Arc<SftpSession>)>>,
     terminals: Arc<Mutex<HashMap<u64, Arc<ChannelWriteHalf<Msg>>>>>,
+    /// Copies de la sortie des terminaux partagés (`id du terminal` → destinataire).
+    mirrors: Arc<Mutex<HashMap<u64, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>>,
     /// Un verrou par serveur pendant l'établissement de la connexion : un serveur lent ou
     /// injoignable ne bloque pas les autres, et deux demandes simultanées partagent une tentative.
     connecting: std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>,
@@ -55,6 +57,7 @@ impl Sessions {
             connections: Mutex::new(HashMap::new()),
             sftp: Mutex::new(HashMap::new()),
             terminals: Arc::new(Mutex::new(HashMap::new())),
+            mirrors: Arc::new(Mutex::new(HashMap::new())),
             connecting: std::sync::Mutex::new(HashMap::new()),
             next_term: AtomicU64::new(1),
             id_names: Mutex::new(HashMap::new()),
@@ -185,6 +188,7 @@ impl Sessions {
         self.terminals.lock().await.insert(id, Arc::new(writer));
 
         let terminals = self.terminals.clone();
+        let mirrors = self.mirrors.clone();
         tauri::async_runtime::spawn(async move {
             let b64 = base64::engine::general_purpose::STANDARD;
             let mut code = None;
@@ -213,6 +217,10 @@ impl Sessions {
                                 Ok(None) | Err(_) => break,
                             }
                         }
+                        // Terminal partagé : la même sortie part vers les invités.
+                        if let Some(mirror) = mirrors.lock().await.get(&id) {
+                            let _ = mirror.send(buf.clone());
+                        }
                         if events.send(TermEvent::Data { data: b64.encode(&buf) }).is_err() {
                             break;
                         }
@@ -224,6 +232,7 @@ impl Sessions {
             }
             let _ = events.send(TermEvent::Exit { code });
             terminals.lock().await.remove(&id);
+            mirrors.lock().await.remove(&id);
         });
         Ok(id)
     }
@@ -232,6 +241,21 @@ impl Sessions {
     /// (sortie énorme, réseau lent) ne bloque pas la saisie dans les autres.
     async fn writer(&self, id: u64) -> Result<Arc<ChannelWriteHalf<Msg>>, String> {
         self.terminals.lock().await.get(&id).cloned().ok_or_else(|| "terminal fermé".to_string())
+    }
+
+    /// Duplique la sortie d'un terminal vers un partage (un seul partage par terminal).
+    pub async fn mirror(&self, id: u64) -> tokio::sync::mpsc::UnboundedReceiver<Vec<u8>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.mirrors.lock().await.insert(id, tx);
+        rx
+    }
+
+    pub async fn stop_mirror(&self, id: u64) {
+        self.mirrors.lock().await.remove(&id);
+    }
+
+    pub async fn is_open(&self, id: u64) -> bool {
+        self.terminals.lock().await.contains_key(&id)
     }
 
     pub async fn write_terminal(&self, id: u64, data: &[u8]) -> Result<(), String> {
