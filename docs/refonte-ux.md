@@ -82,6 +82,62 @@ bureau à distance. Les titres de colonnes et d'actions mélangent infinitif et 
 
 **Pistes** : lexique court en tête de ce document, appliqué partout ; actions à l'infinitif.
 
+### 1.8 Organisation des pages : chaque vue a sa propre grammaire
+
+Il n'y a pas de gabarit de page commun, donc chaque onglet se lit différemment.
+
+| Vue | En-tête | Zone de contenu |
+|---|---|---|
+| Accueil | titre dans le contenu | grille figée `1fr 360px`, indicateurs en `grid-cols-4` |
+| Serveurs, Docker, Supervision | `<header … px-6 pt-4>` | cartes, une zone de défilement |
+| Sites, Sécurité, Sauvegardes, Tunnels | `<header … px-6 py-4>` | deux à quatre zones de défilement |
+| Fichiers, Journaux | aucun en-tête | barre d'outils propre à la vue, colonne latérale |
+| Terminal | barre d'onglets + barre d'outils | panneaux |
+
+Trois conséquences concrètes :
+
+- **Le titre de la page n'est pas au même endroit** d'une vue à l'autre, et parfois absent : on
+  perd le repère en changeant d'onglet.
+- **Les actions de page ne sont pas au même endroit** : tantôt dans l'en-tête à droite, tantôt au
+  milieu du contenu (le bouton Actualiser de l'Accueil est dans le flux).
+- **Plusieurs ascenseurs par page** (jusqu'à quatre dans Sécurité,
+  [Security.tsx](../apps/desktop/src/views/Security.tsx)) : la molette agit sur une zone qu'on n'a
+  pas choisie, et le contenu peut défiler sous un en-tête qui, lui, ne bouge pas.
+
+**Pistes** : un gabarit unique `PageLayout` — bandeau de titre (titre, sous-titre, actions à
+droite, barre d'onglets secondaire éventuelle) puis **une seule** zone de défilement ; les colonnes
+latérales gardent la leur, jamais plus. Cartes et tableaux prennent la même gouttière (24 px) et le
+même espacement vertical.
+
+### 1.9 Rien ne s'adapte à la largeur
+
+L'app n'a pratiquement aucun point de rupture : sur tout le front, deux usages de `xl:`, et rien en
+`sm:`, `md:` ou `lg:`. Le reste est figé :
+
+- grilles `grid-cols-4` (indicateurs de l'Accueil), `grid-cols-6`, `grid-cols-2` quelle que soit la
+  largeur de la fenêtre ;
+- colonnes de tableau en pixels : `200px … 150px 110px` pour la liste de l'Accueil ;
+- panneaux et champs à largeur fixe : colonne latérale de l'Accueil à 360 px, champ de recherche à
+  440 px, panneau Fichiers du terminal à 288 px (celui-ci désormais réglable à la souris) ;
+- barres d'outils sur une seule ligne, sans repli.
+
+Ce que ça donne : sous ~1100 px les barres d'outils débordent et les cartes deviennent illisibles ;
+au-delà de ~1700 px les lignes de tableau s'étirent sans que rien ne remplisse l'espace, et l'œil
+ne relie plus le début et la fin d'une ligne.
+
+**Pistes** :
+
+- fixer trois paliers — **compact** (< 1200 px), **normal**, **large** (> 1700 px) — et s'y tenir
+  partout plutôt que d'ajuster vue par vue ;
+- grilles en `repeat(auto-fit, minmax(…))` au lieu d'un nombre de colonnes figé ;
+- colonnes de tableau en fractions avec une largeur minimale, nombres alignés à droite ;
+- barres d'outils qui replient leurs groupes secondaires derrière « … » quand la place manque
+  (même mécanisme qu'en 1.2) ;
+- largeur de lecture plafonnée pour les contenus textuels (audit, journaux, réglages) ;
+- colonnes latérales (Accueil, Journaux, Fichiers du terminal) repliables et de largeur retenue,
+  comme le panneau Fichiers ;
+- vérifier chaque écran à 1100, 1440 et 1920 px.
+
 ## 2. Ordre de traitement
 
 Chaque phase est indépendante et livrable seule.
@@ -90,11 +146,15 @@ Chaque phase est indépendante et livrable seule.
    cibles, composant de squelette, règle d'erreur écrite. Fichiers : `components/ui.tsx`, `App.tsx`.
 2. **Navigation** : libellés dans la colonne d'icônes, en-tête `Serveur · Section`, distinction
    visuelle pastilles serveur / onglets de terminal.
-3. **Barres d'outils** : regroupement et débordement « … », en commençant par le terminal, puis
+3. **Gabarit de page** : `PageLayout` commun (titre, actions, une seule zone de défilement),
+   appliqué vue par vue en commençant par Sécurité et Accueil, les plus morcelées.
+4. **Barres d'outils** : regroupement et débordement « … », en commençant par le terminal, puis
    Docker et Sites.
-4. **Listes et tableaux** : densité homogène (hauteur de ligne, alignement des nombres à droite,
+5. **Adaptation à la largeur** : trois paliers, grilles `auto-fit`, colonnes en fractions,
+   panneaux latéraux repliables. Se fait après le gabarit, sinon on adapte deux fois.
+6. **Listes et tableaux** : densité homogène (hauteur de ligne, alignement des nombres à droite,
    actions toujours au même endroit), tri et filtre au même endroit dans toutes les vues.
-5. **Vocabulaire et micro-copie** : lexique appliqué, infobulles revues, messages d'erreur qui
+7. **Vocabulaire et micro-copie** : lexique appliqué, infobulles revues, messages d'erreur qui
    disent quoi faire.
 
 ## 3. À vérifier avant de commencer
@@ -103,4 +163,5 @@ Chaque phase est indépendante et livrable seule.
   Fichiers), Docker, Bases de données, Sécurité.
 - Tester en thème clair autant qu'en thème sombre : les deux jeux de couleurs existent
   ([index.css](../apps/desktop/src/index.css)) mais le clair est peu éprouvé.
-- Vérifier à 1280 px de large : c'est là que les barres d'outils débordent.
+- Vérifier chaque écran à 1100, 1440 et 1920 px : c'est en dessous de ~1100 px que les barres
+  d'outils débordent, et au-delà de ~1700 px que les tableaux s'étirent dans le vide.
