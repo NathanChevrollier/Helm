@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "pnpm --filter helm-desktop tauri dev",
     "build": "pnpm --filter helm-desktop tauri build",
+    "release": "node scripts/release.mjs",
     "build:agent": "cargo zigbuild -p helmd --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl",
     "typecheck": "pnpm --filter helm-desktop exec tsc --noEmit",
     "test": "cargo test --workspace && pnpm --filter helm-desktop test",

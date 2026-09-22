@@ -4,6 +4,23 @@ Logiciel desktop (Windows / macOS / Linux) pour gérer, naviguer et surveiller u
 terminal SSH, fichiers, monitoring, Docker et sites nginx réunis dans une seule app.
 Tout passe par SSH : aucun panneau web ni port supplémentaire n'est ouvert sur le serveur.
 
+## Téléchargement
+
+Les installeurs sont sur la page [Releases](https://github.com/NathanChevrollier/Helm/releases/latest) :
+
+| Système | Fichier |
+| --- | --- |
+| Windows 10/11 | `Helm_x.y.z_x64-setup.exe` |
+| macOS Apple Silicon | `Helm_x.y.z_aarch64.dmg` |
+| macOS Intel | `Helm_x.y.z_x64.dmg` |
+| Linux | `.AppImage` (mises à jour automatiques), `.deb` ou `.rpm` |
+
+Une fois installé, Helm vérifie au démarrage si une nouvelle version existe et propose de l'installer (Réglages → Préférences → Mises à jour). Les mises à jour sont signées : une version altérée est refusée.
+
+**Windows** : l'installeur n'est pas signé par un certificat, SmartScreen affiche « Windows a protégé votre ordinateur » → *Informations complémentaires* → *Exécuter quand même*.
+
+**macOS** : l'app n'est pas notariée par Apple. Au premier lancement, macOS refuse de l'ouvrir : *Réglages Système* → *Confidentialité et sécurité* → *Ouvrir quand même*. Si macOS indique que l'app « est endommagée », lancer une fois `xattr -dr com.apple.quarantine /Applications/Helm.app` dans le Terminal.
+
 ## Fonctionnalités
 
 | Section | Ce qu'elle fait |
@@ -91,6 +108,16 @@ cargo run -p helm-core --example nginx_smoke  # application sûre nginx (valide,
 
 Le faux VPS a son propre démon Docker (Docker-in-Docker) : il ne voit jamais les conteneurs de ta machine. Il embarque 3 applications de démo : `demo-app`, `whoami` (port 8082 exposé) et `demo-db` (MariaDB, mot de passe root `demo`). Pour tout supprimer : `docker compose -f testenv/docker-compose.yml down -v`.
 
-## CI
+## CI et releases
 
-GitHub Actions déroule les étapes suivantes : typecheck, `cargo fmt`, `clippy -D warnings` et tests. Il compile ensuite l'agent (zig) et produit les installeurs Windows (MSI/NSIS), macOS (DMG) et Linux (deb, AppImage, rpm).
+À chaque push et pull request, GitHub Actions ([ci.yml](.github/workflows/ci.yml)) lance typecheck, tests front, `cargo fmt`, `clippy -D warnings` (Linux et Windows), tests Rust, audit des dépendances, tests de bout en bout contre les faux VPS, puis compile l'agent (zig).
+
+Pour publier une version :
+
+```sh
+pnpm release 0.2.0
+```
+
+Le script met la version à jour (Cargo, app, Tauri), crée le commit `chore(release): v0.2.0` et le tag `v0.2.0`, puis les pousse. Le tag déclenche [release.yml](.github/workflows/release.yml) : CI complète, release brouillon avec notes générées depuis les commits, installeurs Windows (NSIS), macOS (arm64 et Intel) et Linux (AppImage, deb, rpm) signés pour la mise à jour, puis publication avec `latest.json`. Un tag avec suffixe (`v0.2.0-beta.1`) donne une pré-release, ignorée par les mises à jour automatiques.
+
+La clé de signature des mises à jour est dans les secrets du dépôt (`TAURI_SIGNING_PRIVATE_KEY` et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) ; sa clé publique est dans `tauri.conf.json`. Si elle est perdue, les versions installées ne pourront plus se mettre à jour automatiquement.

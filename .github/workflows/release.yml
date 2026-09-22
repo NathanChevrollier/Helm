@@ -1,0 +1,120 @@
+name: Release
+
+# Déclenchée par un tag vX.Y.Z (voir `pnpm release`). Étapes : CI complète, release brouillon,
+# compilation et signature des installeurs sur les trois OS, puis publication. Le latest.json joint à
+# la release sert au module de mise à jour de l'app.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  draft:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Le tag correspond à la version de l'app
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          cargo=$(sed -n '/\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          pkg=$(jq -r .version apps/desktop/package.json)
+          echo "tag=$tag tauri=$conf cargo=$cargo package=$pkg"
+          [ "$tag" = "$conf" ] && [ "$tag" = "$cargo" ] && [ "$tag" = "$pkg" ] || { echo "::error::Versions différentes : utilise pnpm release $tag"; exit 1; }
+      - name: Release brouillon avec notes générées
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes --title "Helm $GITHUB_REF_NAME" $prerelease
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -1)
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --bundles nsis
+          - os: macos-latest
+            args: --target aarch64-apple-darwin
+            rust-target: aarch64-apple-darwin
+          - os: macos-latest
+            args: --target x86_64-apple-darwin
+            rust-target: x86_64-apple-darwin
+          # 22.04 : glibc plus ancienne, l'AppImage tourne sur davantage de distributions.
+          - os: ubuntu-22.04
+            args: --bundles deb,rpm,appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: helmd
+          path: target
+      - name: L'agent helmd est bien embarqué
+        shell: bash
+        run: |
+          for arch in x86_64 aarch64; do
+            f="target/$arch-unknown-linux-musl/release/helmd"
+            [ -s "$f" ] || { echo "::error::$f absent : l'app serait publiée sans agent"; exit 1; }
+          done
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust-target }}
+      - name: Dépendances système Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          args: ${{ matrix.args }}
+          updaterJsonPreferNsis: true
+
+  publish:
+    needs: [draft, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publication de la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" --jq '.assets[].name' | sort
+          gh api "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" --jq '.assets[].name' | grep -qx latest.json \
+            || { echo "::error::latest.json manquant : les mises à jour automatiques ne verraient pas cette version"; exit 1; }
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" -F draft=false

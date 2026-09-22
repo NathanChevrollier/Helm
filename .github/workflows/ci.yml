@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
+  # Appelé par release.yml : une release n'est publiée que si toute la CI passe.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
 
 jobs:
   check:
@@ -31,6 +39,17 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Clippy sous Windows : le code propre à Windows (import PuTTY, registre) n'est vérifié qu'ici.
+  check-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
   # Vulnérabilités connues dans les dépendances Rust et JavaScript.
   audit:
     runs-on: ubuntu-latest
@@ -41,9 +60,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: rustsec/audit-check@v2
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+      # Avis ignorés et justifiés dans .cargo/audit.toml ; les crates non maintenues restent des avertissements.
+      - run: cargo audit
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --prod --audit-level high
 
@@ -75,7 +96,7 @@ jobs:
           docker logs helm-test-vps | tail -50
           docker exec helm-test-debian tail -50 /var/log/auth.log
 
-  # Agent helmd : binaires Linux statiques (x86_64 et arm64), embarqués ensuite dans l'app.
+  # Agent helmd : binaires Linux statiques (x86_64 et arm64), embarqués ensuite dans l'app par release.yml.
   agent:
     needs: check
     runs-on: ubuntu-latest
@@ -86,7 +107,9 @@ jobs:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       - uses: mlugg/setup-zig@v2
-      - run: cargo install cargo-zigbuild --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
       - run: cargo zigbuild -p helmd --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
       - uses: actions/upload-artifact@v4
         with:
@@ -94,41 +117,4 @@ jobs:
           path: |
             target/x86_64-unknown-linux-musl/release/helmd
             target/aarch64-unknown-linux-musl/release/helmd
-
-  build:
-    needs: agent
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: helmd
-          path: target
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Dépendances système Tauri
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: helm-${{ matrix.os }}
-          path: |
-            target/release/bundle/**/*.msi
-            target/release/bundle/**/*.exe
-            target/release/bundle/**/*.dmg
-            target/release/bundle/**/*.deb
-            target/release/bundle/**/*.AppImage
-            target/release/bundle/**/*.rpm
+          if-no-files-found: error
