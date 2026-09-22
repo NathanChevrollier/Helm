@@ -181,6 +181,14 @@ export interface Diagnosis {
   publicIp: string | null;
 }
 
+/** Portion d'un gros fichier : `len` octets à partir de `offset`, sur `size` au total. */
+export interface TextWindow {
+  text: string;
+  offset: number;
+  len: number;
+  size: number;
+}
+
 /** Date de modification (s) et taille d'un fichier distant. */
 export interface FileStamp {
   mtime: number;
@@ -644,7 +652,12 @@ export const api = {
 
   fsHome: (serverId: string) => invoke<string>("fs_home", { serverId }),
   fsList: (serverId: string, path: string) => invoke<Listing>("fs_list", { serverId, path }),
-  fsRead: (serverId: string, path: string, sudo = false) => invoke<string>("fs_read", { serverId, path, sudo }),
+  /** Fichier entier (≤ 50 Mo), reçu en octets bruts. Erreurs `TOO_BIG:<taille>` et `NOT_UTF8` : utiliser `fsReadRange`. */
+  fsRead: async (serverId: string, path: string, sudo = false) =>
+    new TextDecoder().decode(await invoke<ArrayBuffer>("fs_read", { serverId, path, sudo })),
+  /** Portion d'un fichier en lecture seule (au plus 16 Mo). */
+  fsReadRange: (serverId: string, path: string, offset: number, len: number, sudo = false) =>
+    invoke<TextWindow>("fs_read_range", { serverId, path, offset, len, sudo }),
   /** Écrit un fichier ; avec `expected`, échoue (erreur `CONFLICT…`) s'il a changé entre-temps. Renvoie son nouvel état. */
   fsWrite: (serverId: string, path: string, content: string, sudo = false, expected: FileStamp | null = null) =>
     invoke<FileStamp | null>("fs_write", { serverId, path, content, sudo, expected }),

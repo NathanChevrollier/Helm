@@ -43,7 +43,22 @@ pub async fn fs_list(store: State<'_, Store>, sessions: State<'_, Sessions>, ser
     Ok(listing)
 }
 
-/// Lit un fichier texte. Avec `sudo`, passe par `cat` en root pour les fichiers système.
+/// Lit en root : taille du fichier sur la première ligne, puis `len` octets à partir de `offset`
+/// en base64 (les octets arrivent intacts, quel que soit l'encodage du fichier).
+async fn sudo_read(conn: &helm_core::Connection, pw: Option<&str>, path: &str, offset: u64, len: u64) -> Result<(u64, Vec<u8>), String> {
+    use base64::Engine;
+    let q = shell_quote(path);
+    let cmd = format!("stat -Lc %s -- {q} && tail -c +{} -- {q} | head -c {len} | base64 -w0", offset + 1);
+    let out = helm_core::ssh::long(conn.exec_sudo(&cmd, pw, None)).await.map_err(err)?.into_result().map_err(err)?.stdout;
+    let (size, b64) = out.split_once('\n').unwrap_or((&out, ""));
+    let size = size.trim().parse().map_err(|_| format!("taille illisible pour {path}"))?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).map_err(err)?;
+    Ok((size, bytes))
+}
+
+/// Lit un fichier texte entier pour l'éditeur, renvoyé en octets bruts (pas de JSON : un fichier
+/// de plusieurs dizaines de Mo arrive sans ré-encodage). Avec `sudo`, lecture en root.
+/// Erreurs `TOO_BIG:<taille>` et `NOT_UTF8` : l'interface bascule sur l'affichage par fenêtres.
 #[tauri::command]
 pub async fn fs_read(
     store: State<'_, Store>,
@@ -51,22 +66,41 @@ pub async fn fs_read(
     server_id: String,
     path: String,
     sudo: bool,
-) -> Result<String, String> {
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = if sudo {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        let (size, bytes) = sudo_read(&conn, pw.as_deref(), &path, 0, sftp::MAX_EDIT_SIZE + 1).await?;
+        if size > sftp::MAX_EDIT_SIZE {
+            return Err(format!("TOO_BIG:{size}"));
+        }
+        sftp::check_text(&bytes).map_err(err)?;
+        bytes
+    } else {
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        sftp::read_text(&sftp, &path).await.map_err(err)?
+    };
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Portion d'un fichier (gros fichiers, encodages autres que l'UTF-8), en lecture seule.
+#[tauri::command]
+pub async fn fs_read_range(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+    offset: u64,
+    len: u64,
+    sudo: bool,
+) -> Result<sftp::TextWindow, String> {
+    let len = len.min(sftp::MAX_WINDOW);
     if sudo {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        // Mêmes garde-fous que la lecture SFTP : taille limitée, fichiers binaires refusés.
-        let cmd = format!("head -c {} -- {}", sftp::MAX_EDIT_SIZE + 1, shell_quote(&path));
-        let text = conn.exec_sudo(&cmd, pw.as_deref(), None).await.map_err(err)?.into_result().map_err(err)?.stdout;
-        if text.len() as u64 > sftp::MAX_EDIT_SIZE {
-            return Err("fichier trop volumineux pour l'éditeur (> 5 Mo)".into());
-        }
-        if text.contains('\0') {
-            return Err("fichier binaire : impossible de l'ouvrir dans l'éditeur".into());
-        }
-        return Ok(text);
+        let (size, bytes) = sudo_read(&conn, pw.as_deref(), &path, offset, len).await?;
+        return sftp::text_window(&bytes, offset.min(size), size).map_err(err);
     }
     let sftp = sessions.sftp(&store, &server_id).await?;
-    sftp::read_text(&sftp, &path).await.map_err(err)
+    sftp::read_range(&sftp, &path, offset, len).await.map_err(err)
 }
 
 /// Date de modification et taille d'un fichier, pour détecter une modification concurrente.

@@ -5,14 +5,17 @@ use std::path::{Path, PathBuf};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags};
 use serde::Serialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::ssh::shell_quote;
 use crate::{Connection, Error, Result};
 
 const CHUNK: usize = 256 * 1024;
-/// Taille maximale d'un fichier ouvert dans l'éditeur.
-pub const MAX_EDIT_SIZE: u64 = 5 * 1024 * 1024;
+/// Taille maximale d'un fichier ouvert en entier dans l'éditeur. Au-delà, il s'affiche en
+/// lecture seule par fenêtres de `MAX_WINDOW` octets (voir [`read_range`]).
+pub const MAX_EDIT_SIZE: u64 = 50 * 1024 * 1024;
+/// Taille maximale d'une fenêtre de lecture d'un gros fichier.
+pub const MAX_WINDOW: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -145,21 +148,78 @@ pub async fn list(sftp: &SftpSession, path: &str) -> Result<Listing> {
     Ok(Listing { path, entries })
 }
 
-/// Lit un fichier texte pour l'éditeur. Refuse les fichiers trop gros ou binaires.
-pub async fn read_text(sftp: &SftpSession, path: &str) -> Result<String> {
+/// Lit un fichier texte pour l'éditeur, en octets (UTF-8 vérifié). Erreurs reconnues par l'interface :
+/// `TOO_BIG:<taille>` (à afficher par fenêtres) et `NOT_UTF8` (à afficher en lecture seule).
+pub async fn read_text(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
     let meta = sftp.metadata(path).await.map_err(sftp_err)?;
-    if meta.size.unwrap_or(0) > MAX_EDIT_SIZE {
-        return Err(Error::Other("fichier trop volumineux pour l'éditeur (> 5 Mo)".into()));
+    let size = meta.size.unwrap_or(0);
+    if size > MAX_EDIT_SIZE {
+        return Err(Error::Other(format!("TOO_BIG:{size}")));
     }
     let bytes = sftp.read(path).await.map_err(sftp_err)?;
-    decode_text(bytes)
+    check_text(&bytes)?;
+    Ok(bytes)
 }
 
-pub fn decode_text(bytes: Vec<u8>) -> Result<String> {
+/// Refuse les fichiers binaires ; signale les fichiers texte dans un autre encodage que l'UTF-8.
+pub fn check_text(bytes: &[u8]) -> Result<()> {
     if bytes.iter().take(8192).any(|&b| b == 0) {
         return Err(Error::Other("fichier binaire : impossible de l'ouvrir dans l'éditeur".into()));
     }
-    String::from_utf8(bytes).map_err(|_| Error::Other("fichier non UTF-8 : impossible de l'ouvrir dans l'éditeur".into()))
+    if std::str::from_utf8(bytes).is_err() {
+        return Err(Error::Other("NOT_UTF8".into()));
+    }
+    Ok(())
+}
+
+/// Une portion d'un fichier, décodée pour l'affichage en lecture seule.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextWindow {
+    pub text: String,
+    /// Position du premier octet affiché.
+    pub offset: u64,
+    /// Nombre d'octets lus.
+    pub len: u64,
+    /// Taille totale du fichier.
+    pub size: u64,
+}
+
+/// Décode une portion de fichier pour l'affichage (jamais réenregistrée). UTF-8 si la portion
+/// l'est (hors caractères coupés aux deux bords), sinon Latin-1 : vieux fichiers de config ou journaux.
+pub fn text_window(bytes: &[u8], offset: u64, size: u64) -> Result<TextWindow> {
+    if bytes.iter().take(8192).any(|&b| b == 0) {
+        return Err(Error::Other("fichier binaire : impossible de l'afficher".into()));
+    }
+    // Début coupé au milieu d'un caractère : au plus 3 octets de continuation.
+    let skip = bytes.iter().take(3).take_while(|&&b| b & 0xC0 == 0x80).count();
+    let utf8 = match std::str::from_utf8(&bytes[skip..]) {
+        Ok(_) => true,
+        // Seule la fin est incomplète (caractère coupé par la fenêtre).
+        Err(e) => e.error_len().is_none(),
+    };
+    let text = if utf8 { String::from_utf8_lossy(bytes).into_owned() } else { bytes.iter().map(|&b| b as char).collect() };
+    Ok(TextWindow { text, offset, len: bytes.len() as u64, size })
+}
+
+/// Lit `len` octets (au plus [`MAX_WINDOW`]) à partir de `offset`.
+pub async fn read_range(sftp: &SftpSession, path: &str, offset: u64, len: u64) -> Result<TextWindow> {
+    let size = sftp.metadata(path).await.map_err(sftp_err)?.size.unwrap_or(0);
+    let offset = offset.min(size);
+    let len = len.min(MAX_WINDOW).min(size - offset) as usize;
+    let mut file = sftp.open(path).await.map_err(sftp_err)?;
+    file.seek(std::io::SeekFrom::Start(offset)).await.map_err(sftp_err)?;
+    let mut buf = vec![0u8; len];
+    let mut got = 0;
+    while got < len {
+        let n = file.read(&mut buf[got..]).await.map_err(sftp_err)?;
+        if n == 0 {
+            break;
+        }
+        got += n;
+    }
+    buf.truncate(got);
+    text_window(&buf, offset, size)
 }
 
 /// Écrit un fichier en conservant ses permissions, son propriétaire et ses liens.
@@ -496,6 +556,20 @@ async fn copy_file(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn text_windows() {
+        // Caractères coupés aux bords d'une fenêtre UTF-8 : pas de bascule en Latin-1.
+        let s = "é".repeat(10);
+        let w = text_window(&s.as_bytes()[1..s.len() - 1], 1, 20).unwrap();
+        assert_eq!(w.text.chars().filter(|&c| c == 'é').count(), 8);
+        // Fichier Latin-1.
+        assert_eq!(text_window(b"caf\xe9 cr\xe8me", 0, 10).unwrap().text, "café crème");
+        assert!(text_window(b"a\0b", 0, 3).is_err());
+        assert!(check_text("déjà".as_bytes()).is_ok());
+        assert_eq!(check_text(b"caf\xe9").unwrap_err().to_string(), "NOT_UTF8");
+    }
+
     use super::*;
 
     #[test]
