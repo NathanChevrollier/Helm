@@ -703,68 +703,9 @@ export default function TerminalPane({
   };
 
   return (
-    <div className="group/term relative h-full w-full">
-      <div ref={host} className="h-full w-full overflow-hidden bg-bg" />
-      <div className={`absolute top-1 right-3 z-10 flex items-center gap-1 ${searching || isRecording ? "" : "opacity-0 group-hover/term:opacity-100"}`}>
-        {isRecording && (
-          <span className="flex items-center gap-1 rounded bg-danger/85 px-1.5 py-0.5 text-[10px] font-medium text-white">
-            <Circle size={8} fill="currentColor" /> REC
-          </span>
-        )}
-        {searching ? (
-          <span className="flex items-center gap-1 rounded-md border border-border bg-panel px-1.5 py-1 shadow-lg">
-            <input
-              ref={searchInput}
-              autoFocus
-              className="w-48 bg-transparent text-xs outline-none placeholder:text-muted/60"
-              placeholder="Rechercher (Entrée, Maj+Entrée)"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") find(e.shiftKey);
-                if (e.key === "Escape") closeSearch();
-              }}
-            />
-            <button className="text-muted hover:text-fg" title="Fermer (Échap)" onClick={closeSearch}>
-              <X size={12} />
-            </button>
-          </span>
-        ) : (
-          <button className="rounded bg-panel/90 p-1 text-muted hover:text-fg" title={`Rechercher dans le terminal (${display(shortcutOf("termSearch"))})`} onClick={() => openSearchRef.current()}>
-            <Search size={13} />
-          </button>
-        )}
-        {!join && (
-          <button
-            className={`rounded bg-panel/90 p-1 hover:text-fg ${share ? "text-accent" : "text-muted"}`}
-            title={share ? "Terminal partagé : cliquer pour arrêter" : "Partager ce terminal avec quelqu'un"}
-            onClick={() => (share ? void stopShare() : setSharePicker(true))}
-          >
-            <Share2 size={13} />
-          </button>
-        )}
-        <button
-          className={`rounded bg-panel/90 p-1 hover:text-fg ${isRecording ? "text-danger" : "text-muted"}`}
-          title={isRecording ? "Arrêter et enregistrer la session" : "Enregistrer la session (asciicast)"}
-          onClick={() => void toggleRecording()}
-        >
-          {isRecording ? <Square size={13} fill="currentColor" /> : <Circle size={13} />}
-        </button>
-      </div>
-      {dropTarget !== false && (
-        <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10">
-          <span className="flex items-center gap-2 rounded-md bg-panel px-3 py-2 text-sm shadow-lg">
-            <Upload size={15} className="text-accent" />
-            {dropTarget === null ? "Lecture du dossier courant…" : dropTarget ? <>Déposer pour envoyer dans <span className="font-mono">{dropTarget}</span></> : "Déposer pour envoyer sur le serveur"}
-          </span>
-        </div>
-      )}
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.selection)} onClose={() => {
-        setMenu(null);
-        termRef.current?.focus();
-      }} />}
+    <div className="group/term flex h-full w-full flex-col">
       {share && (
-        <div className="absolute top-0 right-0 left-0 z-10 flex items-center justify-center gap-2 bg-accent/85 px-3 py-0.5 text-[11px] font-medium text-accent-fg">
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-accent/85 px-3 py-0.5 text-[11px] font-medium text-accent-fg">
           <Users size={12} />
           Partagé ({share.mode === "control" ? "avec le contrôle" : "lecture seule"})
           <button className="underline" onClick={() => void writeClipboard(share.invite)}>
@@ -776,24 +717,85 @@ export default function TerminalPane({
         </div>
       )}
       {join && joinMode === "view" && (
-        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 flex items-center justify-center gap-2 bg-panel/90 px-3 py-0.5 text-[11px] text-muted">
+        <div className="pointer-events-none flex shrink-0 items-center justify-center gap-2 bg-panel/90 px-3 py-0.5 text-[11px] text-muted">
           <EyeOff size={12} /> Lecture seule : la personne qui partage garde le contrôle
         </div>
       )}
-      {sharePicker && (
-        <SharePicker
-          onClose={() => setSharePicker(false)}
-          onPick={(mode) => {
-            setSharePicker(false);
-            void startShare(mode);
-          }}
-        />
-      )}
       {broadcasting && (
-        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 bg-danger/85 px-3 py-0.5 text-center text-[11px] font-medium text-white">
+        <div className="pointer-events-none shrink-0 bg-danger/85 px-3 py-0.5 text-center text-[11px] font-medium text-white">
           Saisie diffusée à {broadcastCount} terminaux
         </div>
       )}
+      <div className="relative min-h-0 w-full flex-1">
+        <div ref={host} className="h-full w-full overflow-hidden bg-bg" />
+        <div className={`absolute top-1 right-3 z-10 flex items-center gap-1 ${searching || isRecording ? "" : "opacity-0 group-hover/term:opacity-100"}`}>
+          {isRecording && (
+            <span className="flex items-center gap-1 rounded bg-danger/85 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <Circle size={8} fill="currentColor" /> REC
+            </span>
+          )}
+          {searching ? (
+            <span className="flex items-center gap-1 rounded-md border border-border bg-panel px-1.5 py-1 shadow-lg">
+              <input
+                ref={searchInput}
+                autoFocus
+                className="w-48 bg-transparent text-xs outline-none placeholder:text-muted/60"
+                placeholder="Rechercher (Entrée, Maj+Entrée)"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") find(e.shiftKey);
+                  if (e.key === "Escape") closeSearch();
+                }}
+              />
+              <button className="text-muted hover:text-fg" title="Fermer (Échap)" onClick={closeSearch}>
+                <X size={12} />
+              </button>
+            </span>
+          ) : (
+            <button className="rounded bg-panel/90 p-1 text-muted hover:text-fg" title={`Rechercher dans le terminal (${display(shortcutOf("termSearch"))})`} onClick={() => openSearchRef.current()}>
+              <Search size={13} />
+            </button>
+          )}
+          {!join && (
+            <button
+              className={`rounded bg-panel/90 p-1 hover:text-fg ${share ? "text-accent" : "text-muted"}`}
+              title={share ? "Terminal partagé : cliquer pour arrêter" : "Partager ce terminal avec quelqu'un"}
+              onClick={() => (share ? void stopShare() : setSharePicker(true))}
+            >
+              <Share2 size={13} />
+            </button>
+          )}
+          <button
+            className={`rounded bg-panel/90 p-1 hover:text-fg ${isRecording ? "text-danger" : "text-muted"}`}
+            title={isRecording ? "Arrêter et enregistrer la session" : "Enregistrer la session (asciicast)"}
+            onClick={() => void toggleRecording()}
+          >
+            {isRecording ? <Square size={13} fill="currentColor" /> : <Circle size={13} />}
+          </button>
+        </div>
+        {dropTarget !== false && (
+          <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10">
+            <span className="flex items-center gap-2 rounded-md bg-panel px-3 py-2 text-sm shadow-lg">
+              <Upload size={15} className="text-accent" />
+              {dropTarget === null ? "Lecture du dossier courant…" : dropTarget ? <>Déposer pour envoyer dans <span className="font-mono">{dropTarget}</span></> : "Déposer pour envoyer sur le serveur"}
+            </span>
+          </div>
+        )}
+        {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.selection)} onClose={() => {
+          setMenu(null);
+          termRef.current?.focus();
+        }} />}
+        {sharePicker && (
+          <SharePicker
+            onClose={() => setSharePicker(false)}
+            onPick={(mode) => {
+              setSharePicker(false);
+              void startShare(mode);
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
