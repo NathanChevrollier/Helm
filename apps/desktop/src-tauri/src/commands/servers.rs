@@ -97,6 +97,18 @@ pub async fn server_save(
     Ok(id)
 }
 
+/// Range des serveurs dans un dossier (`None` : hors dossier). Contrairement à `server_save`,
+/// les connexions en cours ne sont pas coupées : seul le classement change.
+#[tauri::command]
+pub fn servers_set_group(store: State<'_, Store>, ids: Vec<String>, group: Option<String>) -> Result<(), String> {
+    let group = group.map(|g| g.trim().to_string()).filter(|g| !g.is_empty());
+    store.write(|d| {
+        for s in d.servers.iter_mut().filter(|s| ids.contains(&s.id)) {
+            s.group = group.clone();
+        }
+    })
+}
+
 #[tauri::command]
 pub async fn server_delete(store: State<'_, Store>, sessions: State<'_, Sessions>, id: String) -> Result<(), String> {
     sessions.disconnect(&id).await;

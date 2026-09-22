@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Download, IdCard, KeyRound, Link2Off, Monitor, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { Download, FolderInput, FolderPlus, IdCard, KeyRound, Link2Off, Monitor, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { forgetCached } from "../lib/cache";
 import { AUTH_LABELS, IdentitiesPanel, IdentitySuggestions, useIdentities } from "../components/Identities";
 import { DesktopsPanel } from "../components/RemoteDesktops";
+import { askFolderName, FolderSection } from "../components/Folders";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
+import { startDrag } from "../lib/drag";
 
 const SOURCES = [
   ["putty", "PuTTY"],
@@ -14,6 +17,62 @@ const SOURCES = [
 ] as const;
 
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6"];
+
+/** Range des serveurs dans un dossier puis relit la liste. */
+async function moveServers(ids: string[], folder: string | null) {
+  const { notify, refreshServers } = useApp.getState();
+  try {
+    await api.serversSetGroup(ids, folder);
+    await refreshServers();
+  } catch (e) {
+    notify(errorMessage(e), "error");
+  }
+}
+
+/** Dossiers de serveurs : ceux créés (même vides) et ceux portés par les profils, triés. */
+function useServerFolders(): string[] {
+  const servers = useApp((s) => s.servers);
+  const created = useApp((s) => s.folders.servers);
+  return [...new Set([...created, ...servers.map((s) => s.group ?? "").filter(Boolean)])].sort((a, b) => a.localeCompare(b, "fr"));
+}
+
+/** Grille des serveurs, rangés par dossier (glisser une carte sur un dossier pour l'y déplacer). */
+function ServerFolders({ onEdit }: { onEdit: (s: ServerView) => void }) {
+  const servers = useApp((s) => s.servers);
+  const setFolders = useApp((s) => s.setFolders);
+  const folders = useServerFolders();
+  const inFolder = (name: string) => servers.filter((s) => (s.group ?? "") === name);
+
+  const rename = async (name: string) => {
+    const next = await askFolderName(`Renommer « ${name} »`, name);
+    if (!next || next === name) return;
+    setFolders((f) => ({ ...f, servers: [...f.servers.filter((x) => x !== name && x !== next), next], collapsed: f.collapsed.map((k) => (k === `servers:${name}` ? `servers:${next}` : k)) }));
+    await moveServers(inFolder(name).map((s) => s.id), next);
+  };
+  const remove = async (name: string) => {
+    setFolders((f) => ({ ...f, servers: f.servers.filter((x) => x !== name) }));
+    const ids = inFolder(name).map((s) => s.id);
+    if (ids.length) await moveServers(ids, null);
+  };
+
+  return (
+    <div className="flex flex-col gap-5">
+      {[...folders, ""].map((name) => {
+        const list = inFolder(name);
+        if (!name && !list.length && folders.length) return null;
+        return (
+          <FolderSection key={name || "-"} collapseKey={`servers:${name}`} name={name} count={list.length} onRename={() => void rename(name)} onDelete={() => void remove(name)}>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+              {list.map((s) => (
+                <ServerCard key={s.id} server={s} folders={folders} onEdit={() => onEdit(s)} />
+              ))}
+            </div>
+          </FolderSection>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function ServersView() {
   const servers = useApp((s) => s.servers);
@@ -53,6 +112,15 @@ export default function ServersView() {
         </nav>
         {tab === "servers" && (
           <div className="flex gap-2 self-center pb-3">
+            <Button
+              icon={<FolderPlus size={14} />}
+              onClick={async () => {
+                const name = await askFolderName("Nouveau dossier de serveurs");
+                if (name) useApp.getState().setFolders((f) => ({ ...f, servers: [...new Set([...f.servers, name])] }));
+              }}
+            >
+              Nouveau dossier
+            </Button>
             <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
               Importer (PuTTY, OpenSSH)
             </Button>
@@ -73,11 +141,7 @@ export default function ServersView() {
             Ajoute ton VPS, ou importe directement tes sessions PuTTY existantes.
           </EmptyState>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
-            {servers.map((s) => (
-              <ServerCard key={s.id} server={s} onEdit={() => setEditing(s)} />
-            ))}
-          </div>
+          <ServerFolders onEdit={setEditing} />
         )}
       </div>
 
@@ -96,11 +160,24 @@ export default function ServersView() {
   );
 }
 
-function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void }) {
+function ServerCard({ server, folders, onEdit }: { server: ServerView; folders: string[]; onEdit: () => void }) {
   const { openTab, setActiveServer, activeServerId, refreshServers, notify, ask } = useAppPick("openTab", "setActiveServer", "activeServerId", "refreshServers", "notify", "ask");
   const [busy, setBusy] = useState(false);
   const active = server.id === activeServerId;
   const identity = useIdentities((s) => s.list.find((i) => i.id === server.identityId));
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const moveItems: MenuItem[] = [
+    ...folders.filter((f) => f !== (server.group ?? "")).map((f) => ({ label: f, icon: <FolderInput size={14} />, onClick: () => void moveServers([server.id], f) })),
+    ...(server.group ? [{ label: "Sortir du dossier", onClick: () => void moveServers([server.id], null) }] : []),
+    {
+      label: "Nouveau dossier…",
+      icon: <FolderPlus size={14} />,
+      onClick: async () => {
+        const name = await askFolderName("Nouveau dossier");
+        if (name) await moveServers([server.id], name);
+      },
+    },
+  ];
 
   const connect = async () => {
     setBusy(true);
@@ -126,7 +203,13 @@ function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void
     <div
       className={`group rounded-lg border bg-panel p-4 transition-colors ${active ? "border-accent/60" : "border-border hover:border-muted/40"}`}
       onClick={() => setActiveServer(server.id)}
+      onMouseDown={(e) => startDrag(e, server.name, (folder) => folder !== (server.group ?? "") && void moveServers([server.id], folder || null))}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
     >
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={moveItems} onClose={() => setMenu(null)} />}
       <div className="mb-3 flex items-start gap-3">
         <div className="mt-1 size-2.5 shrink-0 rounded-full" style={{ background: server.color ?? COLORS[0] }} />
         <div className="min-w-0 flex-1">
@@ -206,6 +289,7 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
   const others = useApp((s) => s.servers).filter((s) => s.id !== server?.id);
   const identities = useIdentities((s) => s.list);
   const identity = identities.find((i) => i.id === p.identityId);
+  const folders = useServerFolders();
 
   const save = async () => {
     setSaving(true);
@@ -311,8 +395,13 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
           </Field>
         </div>
         <div className="col-span-3">
-          <Field label="Groupe (optionnel)">
-            <Input value={p.group ?? ""} placeholder="prod, perso…" onChange={(e) => set("group", e.target.value || null)} />
+          <Field label="Dossier (optionnel)">
+            <Input list="helm-server-folders" value={p.group ?? ""} placeholder="prod, perso…" onChange={(e) => set("group", e.target.value || null)} />
+            <datalist id="helm-server-folders">
+              {folders.map((f) => (
+                <option key={f} value={f} />
+              ))}
+            </datalist>
           </Field>
         </div>
         {others.length > 0 && (

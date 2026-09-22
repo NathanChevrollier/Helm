@@ -85,6 +85,13 @@ body {
   background: var(--color-term);
 }
 
+/* Cible d'un glisser-déposer interne (lib/drag.ts). */
+[data-drop-over] {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  background-color: var(--color-hover);
+}
+
 /* Le rendu WebGL ne repeint pas le fond du viewport quand le thème change : on le suit ici. */
 .xterm .xterm-viewport {
   background-color: var(--color-term) !important;

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Box, Container as ContainerIcon, FileCode2, FileSearch, Layers, Pause, Play, RefreshCw, RotateCw, ScrollText,
+  Box, ChevronDown, ChevronRight, Container as ContainerIcon, FileCode2, FileSearch, Folder, FolderInput, FolderOpen, FolderPlus,
+  Layers, Pause, Play, RefreshCw, RotateCw, ScrollText,
   Cable, GitBranch, Lock, Rocket, Square, SquareTerminal, Trash2, UploadCloud,
 } from "lucide-react";
 import {
@@ -13,6 +14,9 @@ import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from 
 import { usePolling } from "../lib/poll";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
+import { askFolderName, toggleCollapsed } from "../components/Folders";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
+import { startDrag } from "../lib/drag";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
@@ -27,6 +31,40 @@ export default function DockerView() {
   const serverId = useApp((s) => s.activeServerId);
   if (!serverId) return <EmptyState icon={<ContainerIcon size={40} />} title="Aucun serveur sélectionné" />;
   return <Docker key={serverId} serverId={serverId} />;
+}
+
+/**
+ * Dossiers de conteneurs d'un serveur : ceux créés (même vides) et ceux déjà attribués.
+ * Le classement est propre à ce PC (il ne change rien sur le serveur).
+ */
+function useContainerFolders(serverId: string) {
+  const assigned = useApp((s) => s.folders.containers[serverId]) ?? {};
+  const created = useApp((s) => s.folders.containerFolders[serverId]) ?? [];
+  const setFolders = useApp((s) => s.setFolders);
+  const names = [...new Set([...created, ...Object.values(assigned)])].filter(Boolean).sort((a, b) => a.localeCompare(b, "fr"));
+
+  const move = (containers: string[], folder: string | null) =>
+    setFolders((f) => {
+      const map = { ...(f.containers[serverId] ?? {}) };
+      for (const name of containers) {
+        if (folder) map[name] = folder;
+        else delete map[name];
+      }
+      return { ...f, containers: { ...f.containers, [serverId]: map }, containerFolders: folder ? { ...f.containerFolders, [serverId]: [...new Set([...created, folder])] } : f.containerFolders };
+    });
+  const create = (name: string) => setFolders((f) => ({ ...f, containerFolders: { ...f.containerFolders, [serverId]: [...new Set([...created, name])] } }));
+  const rename = (from: string, to: string) =>
+    setFolders((f) => {
+      const map = Object.fromEntries(Object.entries(f.containers[serverId] ?? {}).map(([k, v]) => [k, v === from ? to : v]));
+      const list = [...new Set([...(f.containerFolders[serverId] ?? []).filter((x) => x !== from), to])];
+      return { ...f, containers: { ...f.containers, [serverId]: map }, containerFolders: { ...f.containerFolders, [serverId]: list } };
+    });
+  const remove = (name: string) =>
+    setFolders((f) => {
+      const map = Object.fromEntries(Object.entries(f.containers[serverId] ?? {}).filter(([, v]) => v !== name));
+      return { ...f, containers: { ...f.containers, [serverId]: map }, containerFolders: { ...f.containerFolders, [serverId]: (f.containerFolders[serverId] ?? []).filter((x) => x !== name) } };
+    });
+  return { names, folderOf: (container: string) => assigned[container] ?? "", move, create, rename, remove };
 }
 
 function stateTone(state: string) {
@@ -119,6 +157,9 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
   const [busy, setBusy] = useState<string | null>(null);
   const [inspect, setInspect] = useState<{ name: string; json: string } | null>(null);
   const [restrict, setRestrict] = useState<{ project: ComposeProject; port: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; container: string } | null>(null);
+  const collapsed = useApp((s) => s.folders.collapsed);
+  const folders = useContainerFolders(serverId);
 
   // `docker stats` prend souvent 2 à 3 s : le hook évite d'empiler les appels.
   usePolling(
@@ -153,9 +194,38 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
     }
   };
 
+  // Un dossier par section, plus les conteneurs hors dossier à la fin.
+  const sections = [...folders.names, ""].map((name) => ({ name, items: rows.filter((c) => folders.folderOf(c.name) === name) })).filter((s) => s.name || s.items.length || !folders.names.length);
+
+  const moveMenu = (container: string): MenuItem[] => [
+    ...folders.names.filter((f) => f !== folders.folderOf(container)).map((f) => ({ label: f, icon: <FolderInput size={14} />, onClick: () => folders.move([container], f) })),
+    ...(folders.folderOf(container) ? [{ label: "Sortir du dossier", onClick: () => folders.move([container], null) }] : []),
+    {
+      label: "Nouveau dossier…",
+      icon: <FolderPlus size={14} />,
+      onClick: async () => {
+        const name = await askFolderName("Nouveau dossier de conteneurs");
+        if (name) folders.move([container], name);
+      },
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
-      <Input className="!w-72" placeholder="Filtrer (nom, image, projet)…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="flex items-center gap-2">
+        <Input className="!w-72" placeholder="Filtrer (nom, image, projet)…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <Button
+          size="sm"
+          icon={<FolderPlus size={13} />}
+          onClick={async () => {
+            const name = await askFolderName("Nouveau dossier de conteneurs");
+            if (name) folders.create(name);
+          }}
+        >
+          Nouveau dossier
+        </Button>
+        <span className="text-xs text-muted">Glisse un conteneur sur un dossier pour l'y ranger (classement local, rien ne change sur le serveur).</span>
+      </div>
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full text-sm">
           <thead className="bg-panel text-left text-xs text-muted">
@@ -169,12 +239,55 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
               <th className="w-56" />
             </tr>
           </thead>
-          <tbody>
-            {rows.map((c) => {
+          {sections.map((section) => {
+            const key = `docker:${serverId}:${section.name}`;
+            const folded = collapsed.includes(key);
+            return (
+          <tbody key={section.name || "-"}>
+            {(folders.names.length > 0 || section.name) && (
+              <tr className="border-t border-border/50 bg-hover-soft" data-drop={section.name}>
+                <td colSpan={7} className="px-2 py-1.5">
+                  <span className="flex items-center gap-2 text-xs">
+                    <button className="flex items-center gap-2" onClick={() => toggleCollapsed(key)}>
+                      {folded ? <ChevronRight size={13} className="text-muted" /> : <ChevronDown size={13} className="text-muted" />}
+                      {section.name ? <Folder size={13} className="text-accent" /> : <FolderOpen size={13} className="text-muted" />}
+                      <span className={section.name ? "font-medium" : "text-muted"}>{section.name || "Sans dossier"}</span>
+                      <span className="text-muted">{section.items.length}</span>
+                    </button>
+                    {section.name && (
+                      <span className="flex gap-1 text-muted">
+                        <button
+                          className="hover:text-fg"
+                          title="Renommer"
+                          onClick={async () => {
+                            const next = await askFolderName(`Renommer « ${section.name} »`, section.name);
+                            if (next && next !== section.name) folders.rename(section.name, next);
+                          }}
+                        >
+                          renommer
+                        </button>
+                        <button className="hover:text-fg" title="Supprimer le dossier" onClick={() => folders.remove(section.name)}>
+                          supprimer
+                        </button>
+                      </span>
+                    )}
+                  </span>
+                </td>
+              </tr>
+            )}
+            {!folded && section.items.map((c) => {
               const s = stats[c.id];
               const isRunning = c.state === "running";
               return (
-                <tr key={c.id} className="group border-t border-border/50 hover:bg-hover-soft">
+                <tr
+                  key={c.id}
+                  className="group border-t border-border/50 hover:bg-hover-soft"
+                  onMouseDown={(e) => startDrag(e, c.name, (folder) => folders.move([c.name], folder || null))}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, container: c.name });
+                  }}
+                >
                   <td className="px-3 py-2">
                     <div className="font-medium">{c.name}</div>
                     {c.composeProject && <div className="text-xs text-muted">{c.composeProject} · {c.composeService}</div>}
@@ -267,8 +380,11 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
               );
             })}
           </tbody>
+            );
+          })}
         </table>
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={moveMenu(menu.container)} onClose={() => setMenu(null)} />}
       {restrict && (
         <RestrictPortDialog
           serverId={serverId}

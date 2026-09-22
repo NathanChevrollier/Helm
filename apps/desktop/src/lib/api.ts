@@ -693,6 +693,8 @@ export const api = {
   saveServer: (profile: ServerProfile, secretsInput: SecretsInput) =>
     invoke<string>("server_save", { profile, secretsInput }),
   deleteServer: (id: string) => invoke<void>("server_delete", { id }),
+  /** Range des serveurs dans un dossier (`null` : hors dossier), sans couper leurs connexions. */
+  serversSetGroup: (ids: string[], group: string | null) => invoke<void>("servers_set_group", { ids, group }),
   trustHost: (id: string, fingerprint: string) => invoke<void>("host_trust", { id, fingerprint }),
   connect: (id: string, userInitiated = false) => invoke<ConnectInfo>("ssh_connect", { id, userInitiated }),
   disconnect: (id: string) => invoke<void>("ssh_disconnect", { id }),

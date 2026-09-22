@@ -77,6 +77,7 @@ pub fn run() {
             servers::servers_list,
             servers::server_save,
             servers::server_delete,
+            servers::servers_set_group,
             servers::host_trust,
             servers::ssh_connect,
             servers::ssh_disconnect,

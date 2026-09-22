@@ -84,7 +84,22 @@ interface Persisted {
   settings: Settings;
   recent: string[];
   bookmarks?: Record<string, Bookmark[]>;
+  folders?: Folders;
 }
+
+/** Dossiers de classement (serveurs, conteneurs Docker), propres à ce PC. */
+export interface Folders {
+  /** Dossiers de serveurs créés, même vides (le dossier d'un serveur est son champ `group`). */
+  servers: string[];
+  /** Par serveur : nom du conteneur → dossier. */
+  containers: Record<string, Record<string, string>>;
+  /** Par serveur : dossiers de conteneurs créés, même vides. */
+  containerFolders: Record<string, string[]>;
+  /** Dossiers repliés (`servers:<nom>` ou `docker:<serveur>:<nom>`). */
+  collapsed: string[];
+}
+
+const NO_FOLDERS: Folders = { servers: [], containers: {}, containerFolders: {}, collapsed: [] };
 
 interface State {
   hydrated: boolean;
@@ -130,6 +145,9 @@ interface State {
   /** Identifiants des dernières actions de la palette (les plus récentes d'abord). */
   recent: string[];
   pushRecent: (id: string) => void;
+
+  folders: Folders;
+  setFolders: (update: (f: Folders) => Folders) => void;
 }
 
 const ACTIVE_SERVER_KEY = "helm.activeServer";
@@ -165,6 +183,7 @@ export const useApp = create<State>((set, get) => ({
           settings: { ...get().settings, ...raw.settings },
           recent: raw.recent ?? [],
           bookmarks: raw.bookmarks ?? {},
+          folders: { ...NO_FOLDERS, ...raw.folders },
         });
       }
     } catch {
@@ -272,6 +291,9 @@ export const useApp = create<State>((set, get) => ({
 
   recent: [],
   pushRecent: (id) => set((s) => ({ recent: [id, ...s.recent.filter((x) => x !== id)].slice(0, 30) })),
+
+  folders: NO_FOLDERS,
+  setFolders: (update) => set((s) => ({ folders: update(s.folders) })),
 }));
 
 // Sauvegarde de l'espace de travail, regroupée pour ne pas écrire à chaque frappe.
@@ -288,6 +310,7 @@ useApp.subscribe((s) => {
     settings: s.settings,
     recent: s.recent,
     bookmarks: s.bookmarks,
+    folders: s.folders,
   };
   const json = JSON.stringify(snapshot);
   if (json === lastSaved) return;
