@@ -103,7 +103,8 @@ jobs:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
           releaseId: ${{ needs.draft.outputs.release_id }}
-          args: ${{ matrix.args }}
+          # Artefacts de mise à jour signés seulement ici : un build local n'a pas la clé privée.
+          args: ${{ matrix.args }} --config ${{ github.workspace }}/apps/desktop/src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true
 
   publish:

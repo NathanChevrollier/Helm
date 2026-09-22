@@ -33,7 +33,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true,
     "publisher": "Nathan Chevrollier",
     "homepage": "https://github.com/NathanChevrollier/Helm",
     "category": "DeveloperTool",
