@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Download, FolderInput, FolderPlus, IdCard, KeyRound, Link2Off, Monitor, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { Download, FolderInput, FolderPlus, IdCard, KeyRound, Link2Off, Monitor, Pencil, Plug, PlugZap, Plus, Server, Share2, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { forgetCached } from "../lib/cache";
 import { AUTH_LABELS, IdentitiesPanel, IdentitySuggestions, useIdentities } from "../components/Identities";
 import { DesktopsPanel } from "../components/RemoteDesktops";
+import { ReceiveShareDialog, ShareDialog } from "../components/ShareServers";
 import { askFolderName, FolderSection } from "../components/Folders";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { startDrag } from "../lib/drag";
@@ -79,6 +80,8 @@ export default function ServersView() {
   const refresh = useApp((s) => s.refreshServers);
   const [editing, setEditing] = useState<ServerView | "new" | null>(null);
   const [importing, setImporting] = useState(false);
+  const [sharing, setSharing] = useState<"send" | "receive" | null>(null);
+  const [shareMenu, setShareMenu] = useState<{ x: number; y: number } | null>(null);
   const [tab, setTab] = useState<"servers" | "identities" | "desktops">("servers");
   const reloadIdentities = useIdentities((s) => s.reload);
   useEffect(() => {
@@ -121,6 +124,15 @@ export default function ServersView() {
             >
               Nouveau dossier
             </Button>
+            <Button
+              icon={<Share2 size={14} />}
+              onClick={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setShareMenu({ x: r.left, y: r.bottom + 4 });
+              }}
+            >
+              Partage
+            </Button>
             <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
               Importer (PuTTY, OpenSSH)
             </Button>
@@ -156,6 +168,19 @@ export default function ServersView() {
         />
       )}
       {importing && <Import onClose={() => setImporting(false)} onDone={() => void refresh()} />}
+      {shareMenu && (
+        <ContextMenu
+          x={shareMenu.x}
+          y={shareMenu.y}
+          onClose={() => setShareMenu(null)}
+          items={[
+            { label: "Partager des serveurs…", icon: <Share2 size={14} />, disabled: servers.length === 0, onClick: () => setSharing("send") },
+            { label: "Recevoir un partage…", icon: <Download size={14} />, onClick: () => setSharing("receive") },
+          ]}
+        />
+      )}
+      {sharing === "send" && <ShareDialog onClose={() => setSharing(null)} />}
+      {sharing === "receive" && <ReceiveShareDialog onClose={() => setSharing(null)} onDone={() => void refresh()} />}
     </div>
   );
 }

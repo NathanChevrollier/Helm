@@ -903,6 +903,15 @@ export const api = {
 
   mcpConfig: () => invoke<McpConfig>("mcp_config"),
   saveTextFile: (path: string, content: string) => invoke<void>("save_text_file", { path, content }),
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  /** Partage d'une sélection de serveurs (texte chiffré à enregistrer). */
+  settingsShare: (ids: string[], password: string, includeSecrets: boolean) => invoke<string>("settings_share", { ids, password, includeSecrets }),
+  /** Même partage, en code d'une ligne à coller. */
+  settingsShareCode: (ids: string[], password: string, includeSecrets: boolean) =>
+    invoke<string>("settings_share_code", { ids, password, includeSecrets }),
+  settingsImportText: (text: string, password: string) =>
+    invoke<{ servers: number; identities: number; snippets: number; tunnels: number; secrets: number }>("settings_import_text", { text, password }),
+  settingsTextEncrypted: (text: string) => invoke<boolean>("settings_text_encrypted", { text }),
 };
 
 export function formatDuration(secs: number): string {

@@ -159,6 +159,63 @@ pub(crate) fn seal(payload: &Payload, password: &str) -> Result<String, String> 
     serde_json::to_string_pretty(&envelope).map_err(|e| e.to_string())
 }
 
+/// Préfixe d'un partage transmis sous forme de texte (à coller dans une conversation).
+pub const SHARE_PREFIX: &str = "helm-share:";
+
+/// Partage d'une sélection de serveurs : leurs identifiants de la banque, les clés d'hôte
+/// approuvées correspondantes et, si demandé, leurs secrets. Toujours chiffré.
+pub fn share(store: &Store, ids: &[String], password: &str, include_secrets: bool) -> Result<String, String> {
+    if password.is_empty() {
+        return Err("choisis un mot de passe : un partage est toujours chiffré".into());
+    }
+    let full = snapshot(store, include_secrets);
+    // Les serveurs de rebond d'un serveur partagé le suivent, sinon il serait inutilisable.
+    let mut wanted: Vec<String> = ids.to_vec();
+    let mut i = 0;
+    while i < wanted.len() {
+        if let Ok(chain) = store.jump_chain(&wanted[i]) {
+            for j in chain {
+                if !wanted.contains(&j) {
+                    wanted.push(j);
+                }
+            }
+        }
+        i += 1;
+    }
+    let servers: Vec<ServerProfile> = full.servers.into_iter().filter(|s| wanted.contains(&s.id)).collect();
+    if servers.is_empty() {
+        return Err("aucun serveur à partager".into());
+    }
+    let hosts: Vec<String> = servers.iter().map(|s| format!("{}:{}", s.host, s.port)).collect();
+    let identity_ids: Vec<String> = servers.iter().filter_map(|s| s.identity_id.clone()).collect();
+    let owners: Vec<String> = servers.iter().map(|s| s.id.clone()).chain(identity_ids.iter().map(|i| Identity::secret_owner(i))).collect();
+    let payload = Payload {
+        known_hosts: full.known_hosts.into_iter().filter(|(k, _)| hosts.contains(k)).collect(),
+        identities: full.identities.into_iter().filter(|i| identity_ids.contains(&i.id)).collect(),
+        secrets: full.secrets.into_iter().filter(|(owner, _)| owners.contains(owner)).collect(),
+        servers,
+        snippets: vec![],
+        tunnels: vec![],
+        desktops: vec![],
+    };
+    seal(&payload, password)
+}
+
+/// Partage sous forme de code d'une seule ligne, à coller dans une conversation.
+pub fn to_code(text: &str) -> String {
+    format!("{SHARE_PREFIX}{}", B64.encode(text.as_bytes()))
+}
+
+/// Texte d'un partage reçu : code d'une ligne ou contenu de fichier, indifféremment.
+pub fn from_code(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    let Some(code) = trimmed.strip_prefix(SHARE_PREFIX) else {
+        return Ok(trimmed.to_string());
+    };
+    let bytes = B64.decode(code.trim().as_bytes()).map_err(|_| "ce code de partage est incomplet ou abîmé".to_string())?;
+    String::from_utf8(bytes).map_err(|_| "ce code de partage est illisible".into())
+}
+
 /// Le fichier est-il chiffré (faut-il demander un mot de passe) ?
 pub fn is_encrypted(text: &str) -> Result<bool, String> {
     let e: Envelope = serde_json::from_str(text).map_err(|_| "ce fichier n'est pas un export de Helm")?;
@@ -255,6 +312,33 @@ mod tests {
         let target = Store::open(b.path());
         assert_eq!(import(&target, &text, "mot de passe").unwrap().servers, 1);
         assert_eq!(target.read(|d| d.known_hosts.get("h:22").cloned()), Some("SHA256:x".into()));
+    }
+
+    #[test]
+    fn share_selection_and_code() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let source = store_with_server(a.path());
+        source
+            .write(|d| {
+                let mut other = d.servers[0].clone();
+                other.id = "b".into();
+                other.name = "Autre".into();
+                other.host = "autre".into();
+                d.servers.push(other);
+                d.snippets.push(Snippet { id: "s".into(), name: "n".into(), command: "ls".into() });
+            })
+            .unwrap();
+        assert!(share(&source, &[], "mot de passe long", false).is_err(), "sélection vide");
+        assert!(share(&source, &["a".into()], "", false).is_err(), "mot de passe obligatoire");
+        let code = to_code(&share(&source, &["a".into()], "mot de passe long", false).unwrap());
+        assert!(code.starts_with(SHARE_PREFIX) && !code.contains('\n'), "une seule ligne à coller");
+
+        let target = Store::open(b.path());
+        let summary = import(&target, &from_code(&code).unwrap(), "mot de passe long").unwrap();
+        assert_eq!((summary.servers, summary.snippets), (1, 0), "seul le serveur choisi est partagé");
+        assert_eq!(target.read(|d| d.servers[0].name.clone()), "VPS");
+        assert_eq!(target.read(|d| d.known_hosts.len()), 1);
+        assert!(from_code("helm-share:pas du base64 !").is_err());
     }
 
     #[test]

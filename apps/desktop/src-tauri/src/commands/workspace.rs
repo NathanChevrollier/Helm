@@ -166,6 +166,16 @@ pub fn mcp_config() -> Result<McpConfig, String> {
     })
 }
 
+/// Lit un fichier texte du PC choisi par l'utilisateur (partage reçu, au plus 8 Mo).
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(err)?;
+    if meta.len() > 8_000_000 {
+        return Err("fichier trop volumineux".into());
+    }
+    std::fs::read_to_string(&path).map_err(err)
+}
+
 /// Écrit un fichier texte sur le PC (chemin choisi par l'utilisateur dans la boîte de dialogue native).
 #[tauri::command]
 pub fn save_text_file(path: String, content: String) -> Result<(), String> {
@@ -179,6 +189,39 @@ pub fn settings_export(store: State<'_, Store>, path: String, password: String, 
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
     log::info!("réglages exportés vers {path} (chiffré : {}, secrets : {include_secrets})", !password.is_empty());
     Ok(())
+}
+
+/// Partage d'une sélection de serveurs : texte chiffré, à enregistrer ou à envoyer.
+#[tauri::command]
+pub fn settings_share(store: State<'_, Store>, ids: Vec<String>, password: String, include_secrets: bool) -> Result<String, String> {
+    let text = helm_profiles::export::share(&store, &ids, &password, include_secrets)?;
+    log::info!("partage de {} serveur(s) (secrets : {include_secrets})", ids.len());
+    Ok(text)
+}
+
+/// Même partage, sous forme de code d'une seule ligne à coller dans une conversation.
+#[tauri::command]
+pub fn settings_share_code(store: State<'_, Store>, ids: Vec<String>, password: String, include_secrets: bool) -> Result<String, String> {
+    Ok(helm_profiles::export::to_code(&settings_share(store, ids, password, include_secrets)?))
+}
+
+/// Importe un partage reçu (contenu de fichier ou code collé).
+#[tauri::command]
+pub fn settings_import_text(
+    store: State<'_, Store>,
+    text: String,
+    password: String,
+) -> Result<helm_profiles::export::ImportSummary, String> {
+    let content = helm_profiles::export::from_code(&text)?;
+    let summary = helm_profiles::export::import(&store, &content, &password)?;
+    log::info!("partage importé : {summary:?}");
+    Ok(summary)
+}
+
+/// Un partage reçu est-il chiffré (faut-il demander son mot de passe) ?
+#[tauri::command]
+pub fn settings_text_encrypted(text: String) -> Result<bool, String> {
+    helm_profiles::export::is_encrypted(&helm_profiles::export::from_code(&text)?)
 }
 
 /// Le fichier à importer est-il chiffré ?
