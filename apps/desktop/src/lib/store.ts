@@ -33,6 +33,8 @@ export interface TermTab {
   tmux?: string;
   /** Écran divisé : session tmux du second panneau, ou "" pour un shell simple. */
   split?: string | null;
+  /** Orientation de la division : côte à côte (« cols », par défaut) ou l'un au-dessus de l'autre. */
+  splitDir?: "cols" | "rows";
   /** Serveur du second panneau, s'il diffère de celui de l'onglet (deux hôtes côte à côte). */
   splitServerId?: string;
   /** Onglet multi-serveurs : une grille de panneaux, un par serveur, pour diffuser la saisie. */

@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Database, Download, Play, RefreshCw, Table2, TriangleAlert } from "lucide-react";
-import "../lib/monaco";
 import { api, errorMessage, formatBytes, type DbInstance, type DbNamed, type DbQueryResult } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { useCachedState } from "../lib/cache";
@@ -9,7 +8,8 @@ import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
 import { Badge, Button, EmptyState, IconButton, Input } from "../components/ui";
 
-const Editor = lazy(() => import("@monaco-editor/react"));
+// Monaco reste hors du morceau de code de cet onglet : il ne retarde plus son ouverture.
+const SqlEditor = lazy(() => import("../components/SqlEditor"));
 
 const LIMITS = [100, 500, 1000, 5000];
 
@@ -42,6 +42,22 @@ function Databases({ serverId }: { serverId: string }) {
   const [loading, setLoading] = useState(false);
 
   const instance = instances?.find((i) => i.id === instanceId) ?? null;
+
+  // Version de l'instance affichée : demandée après coup, elle ne retarde ni la liste ni les tables.
+  useEffect(() => {
+    if (!instance || instance.version) return;
+    let cancelled = false;
+    void api.dbVersion(serverId, instance).then(
+      (v) => {
+        if (cancelled || !v) return;
+        setInstances((list) => (list ?? []).map((i) => (i.id === instance.id ? { ...i, version: v } : i)));
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId, instance, setInstances]);
 
   const loadInstances = useCallback(
     async (auto = false) => {
@@ -223,13 +239,11 @@ function Databases({ serverId }: { serverId: string }) {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="h-52 border-b border-border">
-            <Suspense fallback={null}>
-              <Editor
+            <Suspense fallback={<div className="p-3 text-xs text-muted">Chargement de l'éditeur…</div>}>
+              <SqlEditor
                 value={sql}
-                onChange={(v) => setSql(v ?? "")}
-                language="sql"
+                onChange={setSql}
                 theme={monacoTheme}
-                options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, lineNumbers: "off" }}
                 onMount={(editor, monaco) => {
                   // Ctrl+Entrée exécute, comme dans les clients SQL habituels.
                   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void run(editor.getValue()));

@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { DiffEditor } from "@monaco-editor/react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Copy, KeyRound, Lock, Trash2 } from "lucide-react";
-import "../lib/monaco";
 import { api, errorMessage, type ComposeProject, type Container, type DeployKey } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useApp, useAppPick } from "../lib/store";
 import { Button, Field, IconButton, Input, Modal } from "./ui";
 import { useMonacoTheme } from "../lib/theme";
+
+const DiffView = lazy(() => import("./DiffView"));
 
 /** Crée et démarre un tunnel vers un port publié (ou un port de conteneur) du serveur. */
 export async function tunnelTo(serverId: string, c: Container, remotePort: number) {
@@ -83,15 +83,9 @@ export function RestrictPortDialog({
           <>
             <div className="font-mono text-xs text-muted">{preview.file}</div>
             <div className="h-[50vh]">
-              <DiffEditor
-                keepCurrentOriginalModel
-                keepCurrentModifiedModel
-                original={preview.before}
-                modified={preview.after}
-                language="yaml"
-                theme={monacoTheme}
-                options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12 }}
-              />
+              <Suspense fallback={<p className="p-3 text-xs text-muted">Chargement de la comparaison…</p>}>
+                <DiffView original={preview.before} modified={preview.after} language="yaml" theme={monacoTheme} />
+              </Suspense>
             </div>
           </>
         )}

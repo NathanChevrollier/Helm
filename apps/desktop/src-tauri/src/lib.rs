@@ -102,6 +102,7 @@ pub fn run() {
             rdp::desktop_delete,
             rdp::desktop_launch,
             databases::db_instances,
+            databases::db_version,
             databases::db_databases,
             databases::db_tables,
             databases::db_query,

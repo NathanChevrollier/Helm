@@ -121,6 +121,9 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
     void api.termWrite(id, text);
   };
 
+  /** Ctrl+U : vide la ligne en cours pour qu'un « cd » ne se colle pas à une commande à demi tapée. */
+  const cdInTerminal = (dir: string) => sendToTerminal(`\u0015cd ${shellQuote(dir)}\r`);
+
   const uploadHere = async () => {
     if (!serverId || !path) return;
     const files = await open({ multiple: true, title: `Envoyer dans ${path}` });
@@ -196,7 +199,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
           <ArrowUp size={14} />
         </IconButton>
         <Input className="h-7 font-mono text-xs" value={input} onChange={(e) => setInput(e.target.value)} placeholder="/chemin" />
-        <IconButton title="Aller à ce dossier dans le terminal (cd)" type="button" disabled={!path} onClick={() => path && sendToTerminal(`cd ${shellQuote(path)}\r`)}>
+        <IconButton title="Aller à ce dossier dans le terminal (cd)" type="button" disabled={!path} onClick={() => path && cdInTerminal(path)}>
           <FolderInput size={14} />
         </IconButton>
       </form>
@@ -218,19 +221,17 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
             {isDir(e) ? <Folder size={14} className="shrink-0 text-accent" /> : <File size={14} className="shrink-0 text-muted" />}
             <span className="min-w-0 flex-1 truncate">{e.name}</span>
             <span className="flex opacity-0 group-hover:opacity-100">
+              <IconButton title="Insérer le chemin dans la ligne de commande" className="size-6" onClick={() => sendToTerminal(`${shellQuote(e.path)} `)}>
+                <TextCursorInput size={13} />
+              </IconButton>
               {isDir(e) ? (
-                <IconButton title="Aller dans ce dossier (cd) dans le terminal" className="size-6" onClick={() => sendToTerminal(`cd ${shellQuote(e.path)}\r`)}>
+                <IconButton title="Ouvrir ce dossier dans le terminal (cd)" className="size-6" onClick={() => cdInTerminal(e.path)}>
                   <FolderInput size={13} />
                 </IconButton>
               ) : (
-                <>
-                  <IconButton title="Insérer le chemin dans le terminal" className="size-6" onClick={() => sendToTerminal(`${shellQuote(e.path)} `)}>
-                    <TextCursorInput size={13} />
-                  </IconButton>
-                  <IconButton title="Télécharger" className="size-6" onClick={() => void download(e)}>
-                    <Download size={13} />
-                  </IconButton>
-                </>
+                <IconButton title="Télécharger" className="size-6" onClick={() => void download(e)}>
+                  <Download size={13} />
+                </IconButton>
               )}
             </span>
           </div>

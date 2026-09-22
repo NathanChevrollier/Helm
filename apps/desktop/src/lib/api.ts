@@ -796,6 +796,7 @@ export const api = {
   desktopLaunch: (id: string) => invoke<string>("desktop_launch", { id }),
 
   dbInstances: (serverId: string) => invoke<DbInstance[]>("db_instances", { serverId }),
+  dbVersion: (serverId: string, instance: DbInstance) => invoke<string>("db_version", { serverId, instance }),
   dbDatabases: (serverId: string, instance: DbInstance) => invoke<DbNamed[]>("db_databases", { serverId, instance }),
   dbTables: (serverId: string, instance: DbInstance, database: string) => invoke<DbNamed[]>("db_tables", { serverId, instance, database }),
   dbQuery: (serverId: string, instance: DbInstance, database: string | null, sql: string, limit = 500) =>

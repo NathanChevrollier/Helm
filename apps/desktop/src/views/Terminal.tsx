@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Columns2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, Share2, SquareTerminal, Users, X } from "lucide-react";
+import { Columns2,
+  Rows2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, Share2, SquareTerminal, Users, X } from "lucide-react";
 import TerminalPane from "../components/TerminalPane";
 import SnippetsPanel from "../components/SnippetsPanel";
 import TerminalFiles from "../components/TerminalFiles";
@@ -37,6 +38,8 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   const [showSnippets, setShowSnippets] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [splitMenu, setSplitMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Part de l'espace prise par le premier panneau d'un onglet divisé (poignée centrale). */
+  const [splitRatios, setSplitRatios] = useState<Record<string, number>>({});
   const [multiPicker, setMultiPicker] = useState(false);
   const [joinPicker, setJoinPicker] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<string | null>(null);
@@ -110,7 +113,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   }, [visible, activeServerId, current, openTab, close, tabs, setActiveTab]);
 
   /** Divise l'onglet ; le second panneau peut ouvrir un autre serveur (deux hôtes côte à côte). */
-  const splitWith = async (serverId: string) => {
+  const splitWith = async (serverId: string, dir: "cols" | "rows" = "cols") => {
     if (!current) return;
     const other = serverId !== current.serverId;
     // Autre serveur : connecté d'abord, pour que ses dialogues (clé d'hôte, mot de passe) passent seuls.
@@ -118,7 +121,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
     const persistent = other
       ? settings.persistentSessions && !settings.tmuxDeclined[serverId]
       : !current.command && !!current.tmux;
-    updateTab(current.key, { split: persistent ? newTmuxName() : "", splitServerId: other ? serverId : undefined });
+    updateTab(current.key, { split: persistent ? newTmuxName() : "", splitServerId: other ? serverId : undefined, splitDir: dir });
   };
   const toggleSplit = (e: React.MouseEvent) => {
     if (!current || current.grid) return;
@@ -127,18 +130,38 @@ export default function TerminalView({ visible }: { visible: boolean }) {
       const on = current.splitServerId ?? current.serverId;
       updateTab(current.key, { split: null, splitServerId: undefined });
       if (name) void api.tmuxKill(on, name).catch(() => {});
-    } else if (servers.length > 1) {
+    } else {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setSplitMenu({ x: r.left, y: r.bottom + 4 });
-    } else {
-      void splitWith(current.serverId);
     }
+  };
+
+  /** Glissement de la poignée entre les deux panneaux d'un onglet divisé. */
+  const startSplitResize = (key: string, rows: boolean) => (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+    e.preventDefault();
+    const move = (ev: PointerEvent) => {
+      const r = rows ? (ev.clientY - box.top) / box.height : (ev.clientX - box.left) / box.width;
+      setSplitRatios((x) => ({ ...x, [key]: Math.min(0.85, Math.max(0.15, r)) }));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = rows ? "row-resize" : "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
   };
 
   const labelOf = (t: TermTab, right = false) =>
     t.join
       ? `${titles[t.key] ?? t.title} (partagé)`
-      : right ? `${serverOf(t.splitServerId ?? t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title} (droite)` : `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}`;
+      : right
+        ? `${serverOf(t.splitServerId ?? t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title} (${t.splitDir === "rows" ? "bas" : "droite"})`
+        : `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -201,6 +224,18 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           <ToolButton label="Multi-serveurs" title="Un terminal par serveur, côte à côte, avec la saisie diffusée à tous" icon={<LayoutGrid size={13} />} disabled={servers.length < 2} onClick={() => setMultiPicker(true)} />
           <ToolButton label="Sessions" title="Sessions persistantes (tmux)" icon={<History size={13} />} disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)} />
           <ToolButton label="Diviser" title="Diviser l'écran (même serveur ou un autre)" icon={<Columns2 size={13} />} disabled={!current || !!current.grid || !!current.join} active={current?.split != null} onClick={toggleSplit} />
+          {current?.split != null && (
+            <ToolButton
+              label="Orientation"
+              title={current.splitDir === "rows" ? "Passer côte à côte" : "Passer l'un au-dessus de l'autre"}
+              icon={current.splitDir === "rows" ? <Rows2 size={13} /> : <Columns2 size={13} />}
+              onClick={() => {
+                // Les proportions repartent de la moitié : celles de l'autre sens n'ont pas de sens ici.
+                setSplitRatios((x) => ({ ...x, [current.key]: 0.5 }));
+                updateTab(current.key, { splitDir: current.splitDir === "rows" ? "cols" : "rows" });
+              }}
+            />
+          )}
           <ToolButton label="Fichiers" title="Fichiers du serveur, au dossier courant du terminal" icon={<FolderTree size={13} />} active={showFiles} disabled={!current || !!current.join} onClick={() => setShowFiles((v) => !v)} />
           <ToolButton label="Snippets" title="Snippets" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
         </div>
@@ -222,7 +257,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           {tabs.map((t) => {
             const show = visible && t.key === activeTab;
             return (
-              <div key={t.key} className={`absolute inset-0 flex ${t.key === activeTab ? "" : "invisible"}`}>
+              <div key={t.key} className={`absolute inset-0 flex ${t.splitDir === "rows" ? "flex-col" : ""} ${t.key === activeTab ? "" : "invisible"}`}>
                 {t.join ? (
                   <TerminalPane
                     serverId=""
@@ -236,7 +271,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                   <GridPanes tab={t} visible={show} />
                 ) : (
                   <>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-h-0 min-w-0 flex-1" style={t.split != null ? { flex: `${splitRatios[t.key] ?? 0.5} 1 0%` } : undefined}>
                       <TerminalPane
                         serverId={t.serverId}
                         command={t.command}
@@ -248,12 +283,22 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                       />
                     </div>
                     {t.split != null && (
-                      <div className="flex min-w-0 flex-1 flex-col border-l border-border">
-                        {t.splitServerId && <PaneHeader serverId={t.splitServerId} />}
-                        <div className="min-h-0 flex-1">
-                          <TerminalPane serverId={t.splitServerId ?? t.serverId} tmux={t.split || undefined} paneId={`${t.key}:1`} label={labelOf(t, true)} visible={show} />
+                      <>
+                        <div
+                          role="separator"
+                          aria-orientation={t.splitDir === "rows" ? "horizontal" : "vertical"}
+                          aria-label="Redimensionner les deux terminaux"
+                          title="Glisser pour redimensionner"
+                          className={`shrink-0 bg-border hover:bg-accent/40 ${t.splitDir === "rows" ? "h-1 cursor-row-resize" : "w-1 cursor-col-resize"}`}
+                          onPointerDown={startSplitResize(t.key, t.splitDir === "rows")}
+                        />
+                        <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: `${1 - (splitRatios[t.key] ?? 0.5)} 1 0%` }}>
+                          {t.splitServerId && <PaneHeader serverId={t.splitServerId} />}
+                          <div className="min-h-0 flex-1">
+                            <TerminalPane serverId={t.splitServerId ?? t.serverId} tmux={t.split || undefined} paneId={`${t.key}:1`} label={labelOf(t, true)} visible={show} />
+                          </div>
                         </div>
-                      </div>
+                      </>
                     )}
                   </>
                 )}
@@ -273,7 +318,8 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           y={splitMenu.y}
           onClose={() => setSplitMenu(null)}
           items={[
-            { label: `Même serveur (${serverOf(current.serverId)?.name ?? "?"})`, icon: <Columns2 size={14} />, onClick: () => void splitWith(current.serverId) },
+            { label: "Côte à côte", icon: <Columns2 size={14} />, onClick: () => void splitWith(current.serverId, "cols") },
+            { label: "L'un au-dessus de l'autre", icon: <Rows2 size={14} />, onClick: () => void splitWith(current.serverId, "rows") },
             "separator",
             ...servers
               .filter((s) => s.id !== current.serverId)

@@ -14,35 +14,53 @@ fn err(e: impl ToString) -> String {
 }
 
 /// Instances trouvées : conteneurs MySQL/MariaDB/PostgreSQL en cours, puis services installés.
+/// La recherche côté Docker et la sonde des services locaux partent ensemble, et aucune version
+/// n'est demandée ici : chaque sonde lance un client SQL sur le serveur, ce qui rendait
+/// l'ouverture de l'onglet très lente. L'interface demande ensuite `db_version` pour la seule
+/// instance affichée.
 #[tauri::command]
 pub async fn db_instances(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<Instance>, String> {
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    let containers = async {
+        let (access, _) = docker::access(&conn, pw.as_deref()).await?;
+        if access == Access::Unavailable {
+            return Ok(Vec::new());
+        }
+        docker::containers(&conn, access, pw.as_deref()).await
+    };
+    let (containers, local) = tokio::join!(containers, conn.exec(db::LOCAL_PROBE, None));
+
     let mut out = Vec::new();
-    let (access, _) = docker::access(&conn, pw.as_deref()).await.map_err(err)?;
-    if access != Access::Unavailable {
-        for c in docker::containers(&conn, access, pw.as_deref()).await.map_err(err)? {
-            if c.state != "running" {
-                continue;
-            }
-            if let Some(engine) = Engine::from_image(&c.image) {
-                out.push(Instance {
-                    id: format!("container:{}", c.name),
-                    label: format!("{} ({})", c.name, c.image),
-                    engine,
-                    container: Some(c.name),
-                    version: String::new(),
-                });
-            }
+    for c in containers.map_err(err)? {
+        if c.state != "running" {
+            continue;
+        }
+        if let Some(engine) = Engine::from_image(&c.image) {
+            out.push(Instance {
+                id: format!("container:{}", c.name),
+                label: format!("{} ({})", c.name, c.image),
+                engine,
+                container: Some(c.name),
+                version: String::new(),
+            });
         }
     }
-    let local = conn.exec(db::LOCAL_PROBE, None).await.map_err(err)?;
-    out.extend(db::parse_local(&local.stdout));
-    // Une instance injoignable (mot de passe absent du conteneur, client manquant) reste listée,
-    // sans version : l'erreur s'affichera à la première requête.
-    for inst in &mut out {
-        inst.version = db::version(&conn, pw.as_deref(), inst).await;
-    }
+    out.extend(db::parse_local(&local.map_err(err)?.stdout));
     Ok(out)
+}
+
+/// Version d'une instance, demandée à part pour ne pas retarder la liste. Chaîne vide si
+/// l'instance est injoignable (mot de passe absent du conteneur, client manquant) : l'erreur
+/// s'affichera à la première requête.
+#[tauri::command]
+pub async fn db_version(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+) -> Result<String, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    Ok(db::version(&conn, pw.as_deref(), &instance).await)
 }
 
 #[tauri::command]
