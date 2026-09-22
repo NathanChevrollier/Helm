@@ -9,6 +9,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { Badge, Button, Input } from "../components/ui";
 import { checkForUpdate } from "../lib/updater";
 import SyncSettings from "../components/SyncSettings";
+import AiSettingsPanel from "../components/AiSettings";
 
 const TABS = [
   { id: "journal", label: "Journal d'actions", icon: History },
@@ -268,6 +269,7 @@ function Preferences() {
       </label>
       <Shortcuts />
       <AppLock />
+      <AiSettingsPanel />
       <SyncSettings />
       <ExportImport />
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">

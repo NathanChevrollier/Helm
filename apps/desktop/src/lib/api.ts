@@ -669,6 +669,41 @@ export interface DbQueryResult {
   durationMs: number;
 }
 
+/** Assistant IA : fournisseur, autorisations et mode d'exécution. */
+export type AiProvider = "anthropic" | "openai";
+export type AiExecMode = "off" | "propose" | "auto";
+
+export interface AiCapabilities {
+  status: boolean;
+  containers: boolean;
+  logs: boolean;
+  sites: boolean;
+  processes: boolean;
+  files: boolean;
+  security: boolean;
+}
+
+export interface AiSettings {
+  provider: AiProvider;
+  baseUrl: string;
+  model: string;
+  maxTokens: number;
+  capabilities: AiCapabilities;
+  execMode: AiExecMode;
+}
+
+export interface AiView extends AiSettings {
+  hasKey: boolean;
+}
+
+export type AiEvent =
+  | { type: "text"; text: string }
+  | { type: "tool"; callId: string; name: string; detail: string }
+  | { type: "toolDone"; callId: string; ok: boolean; summary: string }
+  | { type: "proposal"; callId: string; server: string; command: string; why: string; dangerous: boolean }
+  | { type: "done"; inputTokens: number; outputTokens: number }
+  | { type: "error"; message: string };
+
 export type SyncMode = "off" | "file" | "server";
 
 export interface SyncView {
@@ -766,6 +801,17 @@ export const api = {
   dbQuery: (serverId: string, instance: DbInstance, database: string | null, sql: string, limit = 500) =>
     invoke<DbQueryResult>("db_query", { serverId, instance, database, sql, limit }),
   dbPreviewQuery: (engine: DbEngine, table: string, limit = 200) => invoke<string>("db_preview_query", { engine, table, limit }),
+
+  aiGet: () => invoke<AiView>("ai_get"),
+  /** `apiKey` : `undefined` = inchangée, `""` = supprimée. */
+  aiSet: (settings: AiSettings, apiKey?: string) => invoke<void>("ai_set", { settings, apiKey }),
+  aiAsk: (conversation: string, message: string, context: string | undefined, onEvent: (e: AiEvent) => void) => {
+    const channel = new Channel<AiEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>("ai_ask", { conversation, message, context, onEvent: channel });
+  },
+  aiAnswerProposal: (callId: string, accepted: boolean) => invoke<void>("ai_answer_proposal", { callId, accepted }),
+  aiReset: (conversation: string) => invoke<string>("ai_reset", { conversation }),
 
   syncGet: () => invoke<SyncView>("sync_get"),
   /** `passphrase` / `token` : `undefined` = inchangé, `""` = supprimé. */

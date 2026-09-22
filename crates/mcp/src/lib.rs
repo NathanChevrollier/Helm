@@ -95,7 +95,8 @@ const READ_ALLOW: &[&str] =
 /// Toujours refusés, même sous un dossier autorisé.
 const READ_DENY: &[&str] = &["/.ssh/", "privkey", ".key", "id_rsa", "id_ed25519", "shadow", "/etc/helm-backup/", ".pfx", ".p12"];
 
-fn readable(path: &str) -> bool {
+/// Chemin qu'une IA a le droit de lire (mêmes règles pour le serveur MCP et l'assistant intégré).
+pub fn readable(path: &str) -> bool {
     path.starts_with('/')
         && !path.contains("..")
         && READ_ALLOW.iter().any(|p| path.starts_with(p))

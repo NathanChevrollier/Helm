@@ -8,6 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
+helm-ai = { path = "crates/ai" }
 helm-core = { path = "crates/core" }
 helm-protocol = { path = "crates/protocol" }
 helm-profiles = { path = "crates/profiles" }

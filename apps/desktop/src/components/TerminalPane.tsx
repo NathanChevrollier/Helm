@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, Search, Share2, Square, TextSelect, Upload, Users, X } from "lucide-react";
+import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, Search, Share2, Sparkles, Square, TextSelect, Upload, Users, X } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
@@ -16,6 +16,7 @@ import { useTheme } from "../lib/theme";
 import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
 import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
+import { explain } from "../lib/assistant";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { Button, Modal } from "./ui";
 
@@ -656,6 +657,11 @@ export default function TerminalPane({
       { label: "Tout sélectionner", icon: <TextSelect size={14} />, onClick: () => term?.selectAll() },
       { label: "Rechercher…", icon: <Search size={14} />, hint: display(shortcutOf("termSearch")), onClick: () => openSearchRef.current() },
       { label: "Effacer l'écran", icon: <Eraser size={14} />, onClick: () => term?.clear() },
+      {
+        label: selection ? "Expliquer la sélection" : "Expliquer ce qui s'affiche",
+        icon: <Sparkles size={14} />,
+        onClick: () => explain(selection ? "cette sortie de terminal" : "ce qui s'affiche dans mon terminal", selection || screenText()),
+      },
       "separator",
       {
         label: "Envoyer des fichiers ici…",

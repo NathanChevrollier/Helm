@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
-import { Lock, Plus, RefreshCw, Search, ShipWheel, type LucideIcon } from "lucide-react";
+import { Lock, Plus, RefreshCw, Search, ShipWheel, Sparkles, type LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp, useAppPick } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
@@ -14,6 +14,8 @@ import { checkForUpdate } from "./lib/updater";
 import { applyTheme } from "./lib/theme";
 import { display, matches, shortcutOf } from "./lib/shortcuts";
 import { refreshAll, useRefresh } from "./lib/refresh";
+import { useAssistant } from "./lib/assistant";
+import AssistantPanel from "./components/AssistantPanel";
 import HomeView from "./views/Home";
 
 // Chargé à part : xterm pèse un tiers de l'app et n'est pas nécessaire pour afficher l'accueil.
@@ -76,6 +78,7 @@ export default function App() {
     return () => clearInterval(id);
   }, [autoRefreshSecs]);
 
+  const assistantOpen = useAssistant((s) => s.open);
   const themeSetting = useApp((s) => s.settings.theme);
   useEffect(() => applyTheme(themeSetting), [themeSetting]);
 
@@ -98,6 +101,11 @@ export default function App() {
       if (matches(e, "palette")) {
         e.preventDefault();
         setPalette((v) => !v);
+      }
+      if (matches(e, "assistant")) {
+        e.preventDefault();
+        const assistant = useAssistant.getState();
+        assistant.setOpen(!assistant.open);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -159,6 +167,7 @@ export default function App() {
               <Plus size={15} />
             </button>
           </div>
+          <AssistantButton />
           <RefreshButton />
           <button
             onClick={() => setPalette(true)}
@@ -170,7 +179,8 @@ export default function App() {
           </button>
         </header>
 
-        <main className="relative min-h-0 flex-1">
+        <main className="relative flex min-h-0 flex-1">
+          <div className="relative min-w-0 flex-1">
           {hydrated && (
             <>
               {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
@@ -193,6 +203,8 @@ export default function App() {
               )}
             </>
           )}
+          </div>
+          {assistantOpen && <AssistantPanel />}
         </main>
 
         {/* Barre d'état. */}
@@ -224,6 +236,22 @@ export default function App() {
   );
 }
 
+/** Ouvre le panneau de l'assistant IA. */
+function AssistantButton() {
+  const { open, setOpen } = useAssistant();
+  return (
+    <button
+      onClick={() => setOpen(!open)}
+      title={`Assistant IA (${display(shortcutOf("assistant"))})`}
+      aria-label="Assistant IA"
+      aria-pressed={open}
+      className={`ml-auto flex size-[34px] shrink-0 items-center justify-center rounded-lg border ${open ? "border-accent/60 bg-accent/10 text-accent" : "border-border text-muted hover:border-border-strong hover:text-fg"}`}
+    >
+      <Sparkles size={15} />
+    </button>
+  );
+}
+
 /** Actualise la page affichée et l'état des serveurs (aussi F5). */
 function RefreshButton() {
   const tick = useRefresh((s) => s.tick);
@@ -239,7 +267,7 @@ function RefreshButton() {
       onClick={refreshAll}
       title="Actualiser (F5)"
       aria-label="Actualiser"
-      className="ml-auto flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-border text-muted hover:border-border-strong hover:text-fg"
+      className="flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-border text-muted hover:border-border-strong hover:text-fg"
     >
       <RefreshCw size={15} className={spin ? "animate-spin" : ""} />
     </button>

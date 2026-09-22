@@ -190,6 +190,9 @@ pub struct Data {
     /// Constats d'audit ignorés (archivés).
     #[serde(default)]
     pub ignored_findings: Vec<IgnoredFinding>,
+    /// Réglages de l'assistant IA (fournisseur, modèle, autorisations), sans la clé d'API.
+    #[serde(default)]
+    pub ai: Option<serde_json::Value>,
     /// Synchronisation avec les autres PC (propre à ce PC).
     #[serde(default)]
     pub sync: Option<sync::SyncConfig>,

@@ -9,6 +9,7 @@ export const SHORTCUTS = {
   nextTab: { label: "Onglet suivant", default: "Ctrl+Tab" },
   prevTab: { label: "Onglet précédent", default: "Ctrl+Shift+Tab" },
   termSearch: { label: "Rechercher dans le terminal", default: "Ctrl+Shift+F" },
+  assistant: { label: "Ouvrir l'assistant IA", default: "Ctrl+I" },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

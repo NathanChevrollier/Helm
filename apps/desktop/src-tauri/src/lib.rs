@@ -6,8 +6,8 @@ mod sessions;
 mod store;
 
 use commands::{
-    backups, dashboard, databases, deploy, docker, files, identities, logs, monitoring, rdp, security, servers, share, sites, sync,
-    terminal, tunnels, workspace,
+    assistant, backups, dashboard, databases, deploy, docker, files, identities, logs, monitoring, rdp, security, servers, share, sites,
+    sync, terminal, tunnels, workspace,
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
@@ -67,6 +67,7 @@ pub fn run() {
             app.manage(tunnels::Tunnels::default());
             app.manage(logs::LogStreams::default());
             app.manage(share::Shares::default());
+            app.manage(assistant::Assistant::default());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<tunnels::Tunnels>().autostart(&handle).await;
@@ -117,6 +118,11 @@ pub fn run() {
             share::term_join,
             share::term_join_write,
             share::term_join_close,
+            assistant::ai_get,
+            assistant::ai_set,
+            assistant::ai_ask,
+            assistant::ai_answer_proposal,
+            assistant::ai_reset,
             files::fs_home,
             files::fs_list,
             files::fs_read,

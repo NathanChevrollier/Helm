@@ -1,0 +1,11 @@
+[package]
+name = "helm-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dialogue avec un modèle (Claude, API compatible OpenAI, modèle local) et appels d'outils"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ureq = { version = "3.4", features = ["json"] }

@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod backups;
 pub mod dashboard;
 pub mod databases;
