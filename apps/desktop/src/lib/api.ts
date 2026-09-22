@@ -36,6 +36,30 @@ export interface IdentityView extends Identity {
   usedBy: string[];
 }
 
+/** Bureau à distance (RDP). */
+export interface RemoteDesktop {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  domain?: string | null;
+  identityId?: string | null;
+  /** Serveur SSH de Helm à traverser (tunnel), sinon connexion directe. */
+  viaServerId?: string | null;
+  fullscreen: boolean;
+  width?: number | null;
+  height?: number | null;
+  multimon: boolean;
+  redirectDrives: boolean;
+  color?: string | null;
+  group?: string | null;
+}
+
+export interface DesktopView extends RemoteDesktop {
+  hasPassword: boolean;
+}
+
 export interface ServerView extends ServerProfile {
   hasPassword: boolean;
   hasPassphrase: boolean;
@@ -680,6 +704,12 @@ export const api = {
   identitySave: (identity: Identity, secretsInput: { password?: string; passphrase?: string }) =>
     invoke<string>("identity_save", { identity, secretsInput }),
   identityDelete: (id: string) => invoke<void>("identity_delete", { id }),
+
+  desktops: () => invoke<DesktopView[]>("desktops_list"),
+  /** `password` : `undefined` = inchangé, `""` = supprimé. */
+  desktopSave: (desktop: RemoteDesktop, password?: string) => invoke<string>("desktop_save", { desktop, password }),
+  desktopDelete: (id: string) => invoke<void>("desktop_delete", { id }),
+  desktopLaunch: (id: string) => invoke<string>("desktop_launch", { id }),
 
   syncGet: () => invoke<SyncView>("sync_get"),
   /** `passphrase` / `token` : `undefined` = inchangé, `""` = supprimé. */

@@ -447,7 +447,7 @@ function ExportImport() {
       <div>
         <span className="font-medium">Exporter / importer mes réglages</span>
         <span className="block text-sm text-muted">
-          Serveurs, clés d'hôte approuvées, snippets et tunnels, pour changer de PC ou garder une copie. L'import complète la configuration actuelle sans rien supprimer.
+          Serveurs, bureaux à distance, identifiants, clés d'hôte approuvées, snippets et tunnels, pour changer de PC ou garder une copie. L'import complète la configuration actuelle sans rien supprimer.
         </span>
       </div>
       {exporting ? (

@@ -34,6 +34,8 @@ export async function runSync(manual = false): Promise<SyncOutcome | null> {
       // La banque d'identifiants se recharge à l'ouverture de la page Serveurs.
       const { useIdentities } = await import("../components/Identities");
       void useIdentities.getState().reload();
+      const { useDesktops } = await import("../components/RemoteDesktops");
+      void useDesktops.getState().reload();
       notify("Réglages synchronisés depuis tes autres PC", "success");
     } else if (manual) {
       notify(out.action === "pushed" ? "Réglages envoyés" : "Déjà à jour", "success");

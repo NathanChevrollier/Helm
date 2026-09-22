@@ -86,6 +86,56 @@ pub struct Snippet {
     pub command: String,
 }
 
+/// Bureau à distance (RDP) : ouvert dans le client RDP du système (mstsc sous Windows),
+/// directement ou à travers un tunnel SSH par un serveur de Helm.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktop {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    #[serde(default = "default_rdp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    /// Domaine Windows (`DOMAINE\utilisateur`), optionnel.
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// Identifiant de la banque (utilisateur + mot de passe) à utiliser.
+    #[serde(default)]
+    pub identity_id: Option<String>,
+    /// Serveur SSH de Helm par lequel passer (le port RDP n'est alors jamais exposé à Internet).
+    #[serde(default)]
+    pub via_server_id: Option<String>,
+    #[serde(default)]
+    pub fullscreen: bool,
+    /// Taille de la fenêtre (hors plein écran), par ex. 1600×900.
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub multimon: bool,
+    /// Partage des disques du PC avec la session distante.
+    #[serde(default)]
+    pub redirect_drives: bool,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+fn default_rdp_port() -> u16 {
+    3389
+}
+
+impl RemoteDesktop {
+    /// Propriétaire du mot de passe dans le keyring.
+    pub fn secret_owner(id: &str) -> String {
+        format!("rdp-{id}")
+    }
+}
+
 /// Tunnel SSH local : 127.0.0.1:`local_port` sur le PC → `remote_host`:`remote_port` vu du serveur.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +165,9 @@ pub struct Data {
     /// Banque d'identifiants (logins réutilisables).
     #[serde(default)]
     pub identities: Vec<Identity>,
+    /// Bureaux à distance (RDP).
+    #[serde(default)]
+    pub desktops: Vec<RemoteDesktop>,
     /// Synchronisation avec les autres PC (propre à ce PC).
     #[serde(default)]
     pub sync: Option<sync::SyncConfig>,

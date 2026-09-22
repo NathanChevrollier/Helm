@@ -6,6 +6,7 @@ pub mod files;
 pub mod identities;
 pub mod logs;
 pub mod monitoring;
+pub mod rdp;
 pub mod security;
 pub mod servers;
 pub mod sites;

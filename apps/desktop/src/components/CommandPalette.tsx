@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Box, Cable, FolderOpen, Globe, History, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
+import { Box, Cable, FolderOpen, Globe, History, Layers, Monitor, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
 import { useDoctor } from "./ConnectionDoctor";
 import { focusedTerminal } from "../lib/focus";
-import { api, errorMessage, shellQuote, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
+import { api, errorMessage, shellQuote, type DesktopView, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
+import { launchDesktop } from "./RemoteDesktops";
 import { SECTIONS } from "../sections";
 import { ensureConnected, useApp } from "../lib/store";
 
@@ -41,6 +42,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
   const [docker, setDocker] = useState<DockerOverview | null>(null);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [tunnels, setTunnels] = useState<TunnelView[]>([]);
+  const [desktops, setDesktops] = useState<DesktopView[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
   // Historique du shell du serveur de l'onglet actif, quand on vient d'un terminal.
   const termServer = app.section === "terminal" ? app.tabs.find((t) => t.key === app.activeTab)?.serverId : undefined;
@@ -55,6 +57,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     input.current?.focus();
     void api.snippets().then(setSnippets);
     void api.tunnels().then(setTunnels);
+    void api.desktops().then(setDesktops).catch(() => {});
     // Les données du serveur ne sont chargées que s'il est déjà connecté (aucune connexion imposée).
     if (server?.connected) {
       void api.dockerOverview(server.id).then(setDocker).catch(() => {});
@@ -159,6 +162,9 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
         });
       }
     }
+    for (const d of desktops) {
+      list.push({ id: `rdp:${d.id}`, label: `Bureau à distance : ${d.name}`, hint: d.host, icon: <Monitor size={15} />, run: () => void launchDesktop(d) });
+    }
     for (const t of tunnels) {
       list.push({
         id: `tunnel:${t.id}`,
@@ -210,7 +216,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
       });
     }
     return list;
-  }, [servers, server, docker, snippets, tunnels, domains, history, query, setSection, setActiveServer, openTab, ask, notify, setFilesPath]);
+  }, [servers, server, docker, snippets, tunnels, desktops, domains, history, query, setSection, setActiveServer, openTab, ask, notify, setFilesPath]);
 
   const results = useMemo(() => {
     if (!query) {

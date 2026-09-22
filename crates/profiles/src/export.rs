@@ -14,7 +14,7 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::{secrets, Identity, ServerProfile, Snippet, Store, TunnelDef};
+use crate::{secrets, Identity, RemoteDesktop, ServerProfile, Snippet, Store, TunnelDef};
 
 const FORMAT: &str = "helm-export";
 const ITERATIONS: u32 = 600_000;
@@ -32,6 +32,9 @@ pub(crate) struct Payload {
     /// Banque d'identifiants (absente des exports antérieurs).
     #[serde(default)]
     pub identities: Vec<Identity>,
+    /// Bureaux à distance (absents des exports antérieurs).
+    #[serde(default)]
+    pub desktops: Vec<RemoteDesktop>,
     /// `id du serveur` (ou `identity-<id>`) → (`type de secret` → valeur). Vide si les secrets ne
     /// sont pas exportés.
     #[serde(default)]
@@ -46,11 +49,17 @@ pub(crate) fn snapshot(store: &Store, include_secrets: bool) -> Payload {
         snippets: d.snippets.clone(),
         tunnels: d.tunnels.clone(),
         identities: d.identities.clone(),
+        desktops: d.desktops.clone(),
         secrets: BTreeMap::new(),
     });
     if include_secrets {
-        let owners: Vec<String> =
-            payload.servers.iter().map(|s| s.id.clone()).chain(payload.identities.iter().map(|i| Identity::secret_owner(&i.id))).collect();
+        let owners: Vec<String> = payload
+            .servers
+            .iter()
+            .map(|s| s.id.clone())
+            .chain(payload.identities.iter().map(|i| Identity::secret_owner(&i.id)))
+            .chain(payload.desktops.iter().map(|r| RemoteDesktop::secret_owner(&r.id)))
+            .collect();
         for owner in owners {
             let found: BTreeMap<String, String> =
                 SECRET_KINDS.iter().filter_map(|k| secrets::get(&owner, k).map(|v| (k.to_string(), v))).collect();
@@ -201,6 +210,7 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         merge(&mut d.snippets, p.snippets, |s| &s.id);
         merge(&mut d.tunnels, p.tunnels, |t| &t.id);
         merge(&mut d.identities, p.identities, |i| &i.id);
+        merge(&mut d.desktops, p.desktops, |r| &r.id);
         d.known_hosts.extend(p.known_hosts);
     })?;
     store_secrets(&p.secrets)?;

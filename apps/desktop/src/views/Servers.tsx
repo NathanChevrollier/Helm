@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Download, IdCard, KeyRound, Link2Off, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { Download, IdCard, KeyRound, Link2Off, Monitor, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { forgetCached } from "../lib/cache";
 import { AUTH_LABELS, IdentitiesPanel, IdentitySuggestions, useIdentities } from "../components/Identities";
+import { DesktopsPanel } from "../components/RemoteDesktops";
 
 const SOURCES = [
   ["putty", "PuTTY"],
@@ -19,7 +20,7 @@ export default function ServersView() {
   const refresh = useApp((s) => s.refreshServers);
   const [editing, setEditing] = useState<ServerView | "new" | null>(null);
   const [importing, setImporting] = useState(false);
-  const [tab, setTab] = useState<"servers" | "identities">("servers");
+  const [tab, setTab] = useState<"servers" | "identities" | "desktops">("servers");
   const reloadIdentities = useIdentities((s) => s.reload);
   useEffect(() => {
     void reloadIdentities();
@@ -36,6 +37,7 @@ export default function ServersView() {
           {(
             [
               ["servers", "Serveurs", Server],
+              ["desktops", "Bureaux à distance", Monitor],
               ["identities", "Identifiants", IdCard],
             ] as const
           ).map(([id, label, Icon]) => (
@@ -64,6 +66,8 @@ export default function ServersView() {
       <div className="min-h-0 flex-1 overflow-auto p-6">
         {tab === "identities" ? (
           <IdentitiesPanel />
+        ) : tab === "desktops" ? (
+          <DesktopsPanel />
         ) : servers.length === 0 ? (
           <EmptyState icon={<Server size={40} />} title="Aucun serveur">
             Ajoute ton VPS, ou importe directement tes sessions PuTTY existantes.

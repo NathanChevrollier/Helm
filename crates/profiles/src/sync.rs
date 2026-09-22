@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{self, Payload};
-use crate::{secrets, Identity, Store};
+use crate::{secrets, Identity, RemoteDesktop, Store};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +100,7 @@ pub(crate) fn fingerprint(p: &Payload) -> String {
     p.snippets.sort_by(|a, b| a.id.cmp(&b.id));
     p.tunnels.sort_by(|a, b| a.id.cmp(&b.id));
     p.identities.sort_by(|a, b| a.id.cmp(&b.id));
+    p.desktops.sort_by(|a, b| a.id.cmp(&b.id));
     let json = serde_json::to_vec(&p).unwrap_or_default();
     ring::digest::digest(&ring::digest::SHA256, &json).as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -123,6 +124,7 @@ pub(crate) fn merge(remote: &Payload, local: &Payload) -> Payload {
         snippets: union(&remote.snippets, &local.snippets, |s| &s.id),
         tunnels: union(&remote.tunnels, &local.tunnels, |t| &t.id),
         identities: union(&remote.identities, &local.identities, |i| &i.id),
+        desktops: union(&remote.desktops, &local.desktops, |r| &r.id),
         secrets: carry_secrets(remote, &local.secrets),
     }
 }
@@ -140,18 +142,23 @@ fn carry_secrets(remote: &Payload, local: &BTreeMap<String, BTreeMap<String, Str
 /// Remplace les réglages synchronisés par `p` (suppressions comprises) ; l'état de l'interface et
 /// le réglage de synchronisation ne bougent pas.
 fn apply(store: &Store, p: &Payload, include_secrets: bool) -> Result<(Vec<String>, Vec<String>), String> {
-    let (removed_servers, removed_identities, removed_tunnels) = store.write(|d| {
+    let (removed_servers, removed_identities, removed_tunnels, removed_desktops) = store.write(|d| {
         let gone = |ids: Vec<String>, keep: &dyn Fn(&str) -> bool| ids.into_iter().filter(|id| !keep(id)).collect::<Vec<_>>();
         let rs = gone(d.servers.iter().map(|s| s.id.clone()).collect(), &|id| p.servers.iter().any(|s| s.id == id));
         let ri = gone(d.identities.iter().map(|i| i.id.clone()).collect(), &|id| p.identities.iter().any(|i| i.id == id));
         let rt = gone(d.tunnels.iter().map(|t| t.id.clone()).collect(), &|id| p.tunnels.iter().any(|t| t.id == id));
+        let rd = gone(d.desktops.iter().map(|r| r.id.clone()).collect(), &|id| p.desktops.iter().any(|r| r.id == id));
         d.servers = p.servers.clone();
         d.snippets = p.snippets.clone();
         d.tunnels = p.tunnels.clone();
         d.identities = p.identities.clone();
+        d.desktops = p.desktops.clone();
         d.known_hosts.extend(p.known_hosts.clone());
-        (rs, ri, rt)
+        (rs, ri, rt, rd)
     })?;
+    for id in &removed_desktops {
+        secrets::delete_all(&RemoteDesktop::secret_owner(id));
+    }
     for id in &removed_servers {
         secrets::delete_all(id);
     }

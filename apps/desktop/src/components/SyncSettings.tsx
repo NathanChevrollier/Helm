@@ -77,7 +77,7 @@ export default function SyncSettings() {
           Synchronisation entre PC
         </span>
         <span className="block text-sm text-muted">
-          Serveurs, identifiants, clés d'hôte approuvées, snippets et tunnels identiques sur tous tes PC. Tout est chiffré avec ta phrase de passe avant de quitter ce PC : ni le fichier ni le serveur ne peuvent le lire.
+          Serveurs, bureaux à distance, identifiants, clés d'hôte approuvées, snippets et tunnels identiques sur tous tes PC. Tout est chiffré avec ta phrase de passe avant de quitter ce PC : ni le fichier ni le serveur ne peuvent le lire.
         </span>
       </div>
       <div className="flex w-fit gap-1 rounded-md border border-border bg-bg p-1">
