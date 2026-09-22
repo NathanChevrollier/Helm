@@ -44,6 +44,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Mises à jour signées, publiées par la CI sur les releases GitHub.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
             let store = store::Store::open(&dir);

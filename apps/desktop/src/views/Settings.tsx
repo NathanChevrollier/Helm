@@ -7,6 +7,7 @@ import type { ThemeSetting } from "../lib/theme";
 import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Badge, Button, Input } from "../components/ui";
+import { checkForUpdate } from "../lib/updater";
 
 const TABS = [
   { id: "journal", label: "Journal d'actions", icon: History },
@@ -192,6 +193,7 @@ function AiAccess() {
 function Preferences() {
   const { settings, setSettings, servers, notify } = useAppPick("settings", "setSettings", "servers", "notify");
   const declined = Object.keys(settings.tmuxDeclined).filter((id) => settings.tmuxDeclined[id]);
+  const [checking, setChecking] = useState(false);
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
@@ -226,6 +228,15 @@ function Preferences() {
       <Shortcuts />
       <AppLock />
       <ExportImport />
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
+        <span className="flex-1">
+          <span className="font-medium">Mises à jour</span>
+          <span className="block text-sm text-muted">Helm vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.</span>
+        </span>
+        <Button size="sm" loading={checking} onClick={() => { setChecking(true); void checkForUpdate(true).finally(() => setChecking(false)); }}>
+          Rechercher
+        </Button>
+      </div>
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
         <span className="flex-1">
           <span className="font-medium">Journaux de Helm</span>

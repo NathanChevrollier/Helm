@@ -9,6 +9,7 @@ import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
+import { checkForUpdate } from "./lib/updater";
 import { applyTheme } from "./lib/theme";
 import { display, matches, shortcutOf } from "./lib/shortcuts";
 import HomeView from "./views/Home";
@@ -54,6 +55,12 @@ export default function App() {
     return watchInactivity(() => useApp.getState().settings.lockMinutes);
   }, []);
   useEffect(() => watchAlerts(), []);
+  // Nouvelle version sur GitHub : vérifiée quelques secondes après le démarrage (pas en dev).
+  useEffect(() => {
+    if (!import.meta.env.PROD) return;
+    const t = setTimeout(() => void checkForUpdate(), 5000);
+    return () => clearTimeout(t);
+  }, []);
   const themeSetting = useApp((s) => s.settings.theme);
   useEffect(() => applyTheme(themeSetting), [themeSetting]);
 
