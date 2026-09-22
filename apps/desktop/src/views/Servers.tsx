@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Download, KeyRound, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { Download, IdCard, KeyRound, Link2Off, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { forgetCached } from "../lib/cache";
+import { AUTH_LABELS, IdentitiesPanel, IdentitySuggestions, useIdentities } from "../components/Identities";
 
 const SOURCES = [
   ["putty", "PuTTY"],
@@ -18,26 +19,52 @@ export default function ServersView() {
   const refresh = useApp((s) => s.refreshServers);
   const [editing, setEditing] = useState<ServerView | "new" | null>(null);
   const [importing, setImporting] = useState(false);
+  const [tab, setTab] = useState<"servers" | "identities">("servers");
+  const reloadIdentities = useIdentities((s) => s.reload);
+  useEffect(() => {
+    void reloadIdentities();
+  }, [reloadIdentities]);
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div>
+      <header className="flex items-center gap-4 border-b border-border px-6 pt-4">
+        <div className="pb-3">
           <h1 className="text-lg font-semibold">Serveurs</h1>
           <p className="text-sm text-muted">Profils de connexion SSH. Les secrets sont gardés dans le coffre-fort du système.</p>
         </div>
-        <div className="flex gap-2">
-          <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
-            Importer (PuTTY, OpenSSH)
-          </Button>
-          <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
-            Ajouter un serveur
-          </Button>
-        </div>
+        <nav className="ml-auto flex self-end">
+          {(
+            [
+              ["servers", "Serveurs", Server],
+              ["identities", "Identifiants", IdCard],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 pb-2.5 text-sm ${tab === id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"}`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        {tab === "servers" && (
+          <div className="flex gap-2 self-center pb-3">
+            <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
+              Importer (PuTTY, OpenSSH)
+            </Button>
+            <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
+              Ajouter un serveur
+            </Button>
+          </div>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-6">
-        {servers.length === 0 ? (
+        {tab === "identities" ? (
+          <IdentitiesPanel />
+        ) : servers.length === 0 ? (
           <EmptyState icon={<Server size={40} />} title="Aucun serveur">
             Ajoute ton VPS, ou importe directement tes sessions PuTTY existantes.
           </EmptyState>
@@ -69,6 +96,7 @@ function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void
   const { openTab, setActiveServer, activeServerId, refreshServers, notify, ask } = useAppPick("openTab", "setActiveServer", "activeServerId", "refreshServers", "notify", "ask");
   const [busy, setBusy] = useState(false);
   const active = server.id === activeServerId;
+  const identity = useIdentities((s) => s.list.find((i) => i.id === server.identityId));
 
   const connect = async () => {
     setBusy(true);
@@ -115,7 +143,7 @@ function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void
       </div>
       <div className="mb-4 flex flex-wrap gap-1.5">
         {server.connected ? <Badge tone="ok">connecté</Badge> : <Badge>hors ligne</Badge>}
-        <Badge>{server.authKind === "password" ? "mot de passe" : server.authKind === "key" ? "clé privée" : "agent SSH"}</Badge>
+        {identity ? <Badge tone="accent">{identity.name}</Badge> : <Badge>{AUTH_LABELS[server.authKind]}</Badge>}
         {server.group && <Badge tone="accent">{server.group}</Badge>}
       </div>
       <div className="flex gap-2">
@@ -167,18 +195,30 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
   const [passphrase, setPassphrase] = useState("");
   const [sudo, setSudo] = useState("");
   const [saving, setSaving] = useState(false);
+  const [suggest, setSuggest] = useState(false);
+  /** Enregistrer aussi l'utilisateur et son secret dans la banque d'identifiants. */
+  const [toBank, setToBank] = useState<string | null>(null);
   const set = <K extends keyof ServerProfile>(k: K, v: ServerProfile[K]) => setP((prev) => ({ ...prev, [k]: v }));
   const others = useApp((s) => s.servers).filter((s) => s.id !== server?.id);
+  const identities = useIdentities((s) => s.list);
+  const identity = identities.find((i) => i.id === p.identityId);
 
   const save = async () => {
     setSaving(true);
     try {
-      const profile = { ...p, name: p.name.trim() || p.host.trim(), host: p.host.trim(), username: p.username.trim() };
-      await api.saveServer(profile, {
-        password: password || undefined,
-        passphrase: passphrase || undefined,
-        sudoPassword: sudo || undefined,
-      });
+      let profile = { ...p, name: p.name.trim() || p.host.trim(), host: p.host.trim(), username: p.username.trim() };
+      let secrets = { password: password || undefined, passphrase: passphrase || undefined, sudoPassword: sudo || undefined };
+      if (!identity && toBank !== null) {
+        // Nouvel identifiant de la banque avec ce qui vient d'être saisi, puis le serveur s'y lie.
+        const id = await api.identitySave(
+          { id: "", name: toBank.trim() || profile.username, username: profile.username, authKind: profile.authKind, keyPath: profile.keyPath },
+          { password: secrets.password, passphrase: secrets.passphrase },
+        );
+        profile = { ...profile, identityId: id };
+        secrets = { password: undefined, passphrase: undefined, sudoPassword: secrets.sudoPassword };
+        void useIdentities.getState().reload();
+      }
+      await api.saveServer(profile, secrets);
       onSaved();
     } catch (e) {
       notify(errorMessage(e), "error");
@@ -237,8 +277,33 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
           </Field>
         </div>
         <div className="col-span-3">
-          <Field label="Utilisateur">
-            <Input value={p.username} onChange={(e) => set("username", e.target.value)} />
+          <Field label="Utilisateur" hint={identities.length && !identity ? "Clique dans le champ pour choisir un identifiant enregistré." : undefined}>
+            {identity ? (
+              <div className="flex h-8 items-center gap-2 rounded-md border border-accent/50 bg-accent/10 px-2.5 text-sm">
+                <IdCard size={14} className="shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 truncate" title={`Identifiant « ${identity.name} » de la banque`}>
+                  {identity.name} <span className="font-mono text-xs text-muted">({identity.username})</span>
+                </span>
+                <button type="button" title="Délier : saisir l'utilisateur à la main" className="text-muted hover:text-fg" onClick={() => setP((prev) => ({ ...prev, identityId: null }))}>
+                  <Link2Off size={13} />
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Input value={p.username} autoComplete="off" onFocus={() => setSuggest(true)} onChange={(e) => set("username", e.target.value)} />
+                {suggest && (
+                  <IdentitySuggestions
+                    filter=""
+                    onClose={() => setSuggest(false)}
+                    onPick={(i) => {
+                      setP((prev) => ({ ...prev, identityId: i.id, username: i.username, authKind: i.authKind, keyPath: i.keyPath ?? null }));
+                      setToBank(null);
+                      setSuggest(false);
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </Field>
         </div>
         <div className="col-span-3">
@@ -265,6 +330,12 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
           </div>
         )}
 
+        {identity ? (
+          <p className="col-span-6 rounded-md border border-border bg-bg p-3 text-xs text-muted">
+            Authentification de l'identifiant « {identity.name} » ({AUTH_LABELS[identity.authKind]}{identity.authKind === "password" && !identity.hasPassword ? ", demandé à la connexion" : ""}). Modifiable dans l'onglet Identifiants.
+          </p>
+        ) : (
+        <>
         <div className="col-span-6 flex flex-col gap-1.5">
           <span className="text-xs font-medium text-muted">Authentification</span>
           <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
@@ -284,7 +355,7 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
         {p.authKind === "password" && (
           <div className="col-span-6">
             <Field label="Mot de passe" hint={keptHint(server?.hasPassword) ?? "Tu peux aussi le laisser vide : il sera demandé à la connexion."}>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input type="password" value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
             </Field>
           </div>
         )}
@@ -311,6 +382,13 @@ function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; o
           <p className="col-span-6 rounded-md border border-border bg-bg p-3 text-xs text-muted">
             Helm utilisera les clés chargées dans l'agent OpenSSH de Windows ou dans Pageant (PuTTY).
           </p>
+        )}
+        <label className="col-span-6 flex items-center gap-2 text-xs text-muted">
+          <input type="checkbox" checked={toBank !== null} onChange={(e) => setToBank(e.target.checked ? `${p.username}@${p.name || p.host}` : null)} />
+          Enregistrer aussi dans la banque d'identifiants, sous le nom
+          <Input className="!h-7 !w-56 text-xs" disabled={toBank === null} value={toBank ?? ""} onChange={(e) => setToBank(e.target.value)} />
+        </label>
+        </>
         )}
 
         <div className="col-span-6">

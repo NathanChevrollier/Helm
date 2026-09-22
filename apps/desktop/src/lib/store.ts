@@ -352,16 +352,21 @@ export async function ensureConnected(serverId: string, opts: { interactive?: bo
         continue;
       }
       if (msg.startsWith("NEED_PASSWORD")) {
+        const s = server();
+        if (!s) return false;
+        // Serveur lié à la banque : le mot de passe est celui de l'identifiant, partagé.
+        const identity = s.identityId ? (await api.identities()).find((i) => i.id === s.identityId) : undefined;
         const pw = await ask({
-          title: `Mot de passe pour ${server()?.username}@${server()?.host}`,
-          body: "Il sera enregistré dans le coffre-fort de ton système (Gestionnaire d'identification Windows / Trousseau).",
+          title: `Mot de passe pour ${s.username}@${s.host}`,
+          body: identity
+            ? `Il sera enregistré dans l'identifiant « ${identity.name} » (coffre-fort du système) et servira à tous les serveurs qui l'utilisent.`
+            : "Il sera enregistré dans le coffre-fort de ton système (Gestionnaire d'identification Windows / Trousseau).",
           input: { label: "Mot de passe", secret: true },
           confirmLabel: "Se connecter",
         });
         if (typeof pw !== "string" || !pw) return false;
-        const s = server();
-        if (!s) return false;
-        await api.saveServer(s, { password: pw });
+        if (identity) await api.identitySave(identity, { password: pw });
+        else await api.saveServer(s, { password: pw });
         continue;
       }
       // Serveur injoignable : on propose le diagnostic réseau (IP bannie, sshd arrêté, serveur éteint…).

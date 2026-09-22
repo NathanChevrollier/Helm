@@ -71,6 +71,7 @@ pub fn parse(text: &str) -> Vec<ServerProfile> {
                 group: None,
                 ai_access: false,
                 jump_id: jump,
+                identity_id: None,
             });
         }
     }

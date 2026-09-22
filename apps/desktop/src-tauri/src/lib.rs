@@ -5,7 +5,7 @@ mod commands;
 mod sessions;
 mod store;
 
-use commands::{backups, dashboard, deploy, docker, files, logs, monitoring, security, servers, sites, terminal, tunnels, workspace};
+use commands::{backups, dashboard, deploy, docker, files, identities, logs, monitoring, security, servers, sites, terminal, tunnels, workspace};
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
@@ -84,6 +84,9 @@ pub fn run() {
             servers::putty_sessions,
             servers::ssh_config_sessions,
             servers::server_set_ai_access,
+            identities::identities_list,
+            identities::identity_save,
+            identities::identity_delete,
             terminal::term_open,
             terminal::term_write,
             terminal::term_resize,

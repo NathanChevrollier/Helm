@@ -54,6 +54,13 @@ pub async fn server_save(
     mut profile: ServerProfile,
     secrets_input: SecretsInput,
 ) -> Result<String, String> {
+    if profile.identity_id.as_deref() == Some("") {
+        profile.identity_id = None;
+    }
+    // Identifiant de la banque : le profil affiche son utilisateur.
+    if let Some(i) = &profile.identity_id {
+        profile.username = store.identity(i)?.username;
+    }
     if profile.host.trim().is_empty() || profile.username.trim().is_empty() {
         return Err("l'hôte et l'utilisateur sont obligatoires".into());
     }
@@ -228,6 +235,7 @@ fn read_putty_sessions() -> Option<Vec<ServerProfile>> {
             group: None,
             ai_access: false,
             jump_id: None,
+            identity_id: None,
         });
     }
     Some(out)

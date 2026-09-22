@@ -14,7 +14,7 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::{secrets, ServerProfile, Snippet, Store, TunnelDef};
+use crate::{secrets, Identity, ServerProfile, Snippet, Store, TunnelDef};
 
 const FORMAT: &str = "helm-export";
 const ITERATIONS: u32 = 600_000;
@@ -27,7 +27,11 @@ struct Payload {
     known_hosts: HashMap<String, String>,
     snippets: Vec<Snippet>,
     tunnels: Vec<TunnelDef>,
-    /// `id du serveur` → (`type de secret` → valeur). Vide si les secrets ne sont pas exportés.
+    /// Banque d'identifiants (absente des exports antérieurs).
+    #[serde(default)]
+    identities: Vec<Identity>,
+    /// `id du serveur` (ou `identity-<id>`) → (`type de secret` → valeur). Vide si les secrets ne
+    /// sont pas exportés.
     #[serde(default)]
     secrets: HashMap<String, HashMap<String, String>>,
 }
@@ -52,6 +56,7 @@ struct Envelope {
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {
     pub servers: usize,
+    pub identities: usize,
     pub snippets: usize,
     pub tunnels: usize,
     pub secrets: usize,
@@ -74,14 +79,16 @@ pub fn export(store: &Store, password: &str, include_secrets: bool) -> Result<St
         known_hosts: d.known_hosts.clone(),
         snippets: d.snippets.clone(),
         tunnels: d.tunnels.clone(),
+        identities: d.identities.clone(),
         secrets: HashMap::new(),
     });
     if include_secrets {
-        for s in &payload.servers {
+        let owners = payload.servers.iter().map(|s| s.id.clone()).chain(payload.identities.iter().map(|i| Identity::secret_owner(&i.id)));
+        for owner in owners.collect::<Vec<_>>() {
             let found: HashMap<String, String> =
-                SECRET_KINDS.iter().filter_map(|k| secrets::get(&s.id, k).map(|v| (k.to_string(), v))).collect();
+                SECRET_KINDS.iter().filter_map(|k| secrets::get(&owner, k).map(|v| (k.to_string(), v))).collect();
             if !found.is_empty() {
-                payload.secrets.insert(s.id.clone(), found);
+                payload.secrets.insert(owner, found);
             }
         }
     }
@@ -151,6 +158,7 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
     let p = open(text, password)?;
     let summary = ImportSummary {
         servers: p.servers.len(),
+        identities: p.identities.len(),
         snippets: p.snippets.len(),
         tunnels: p.tunnels.len(),
         secrets: p.secrets.values().map(HashMap::len).sum(),
@@ -167,6 +175,7 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         merge(&mut d.servers, p.servers, |s| &s.id);
         merge(&mut d.snippets, p.snippets, |s| &s.id);
         merge(&mut d.tunnels, p.tunnels, |t| &t.id);
+        merge(&mut d.identities, p.identities, |i| &i.id);
         d.known_hosts.extend(p.known_hosts);
     })?;
     for (server, kinds) in p.secrets {
@@ -199,6 +208,7 @@ mod tests {
                 group: None,
                 ai_access: false,
                 jump_id: None,
+                identity_id: None,
             });
             d.known_hosts.insert("h:22".into(), "SHA256:x".into());
         })

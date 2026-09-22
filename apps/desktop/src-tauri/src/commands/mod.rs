@@ -2,6 +2,7 @@ pub mod backups;
 pub mod dashboard;
 pub mod deploy;
 pub mod docker;
+pub mod identities;
 pub mod files;
 pub mod logs;
 pub mod monitoring;

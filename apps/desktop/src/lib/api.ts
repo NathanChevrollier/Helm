@@ -16,6 +16,24 @@ export interface ServerProfile {
   aiAccess?: boolean;
   /** Serveur de rebond (bastion) à traverser pour joindre celui-ci. */
   jumpId?: string | null;
+  /** Identifiant de la banque utilisé à la place de l'utilisateur et des secrets du profil. */
+  identityId?: string | null;
+}
+
+/** Identifiant réutilisable (banque de logins). */
+export interface Identity {
+  id: string;
+  name: string;
+  username: string;
+  authKind: AuthKind;
+  keyPath?: string | null;
+}
+
+export interface IdentityView extends Identity {
+  hasPassword: boolean;
+  hasPassphrase: boolean;
+  /** Serveurs qui l'utilisent. */
+  usedBy: string[];
 }
 
 export interface ServerView extends ServerProfile {
@@ -604,7 +622,7 @@ export const api = {
   settingsExport: (path: string, password: string, includeSecrets: boolean) => invoke<void>("settings_export", { path, password, includeSecrets }),
   settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),
   settingsImport: (path: string, password: string) =>
-    invoke<{ servers: number; snippets: number; tunnels: number; secrets: number }>("settings_import", { path, password }),
+    invoke<{ servers: number; identities: number; snippets: number; tunnels: number; secrets: number }>("settings_import", { path, password }),
   shellHistory: (serverId: string) => invoke<string[]>("shell_history", { serverId }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
   appIsLocked: () => invoke<boolean>("app_is_locked"),
@@ -630,6 +648,11 @@ export const api = {
   puttySessions: () => invoke<ServerProfile[]>("putty_sessions"),
   sshConfigSessions: () => invoke<ServerProfile[]>("ssh_config_sessions"),
   setAiAccess: (id: string, enabled: boolean) => invoke<void>("server_set_ai_access", { id, enabled }),
+
+  identities: () => invoke<IdentityView[]>("identities_list"),
+  identitySave: (identity: Identity, secretsInput: { password?: string; passphrase?: string }) =>
+    invoke<string>("identity_save", { identity, secretsInput }),
+  identityDelete: (id: string) => invoke<void>("identity_delete", { id }),
 
   snippets: () => invoke<Snippet[]>("snippets_list"),
   saveSnippet: (snippet: Snippet) => invoke<void>("snippet_save", { snippet }),

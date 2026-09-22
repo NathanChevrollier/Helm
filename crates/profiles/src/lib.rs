@@ -51,6 +51,30 @@ pub struct ServerProfile {
     /// Serveur de rebond (bastion) par lequel passer pour joindre celui-ci (`ssh -J`).
     #[serde(default)]
     pub jump_id: Option<String>,
+    /// Identifiant de la banque utilisé pour se connecter : il remplace alors l'utilisateur,
+    /// le type d'authentification, la clé et les secrets du profil.
+    #[serde(default)]
+    pub identity_id: Option<String>,
+}
+
+/// Identifiant réutilisable (banque de logins) : utilisateur + mot de passe ou clé, partagé
+/// par plusieurs serveurs. Ses secrets sont dans le keyring, sous [`Identity::secret_owner`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Identity {
+    pub id: String,
+    pub name: String,
+    pub username: String,
+    pub auth_kind: AuthKind,
+    #[serde(default)]
+    pub key_path: Option<String>,
+}
+
+impl Identity {
+    /// Propriétaire des secrets de l'identifiant dans le keyring (à la place d'un id de serveur).
+    pub fn secret_owner(id: &str) -> String {
+        format!("identity-{id}")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +111,9 @@ pub struct Data {
     pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub tunnels: Vec<TunnelDef>,
+    /// Banque d'identifiants (logins réutilisables).
+    #[serde(default)]
+    pub identities: Vec<Identity>,
     /// État de l'interface (onglets, dossiers ouverts…), opaque côté Rust.
     #[serde(default)]
     pub ui_state: serde_json::Value,
@@ -187,24 +214,33 @@ impl Store {
         Ok(chain)
     }
 
-    /// Paramètres de connexion SSH d'un serveur, secrets lus dans le keyring.
+    pub fn identity(&self, id: &str) -> Result<Identity, String> {
+        self.read(|d| d.identities.iter().find(|i| i.id == id).cloned()).ok_or_else(|| "identifiant introuvable dans la banque".to_string())
+    }
+
+    /// Paramètres de connexion SSH d'un serveur, secrets lus dans le keyring. Un serveur lié à
+    /// un identifiant de la banque utilise l'utilisateur, la clé et les secrets de celui-ci.
     pub fn connect_params(&self, server_id: &str) -> Result<ConnectParams, String> {
         let profile = self.server(server_id)?;
-        let auth = match profile.auth_kind {
+        let (username, auth_kind, key_path, owner, what) = match profile.identity_id.as_deref().filter(|i| !i.is_empty()) {
+            Some(id) => {
+                let ident = self.identity(id)?;
+                (ident.username, ident.auth_kind, ident.key_path, Identity::secret_owner(id), "cet identifiant")
+            }
+            None => (profile.username, profile.auth_kind, profile.key_path, server_id.to_string(), "ce serveur"),
+        };
+        let auth = match auth_kind {
             AuthKind::Password => Auth::Password {
-                password: secrets::get(server_id, "password").ok_or("NEED_PASSWORD: aucun mot de passe enregistré pour ce serveur")?,
+                password: secrets::get(&owner, "password").ok_or(format!("NEED_PASSWORD: aucun mot de passe enregistré pour {what}"))?,
             },
-            AuthKind::Key => Auth::KeyFile {
-                path: profile.key_path.clone().ok_or("aucune clé privée configurée")?,
-                passphrase: secrets::get(server_id, "passphrase"),
-            },
-            AuthKind::Agent => Auth::Agent { key_path: profile.key_path.clone() },
+            AuthKind::Key => Auth::KeyFile { path: key_path.ok_or("aucune clé privée configurée")?, passphrase: secrets::get(&owner, "passphrase") },
+            AuthKind::Agent => Auth::Agent { key_path },
         };
         let host_key = format!("{}:{}", profile.host, profile.port);
         Ok(ConnectParams {
             host: profile.host,
             port: profile.port,
-            username: profile.username,
+            username,
             auth,
             known_fingerprint: self.read(|d| d.known_hosts.get(&host_key).cloned()),
         })
@@ -260,11 +296,41 @@ mod tests {
             group: None,
             ai_access: false,
             jump_id: jump.map(str::to_string),
+            identity_id: None,
         };
         s.write(|d| d.servers.extend([p("a", Some("b")), p("b", Some("c")), p("c", None), p("x", Some("y")), p("y", Some("x"))])).unwrap();
         assert_eq!(s.jump_chain("a").unwrap(), vec!["b", "c"]);
         assert!(s.jump_chain("c").unwrap().is_empty());
         assert!(s.jump_chain("x").is_err(), "boucle détectée");
+    }
+
+    #[test]
+    fn identity_overrides_profile_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path());
+        s.write(|d| {
+            d.identities.push(Identity { id: "i".into(), name: "Perso".into(), username: "alice".into(), auth_kind: AuthKind::Agent, key_path: Some("k".into()) });
+            d.servers.push(ServerProfile {
+                id: "a".into(),
+                name: "VPS".into(),
+                host: "h".into(),
+                port: 22,
+                username: "root".into(),
+                auth_kind: AuthKind::Password,
+                key_path: None,
+                color: None,
+                group: None,
+                ai_access: false,
+                jump_id: None,
+                identity_id: Some("i".into()),
+            });
+        })
+        .unwrap();
+        let p = s.connect_params("a").unwrap();
+        assert_eq!(p.username, "alice");
+        assert!(matches!(p.auth, Auth::Agent { key_path: Some(ref k) } if k == "k"), "authentification de l'identifiant");
+        s.write(|d| d.identities.clear()).unwrap();
+        assert!(s.connect_params("a").is_err(), "identifiant supprimé : erreur explicite");
     }
 
     #[test]

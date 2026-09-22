@@ -434,7 +434,7 @@ function ExportImport() {
       }
       const r = await api.settingsImport(path, password);
       await refreshServers();
-      notify(`Importé : ${r.servers} serveur(s), ${r.snippets} snippet(s), ${r.tunnels} tunnel(s), ${r.secrets} secret(s)`, "success");
+      notify(`Importé : ${r.servers} serveur(s), ${r.identities} identifiant(s), ${r.snippets} snippet(s), ${r.tunnels} tunnel(s), ${r.secrets} secret(s)`, "success");
     } catch (e) {
       notify(errorMessage(e), "error");
     }
