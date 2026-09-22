@@ -4,6 +4,7 @@ import { api, errorMessage, type Service } from "../../lib/api";
 import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../../components/ui";
 import { useCachedState } from "../../lib/cache";
+import { useAutoRefresh } from "../../lib/refresh";
 
 export default function Services({ serverId }: { serverId: string }) {
   const { ask, notify } = useAppPick("ask", "notify");
@@ -24,6 +25,7 @@ export default function Services({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAutoRefresh((auto) => (auto ? api.services(serverId).then(setList, () => {}) : load()), { serverId });
 
   const rows = useMemo(() => {
     const f = filter.toLowerCase();

@@ -7,6 +7,7 @@ import Fail2ban from "./security/Fail2ban";
 import Firewall from "./security/Firewall";
 import Access from "./security/Access";
 import { useCachedState } from "../lib/cache";
+import { useAutoRefresh } from "../lib/refresh";
 
 const LABEL: Record<Severity, string> = { critical: "critique", high: "élevé", medium: "moyen", low: "faible", ok: "OK" };
 const TONE: Record<Severity, "danger" | "warn" | "accent" | "muted" | "ok"> = { critical: "danger", high: "danger", medium: "warn", low: "muted", ok: "ok" };
@@ -57,6 +58,7 @@ function Security({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAutoRefresh(load, { serverId, auto: false });
 
   const startFix = async (f: Finding) => {
     if (f.fix === "apply-updates") {

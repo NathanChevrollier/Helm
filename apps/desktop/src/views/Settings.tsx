@@ -237,6 +237,25 @@ function Preferences() {
           <option value="system">Système</option>
         </select>
       </div>
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
+        <span className="flex-1">
+          <span className="font-medium">Actualisation automatique</span>
+          <span className="block text-sm text-muted">
+            État des conteneurs, sites, services, fichiers… relu régulièrement sur les serveurs déjà connectés. F5 ou le bouton ⟳ de l'en-tête actualisent à tout moment.
+          </span>
+        </span>
+        <select
+          className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
+          value={settings.autoRefreshSecs}
+          onChange={(e) => setSettings({ autoRefreshSecs: Number(e.target.value) })}
+        >
+          <option value={0}>Manuelle</option>
+          <option value={5}>Toutes les 5 s</option>
+          <option value={15}>Toutes les 15 s</option>
+          <option value={30}>Toutes les 30 s</option>
+          <option value={60}>Toutes les minutes</option>
+        </select>
+      </div>
       <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
         <input type="checkbox" className="mt-1" checked={settings.alertNotifications} onChange={(e) => setSettings({ alertNotifications: e.target.checked })} />
         <span>

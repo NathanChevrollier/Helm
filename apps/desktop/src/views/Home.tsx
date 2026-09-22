@@ -6,6 +6,7 @@ import { ensureConnected, useAppPick } from "../lib/store";
 import { usePolling } from "../lib/poll";
 import { Button, EmptyState, IconButton } from "../components/ui";
 import { useCachedState } from "../lib/cache";
+import { useAutoRefresh } from "../lib/refresh";
 
 const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
@@ -52,6 +53,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
   }, [ids]);
 
   usePolling(refresh, REFRESH_MS, [refresh], visible);
+  useAutoRefresh(refresh, { auto: false, enabled: visible });
   useEffect(() => {
     void api.auditList(6).then(setActivity).catch(() => {});
   }, []);

@@ -8,6 +8,7 @@ import { api, errorMessage, type Certificate, type Container, type NginxState, t
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import { useCachedState } from "../lib/cache";
+import { useAutoRefresh } from "../lib/refresh";
 
 const NginxEditor = lazy(() => import("../components/NginxEditor"));
 const NewSiteWizard = lazy(() => import("../components/NewSiteWizard"));
@@ -78,6 +79,16 @@ function Sites({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAutoRefresh(
+    (auto) =>
+      auto
+        ? Promise.all([api.sitesState(serverId), api.dockerOverview(serverId).catch(() => null)]).then(([s, d]) => {
+            setState(s);
+            setContainers(d?.containers ?? []);
+          }, () => {})
+        : load(),
+    { serverId },
+  );
 
   const certFor = useCallback(
     (block: ServerBlock) => state?.certificates.find((c) => c.path === block.sslCertificate),

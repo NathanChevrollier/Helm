@@ -6,6 +6,7 @@ import { track } from "../lib/transfers";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { useCachedState } from "../lib/cache";
+import { useAutoRefresh } from "../lib/refresh";
 
 export default function BackupsView() {
   const serverId = useApp((s) => s.activeServerId);
@@ -33,6 +34,7 @@ function Backups({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAutoRefresh(load, { serverId, auto: false });
 
   if (error) return <EmptyState icon={<DatabaseBackup size={40} />} title="Sauvegardes indisponibles">{error}</EmptyState>;
   if (!data) return <EmptyState icon={<DatabaseBackup size={40} />} title="Chargement…" />;

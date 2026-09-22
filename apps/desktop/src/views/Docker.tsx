@@ -12,6 +12,7 @@ import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../componen
 import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../components/DockerExtras";
 import { usePolling } from "../lib/poll";
 import { useCachedState } from "../lib/cache";
+import { useAutoRefresh } from "../lib/refresh";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
@@ -58,6 +59,7 @@ function Docker({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAutoRefresh((auto) => (auto ? api.dockerOverview(serverId).then(setData, () => {}) : load()), { serverId });
 
   if (error) return <EmptyState icon={<ContainerIcon size={40} />} title="Docker indisponible">{error}</EmptyState>;
   if (!data) return <EmptyState icon={<ContainerIcon size={40} />} title="Chargement…" />;

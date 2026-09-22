@@ -4,6 +4,7 @@ import { api, errorMessage, type CronSource, type Schedule } from "../../lib/api
 import { useApp, useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../../components/ui";
 import { useCachedState } from "../../lib/cache";
+import { useAutoRefresh } from "../../lib/refresh";
 
 export default function ScheduleView({ serverId }: { serverId: string }) {
   const { ask, notify } = useAppPick("ask", "notify");
@@ -27,6 +28,7 @@ export default function ScheduleView({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAutoRefresh((auto) => (auto ? api.scheduleList(serverId).then(setData, () => {}) : load()), { serverId });
 
   if (error) return <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>;
   if (!data) return <EmptyState icon={<CalendarClock size={36} className="animate-pulse" />} title="Lecture des tâches planifiées…" />;

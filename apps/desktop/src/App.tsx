@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
-import { Lock, Plus, Search, ShipWheel, type LucideIcon } from "lucide-react";
+import { Lock, Plus, RefreshCw, Search, ShipWheel, type LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp, useAppPick } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
@@ -12,6 +12,7 @@ import { watchAlerts } from "./lib/alerts";
 import { checkForUpdate } from "./lib/updater";
 import { applyTheme } from "./lib/theme";
 import { display, matches, shortcutOf } from "./lib/shortcuts";
+import { refreshAll, useRefresh } from "./lib/refresh";
 import HomeView from "./views/Home";
 
 // Chargé à part : xterm pèse un tiers de l'app et n'est pas nécessaire pour afficher l'accueil.
@@ -61,6 +62,16 @@ export default function App() {
     const t = setTimeout(() => void checkForUpdate(), 5000);
     return () => clearTimeout(t);
   }, []);
+  // État de connexion des serveurs (pastilles), relu au rythme de l'actualisation automatique.
+  const autoRefreshSecs = useApp((s) => s.settings.autoRefreshSecs);
+  useEffect(() => {
+    if (autoRefreshSecs <= 0) return;
+    const id = setInterval(() => {
+      if (!document.hidden) void useApp.getState().refreshServers().catch(() => {});
+    }, autoRefreshSecs * 1000);
+    return () => clearInterval(id);
+  }, [autoRefreshSecs]);
+
   const themeSetting = useApp((s) => s.settings.theme);
   useEffect(() => applyTheme(themeSetting), [themeSetting]);
 
@@ -68,8 +79,10 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Pas de rechargement de la fenêtre : il couperait les terminaux (et ne doit rien déverrouiller).
+      // F5 / Ctrl+R actualisent plutôt les données affichées.
       if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && e.code === "KeyR")) {
         e.preventDefault();
+        if (!useLock.getState().locked && !e.repeat) refreshAll();
         return;
       }
       if (useLock.getState().locked) return;
@@ -142,9 +155,10 @@ export default function App() {
               <Plus size={15} />
             </button>
           </div>
+          <RefreshButton />
           <button
             onClick={() => setPalette(true)}
-            className="ml-auto flex h-[34px] w-[440px] max-w-[45%] shrink-0 items-center gap-2.5 rounded-lg border border-border bg-panel px-3 text-[13px] text-muted hover:border-border-strong"
+            className="flex h-[34px] w-[440px] max-w-[45%] shrink-0 items-center gap-2.5 rounded-lg border border-border bg-panel px-3 text-[13px] text-muted hover:border-border-strong"
           >
             <Search size={15} />
             Rechercher, ouvrir, relancer…
@@ -203,6 +217,28 @@ export default function App() {
       <Toasts />
       {locked && <LockScreen />}
     </div>
+  );
+}
+
+/** Actualise la page affichée et l'état des serveurs (aussi F5). */
+function RefreshButton() {
+  const tick = useRefresh((s) => s.tick);
+  const [spin, setSpin] = useState(false);
+  useEffect(() => {
+    if (!tick) return;
+    setSpin(true);
+    const t = setTimeout(() => setSpin(false), 700);
+    return () => clearTimeout(t);
+  }, [tick]);
+  return (
+    <button
+      onClick={refreshAll}
+      title="Actualiser (F5)"
+      aria-label="Actualiser"
+      className="ml-auto flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-border text-muted hover:border-border-strong hover:text-fg"
+    >
+      <RefreshCw size={15} className={spin ? "animate-spin" : ""} />
+    </button>
   );
 }
 

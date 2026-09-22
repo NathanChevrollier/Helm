@@ -9,6 +9,7 @@ import {
 import { api, errorMessage, formatBytes, shellQuote, type FsEntry, type Listing } from "../lib/api";
 import { track } from "../lib/transfers";
 import TransfersBar from "../components/TransfersBar";
+import { useAutoRefresh } from "../lib/refresh";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 
@@ -175,6 +176,18 @@ function Explorer({
   useEffect(() => {
     if (version > 0) void load(cwdRef.current);
   }, [version, load]);
+  useAutoRefresh(
+    async (auto) => {
+      if (!cwdRef.current) return;
+      if (!auto) return load(cwdRef.current);
+      const dir = cwdRef.current;
+      const l = await api.fsList(serverId, dir).catch(() => null);
+      if (!l || cwdRef.current !== dir) return;
+      setListing(l);
+      setSelected((sel) => new Set([...sel].filter((p) => l.entries.some((e) => e.path === p))));
+    },
+    { serverId },
+  );
 
   // Dossier demandé depuis ailleurs (palette Ctrl+K, raccourci) alors que l'explorateur est déjà ouvert.
   const requested = pane === "left" ? filesPaths[serverId] : undefined;
