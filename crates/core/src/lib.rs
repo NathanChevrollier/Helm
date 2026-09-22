@@ -4,6 +4,7 @@ pub mod access;
 pub mod agent;
 pub mod apache;
 pub mod backup;
+pub mod db;
 pub mod deploy;
 pub mod diagnose;
 pub mod docker;

@@ -622,6 +622,33 @@ export interface AuditEntry {
   error: string | null;
 }
 
+/** Moteur de base de données. */
+export type DbEngine = "mysql" | "postgres";
+
+export interface DbInstance {
+  id: string;
+  label: string;
+  engine: DbEngine;
+  /** Conteneur Docker, ou null pour le service installé sur le serveur. */
+  container?: string | null;
+  version: string;
+}
+
+/** Base ou table, avec sa taille et son nombre (tables ou lignes), estimés par le moteur. */
+export interface DbNamed {
+  name: string;
+  size: number;
+  count: number;
+}
+
+export interface DbQueryResult {
+  columns: string[];
+  /** `null` = valeur NULL. */
+  rows: (string | null)[][];
+  truncated: boolean;
+  durationMs: number;
+}
+
 export type SyncMode = "off" | "file" | "server";
 
 export interface SyncView {
@@ -712,6 +739,13 @@ export const api = {
   desktopSave: (desktop: RemoteDesktop, password?: string) => invoke<string>("desktop_save", { desktop, password }),
   desktopDelete: (id: string) => invoke<void>("desktop_delete", { id }),
   desktopLaunch: (id: string) => invoke<string>("desktop_launch", { id }),
+
+  dbInstances: (serverId: string) => invoke<DbInstance[]>("db_instances", { serverId }),
+  dbDatabases: (serverId: string, instance: DbInstance) => invoke<DbNamed[]>("db_databases", { serverId, instance }),
+  dbTables: (serverId: string, instance: DbInstance, database: string) => invoke<DbNamed[]>("db_tables", { serverId, instance, database }),
+  dbQuery: (serverId: string, instance: DbInstance, database: string | null, sql: string, limit = 500) =>
+    invoke<DbQueryResult>("db_query", { serverId, instance, database, sql, limit }),
+  dbPreviewQuery: (engine: DbEngine, table: string, limit = 200) => invoke<string>("db_preview_query", { engine, table, limit }),
 
   syncGet: () => invoke<SyncView>("sync_get"),
   /** `passphrase` / `token` : `undefined` = inchangé, `""` = supprimé. */

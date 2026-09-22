@@ -6,8 +6,8 @@ mod sessions;
 mod store;
 
 use commands::{
-    backups, dashboard, deploy, docker, files, identities, logs, monitoring, rdp, security, servers, sites, sync, terminal, tunnels,
-    workspace,
+    backups, dashboard, databases, deploy, docker, files, identities, logs, monitoring, rdp, security, servers, sites, sync, terminal,
+    tunnels, workspace,
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
@@ -98,6 +98,11 @@ pub fn run() {
             rdp::desktop_save,
             rdp::desktop_delete,
             rdp::desktop_launch,
+            databases::db_instances,
+            databases::db_databases,
+            databases::db_tables,
+            databases::db_query,
+            databases::db_preview_query,
             terminal::term_open,
             terminal::term_write,
             terminal::term_resize,

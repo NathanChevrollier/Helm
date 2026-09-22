@@ -2,6 +2,7 @@ import {
   Activity,
   Cable,
   Container,
+  Database,
   DatabaseBackup,
   FolderTree,
   Globe,
@@ -21,6 +22,7 @@ export type SectionId =
   | "files"
   | "monitoring"
   | "docker"
+  | "databases"
   | "sites"
   | "logs"
   | "tunnels"
@@ -44,6 +46,7 @@ export const SECTIONS: Section[] = [
   { id: "files", label: "Fichiers", icon: FolderTree, perServer: true, description: "Explorateur SFTP, transferts entre serveurs, édition distante." },
   { id: "monitoring", label: "Monitoring", icon: Activity, perServer: true, description: "CPU, RAM, disque, réseau, processus, services systemd et alertes." },
   { id: "docker", label: "Docker", icon: Container, perServer: true, description: "Conteneurs, logs en direct, exec, stats, compose et déploiement." },
+  { id: "databases", label: "Bases de données", icon: Database, perServer: true, description: "Bases MySQL/MariaDB et PostgreSQL : tables, requêtes SQL, export CSV." },
   { id: "sites", label: "Sites", icon: Globe, perServer: true, description: "Sous-domaines nginx, certificats SSL, sauvegardes de configuration." },
   { id: "logs", label: "Journaux", icon: ScrollText, perServer: true, description: "Logs Docker, systemd et nginx en direct, fusionnés et filtrables." },
   { id: "tunnels", label: "Tunnels", icon: Cable, description: "Accès local à des services du serveur, sans les exposer sur Internet." },

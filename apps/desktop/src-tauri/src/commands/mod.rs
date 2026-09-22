@@ -1,5 +1,6 @@
 pub mod backups;
 pub mod dashboard;
+pub mod databases;
 pub mod deploy;
 pub mod docker;
 pub mod files;
