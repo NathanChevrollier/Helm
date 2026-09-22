@@ -96,7 +96,8 @@ pub async fn identity_save(
 
 #[tauri::command]
 pub fn identity_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
-    let users: Vec<String> = store.read(|d| d.servers.iter().filter(|s| s.identity_id.as_deref() == Some(&id)).map(|s| s.name.clone()).collect());
+    let users: Vec<String> =
+        store.read(|d| d.servers.iter().filter(|s| s.identity_id.as_deref() == Some(&id)).map(|s| s.name.clone()).collect());
     if !users.is_empty() {
         return Err(format!("identifiant utilisé par : {}. Change d'abord l'authentification de ces serveurs.", users.join(", ")));
     }

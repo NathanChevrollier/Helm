@@ -8,6 +8,7 @@ import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Badge, Button, Input } from "../components/ui";
 import { checkForUpdate } from "../lib/updater";
+import SyncSettings from "../components/SyncSettings";
 
 const TABS = [
   { id: "journal", label: "Journal d'actions", icon: History },
@@ -267,6 +268,7 @@ function Preferences() {
       </label>
       <Shortcuts />
       <AppLock />
+      <SyncSettings />
       <ExportImport />
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
         <span className="flex-1">

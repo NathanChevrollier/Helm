@@ -5,7 +5,7 @@
 //! mot de passe est fourni ; les secrets du coffre (mots de passe SSH, passphrases, sudo, restic)
 //! ne peuvent être inclus que dans un fichier chiffré.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use base64::engine::general_purpose::STANDARD as B64;
@@ -18,22 +18,60 @@ use crate::{secrets, Identity, ServerProfile, Snippet, Store, TunnelDef};
 
 const FORMAT: &str = "helm-export";
 const ITERATIONS: u32 = 600_000;
-const SECRET_KINDS: &[&str] = &["password", "passphrase", "sudo", "restic"];
+pub(crate) const SECRET_KINDS: &[&str] = &["password", "passphrase", "sudo", "restic"];
 
-#[derive(Serialize, Deserialize, Default)]
+/// Réglages transportés par un export ou une synchronisation. Les tables sont triées
+/// (`BTreeMap`) : deux contenus identiques donnent le même JSON, donc la même empreinte.
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct Payload {
-    servers: Vec<ServerProfile>,
-    known_hosts: HashMap<String, String>,
-    snippets: Vec<Snippet>,
-    tunnels: Vec<TunnelDef>,
+pub(crate) struct Payload {
+    pub servers: Vec<ServerProfile>,
+    pub known_hosts: BTreeMap<String, String>,
+    pub snippets: Vec<Snippet>,
+    pub tunnels: Vec<TunnelDef>,
     /// Banque d'identifiants (absente des exports antérieurs).
     #[serde(default)]
-    identities: Vec<Identity>,
+    pub identities: Vec<Identity>,
     /// `id du serveur` (ou `identity-<id>`) → (`type de secret` → valeur). Vide si les secrets ne
     /// sont pas exportés.
     #[serde(default)]
-    secrets: HashMap<String, HashMap<String, String>>,
+    pub secrets: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+/// Réglages actuels, avec les secrets du coffre si demandé.
+pub(crate) fn snapshot(store: &Store, include_secrets: bool) -> Payload {
+    let mut payload = store.read(|d| Payload {
+        servers: d.servers.clone(),
+        known_hosts: d.known_hosts.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        snippets: d.snippets.clone(),
+        tunnels: d.tunnels.clone(),
+        identities: d.identities.clone(),
+        secrets: BTreeMap::new(),
+    });
+    if include_secrets {
+        let owners: Vec<String> =
+            payload.servers.iter().map(|s| s.id.clone()).chain(payload.identities.iter().map(|i| Identity::secret_owner(&i.id))).collect();
+        for owner in owners {
+            let found: BTreeMap<String, String> =
+                SECRET_KINDS.iter().filter_map(|k| secrets::get(&owner, k).map(|v| (k.to_string(), v))).collect();
+            if !found.is_empty() {
+                payload.secrets.insert(owner, found);
+            }
+        }
+    }
+    payload
+}
+
+/// Enregistre dans le coffre les secrets d'un export (types connus uniquement).
+pub(crate) fn store_secrets(from: &BTreeMap<String, BTreeMap<String, String>>) -> Result<(), String> {
+    for (owner, kinds) in from {
+        for (kind, value) in kinds {
+            if SECRET_KINDS.contains(&kind.as_str()) {
+                secrets::set(owner, kind, value)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -74,25 +112,12 @@ pub fn export(store: &Store, password: &str, include_secrets: bool) -> Result<St
     if include_secrets && password.is_empty() {
         return Err("un mot de passe est obligatoire pour exporter les secrets".into());
     }
-    let mut payload = store.read(|d| Payload {
-        servers: d.servers.clone(),
-        known_hosts: d.known_hosts.clone(),
-        snippets: d.snippets.clone(),
-        tunnels: d.tunnels.clone(),
-        identities: d.identities.clone(),
-        secrets: HashMap::new(),
-    });
-    if include_secrets {
-        let owners = payload.servers.iter().map(|s| s.id.clone()).chain(payload.identities.iter().map(|i| Identity::secret_owner(&i.id)));
-        for owner in owners.collect::<Vec<_>>() {
-            let found: HashMap<String, String> =
-                SECRET_KINDS.iter().filter_map(|k| secrets::get(&owner, k).map(|v| (k.to_string(), v))).collect();
-            if !found.is_empty() {
-                payload.secrets.insert(owner, found);
-            }
-        }
-    }
-    let json = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+    seal(&snapshot(store, include_secrets), password)
+}
+
+/// Enveloppe d'export d'un contenu : chiffrée si `password` n'est pas vide.
+pub(crate) fn seal(payload: &Payload, password: &str) -> Result<String, String> {
+    let json = serde_json::to_vec(payload).map_err(|e| e.to_string())?;
     let envelope = if password.is_empty() {
         Envelope {
             format: FORMAT.into(),
@@ -134,7 +159,7 @@ pub fn is_encrypted(text: &str) -> Result<bool, String> {
     Ok(e.encrypted)
 }
 
-fn open(text: &str, password: &str) -> Result<Payload, String> {
+pub(crate) fn open(text: &str, password: &str) -> Result<Payload, String> {
     let e: Envelope = serde_json::from_str(text).map_err(|_| "ce fichier n'est pas un export de Helm")?;
     if e.format != FORMAT || e.version != 1 {
         return Err("format d'export inconnu (fichier d'une version plus récente de Helm ?)".into());
@@ -161,7 +186,7 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         identities: p.identities.len(),
         snippets: p.snippets.len(),
         tunnels: p.tunnels.len(),
-        secrets: p.secrets.values().map(HashMap::len).sum(),
+        secrets: p.secrets.values().map(BTreeMap::len).sum(),
     };
     store.write(|d| {
         fn merge<T>(into: &mut Vec<T>, from: Vec<T>, id: impl Fn(&T) -> &str) {
@@ -178,13 +203,7 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         merge(&mut d.identities, p.identities, |i| &i.id);
         d.known_hosts.extend(p.known_hosts);
     })?;
-    for (server, kinds) in p.secrets {
-        for (kind, value) in kinds {
-            if SECRET_KINDS.contains(&kind.as_str()) {
-                secrets::set(&server, &kind, &value)?;
-            }
-        }
-    }
+    store_secrets(&p.secrets)?;
     Ok(summary)
 }
 

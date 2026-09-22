@@ -1,0 +1,28 @@
+# Bloc nginx du sous-domaine de synchronisation (à adapter : domaine, port).
+# Certificat : sudo certbot certonly --nginx -d sync.exemple.fr
+# (ou « Sites » → nouveau site dans Helm, qui s'occupe du vhost et du certificat).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name sync.exemple.fr;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name sync.exemple.fr;
+
+    ssl_certificate /etc/letsencrypt/live/sync.exemple.fr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sync.exemple.fr/privkey.pem;
+
+    client_max_body_size 8m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8091;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

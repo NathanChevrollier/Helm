@@ -6,6 +6,7 @@ pub mod audit;
 pub mod export;
 pub mod secrets;
 pub mod ssh_config;
+pub mod sync;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +31,7 @@ pub enum AuthKind {
     Agent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerProfile {
     pub id: String,
@@ -77,7 +78,7 @@ impl Identity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Snippet {
     pub id: String,
@@ -114,6 +115,9 @@ pub struct Data {
     /// Banque d'identifiants (logins réutilisables).
     #[serde(default)]
     pub identities: Vec<Identity>,
+    /// Synchronisation avec les autres PC (propre à ce PC).
+    #[serde(default)]
+    pub sync: Option<sync::SyncConfig>,
     /// État de l'interface (onglets, dossiers ouverts…), opaque côté Rust.
     #[serde(default)]
     pub ui_state: serde_json::Value,
@@ -233,7 +237,9 @@ impl Store {
             AuthKind::Password => Auth::Password {
                 password: secrets::get(&owner, "password").ok_or(format!("NEED_PASSWORD: aucun mot de passe enregistré pour {what}"))?,
             },
-            AuthKind::Key => Auth::KeyFile { path: key_path.ok_or("aucune clé privée configurée")?, passphrase: secrets::get(&owner, "passphrase") },
+            AuthKind::Key => {
+                Auth::KeyFile { path: key_path.ok_or("aucune clé privée configurée")?, passphrase: secrets::get(&owner, "passphrase") }
+            }
             AuthKind::Agent => Auth::Agent { key_path },
         };
         let host_key = format!("{}:{}", profile.host, profile.port);
@@ -309,7 +315,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = Store::open(dir.path());
         s.write(|d| {
-            d.identities.push(Identity { id: "i".into(), name: "Perso".into(), username: "alice".into(), auth_kind: AuthKind::Agent, key_path: Some("k".into()) });
+            d.identities.push(Identity {
+                id: "i".into(),
+                name: "Perso".into(),
+                username: "alice".into(),
+                auth_kind: AuthKind::Agent,
+                key_path: Some("k".into()),
+            });
             d.servers.push(ServerProfile {
                 id: "a".into(),
                 name: "VPS".into(),

@@ -1,0 +1,17 @@
+services:
+  helm-sync:
+    build: .
+    image: helm-sync:latest
+    container_name: helm-sync
+    restart: unless-stopped
+    environment:
+      # Un ou plusieurs jetons séparés par des virgules (openssl rand -hex 32), à mettre dans .env.
+      HELM_SYNC_TOKENS: ${HELM_SYNC_TOKENS:?définis HELM_SYNC_TOKENS dans le fichier .env}
+    volumes:
+      - helm-sync-data:/data
+    # Écoute seulement en local : nginx (HTTPS) est devant. Change le port s'il est déjà pris.
+    ports:
+      - "127.0.0.1:8091:8080"
+
+volumes:
+  helm-sync-data:

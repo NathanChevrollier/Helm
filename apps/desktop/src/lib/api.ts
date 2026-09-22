@@ -591,6 +591,26 @@ export interface AuditEntry {
   error: string | null;
 }
 
+export type SyncMode = "off" | "file" | "server";
+
+export interface SyncView {
+  mode: SyncMode;
+  path?: string | null;
+  url?: string | null;
+  includeSecrets: boolean;
+  lastRev: number;
+  lastSync?: number | null;
+  hasPassphrase: boolean;
+  hasToken: boolean;
+}
+
+export interface SyncOutcome {
+  action: "upToDate" | "pushed" | "pulled" | "merged";
+  rev: number;
+  removedServers: string[];
+  removedTunnels: string[];
+}
+
 export interface TmuxSession {
   name: string;
   attached: boolean;
@@ -653,6 +673,12 @@ export const api = {
   identitySave: (identity: Identity, secretsInput: { password?: string; passphrase?: string }) =>
     invoke<string>("identity_save", { identity, secretsInput }),
   identityDelete: (id: string) => invoke<void>("identity_delete", { id }),
+
+  syncGet: () => invoke<SyncView>("sync_get"),
+  /** `passphrase` / `token` : `undefined` = inchangé, `""` = supprimé. */
+  syncSet: (settings: { mode: SyncMode; path?: string | null; url?: string | null; includeSecrets: boolean; passphrase?: string; token?: string }) =>
+    invoke<void>("sync_set", { settings }),
+  syncNow: () => invoke<SyncOutcome>("sync_now"),
 
   snippets: () => invoke<Snippet[]>("snippets_list"),
   saveSnippet: (snippet: Snippet) => invoke<void>("snippet_save", { snippet }),
