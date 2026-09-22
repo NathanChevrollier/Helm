@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-import { api, errorMessage, type AppSpec, type NewSitePlan } from "../lib/api";
+import { api, ENGINE_LABELS, errorMessage, type AppSpec, type NewSitePlan, type WebEngine } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Button, Field, Input, Modal } from "./ui";
 
@@ -23,10 +23,23 @@ function readEmail() {
 }
 
 /**
- * Assistant « Nouveau site » : conteneur Docker (optionnel) → vhost nginx (application sûre)
- * → certificat HTTPS via certbot → vérification.
+ * Assistant « Nouveau site » : conteneur Docker (optionnel) → vhost nginx ou Apache (application
+ * sûre) → certificat HTTPS via certbot → vérification.
  */
-export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId: string; onClose: () => void; onDone: () => void }) {
+export default function NewSiteWizard({
+  serverId,
+  engine = "nginx",
+  confRoot,
+  onClose,
+  onDone,
+}: {
+  serverId: string;
+  engine?: WebEngine;
+  confRoot?: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const web = ENGINE_LABELS[engine];
   const notify = useApp((s) => s.notify);
   const [plan, setPlan] = useState<NewSitePlan | null>(null);
   const [domain, setDomain] = useState("");
@@ -38,7 +51,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
   const [https, setHttps] = useState(true);
   const [email, setEmail] = useState(readEmail);
   const [dnsIp, setDnsIp] = useState<string | null | undefined>(undefined);
-  const [preview, setPreview] = useState<{ vhost: string; compose: string | null } | null>(null);
+  const [preview, setPreview] = useState<{ vhost: string; compose: string | null; path: string; link: string | null } | null>(null);
   const [steps, setSteps] = useState<Step[] | null>(null);
 
   useEffect(() => {
@@ -80,7 +93,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
       setPreview(null);
       return;
     }
-    void api.sitesPreview(domain, hostPort, spec).then(setPreview);
+    void api.sitesPreview(domain, hostPort, spec, engine, confRoot).then(setPreview);
     // `spec` est dérivé des champs ci-dessous.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [domain, hostPort, source, image, containerPort, env]);
@@ -93,7 +106,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
     }
     const list: Step[] = [
       { label: source === "docker" ? `Créer et démarrer le conteneur ${name}` : `Utiliser l'application déjà en écoute sur le port ${hostPort}`, state: source === "docker" ? "pending" : "skipped" },
-      { label: `Configurer nginx pour ${domain}`, state: "pending" },
+      { label: `Configurer ${web} pour ${domain}`, state: "pending" },
       { label: "Obtenir le certificat HTTPS (Let's Encrypt)", state: https ? "pending" : "skipped" },
       { label: "Vérifier que le site répond", state: "pending" },
     ];
@@ -115,11 +128,11 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
     }
 
     update(1, { state: "running" });
-    const available = `/etc/nginx/sites-available/${domain}`;
+    const available = preview!.path;
     try {
-      const r = await api.sitesWrite(serverId, available, preview!.vhost, `/etc/nginx/sites-enabled/${domain}`);
+      const r = await api.sitesWrite(serverId, available, preview!.vhost, preview!.link ?? undefined, engine, engine === "apache");
       if (!r.ok) {
-        update(1, { state: "error", detail: `nginx a refusé la configuration (rien n'a été modifié) :\n${r.log}` });
+        update(1, { state: "error", detail: `${web} a refusé la configuration (rien n'a été modifié) :\n${r.log}` });
         return;
       }
       update(1, { state: "done", detail: `${available} · sauvegarde ${r.backup}` });
@@ -131,7 +144,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
     if (https) {
       update(2, { state: "running" });
       try {
-        await api.sitesCertbot(serverId, domain, email);
+        await api.sitesCertbot(serverId, domain, email, engine);
         update(2, { state: "done", detail: "Certificat installé, HTTP redirigé vers HTTPS. Renouvellement automatique par certbot." });
       } catch (e) {
         update(2, {
@@ -147,7 +160,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
       const ok = /^[23]/.test(code);
       update(3, {
         state: ok ? "done" : "warn",
-        detail: ok ? `nginx répond HTTP ${code}` : `nginx répond HTTP ${code} : l'application ne répond peut-être pas encore (démarrage en cours ?)`,
+        detail: ok ? `${web} répond HTTP ${code}` : `${web} répond HTTP ${code} : l'application ne répond peut-être pas encore (démarrage en cours ?)`,
       });
     } catch (e) {
       update(3, { state: "warn", detail: errorMessage(e) });
@@ -254,7 +267,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
               </>
             )}
             {source === "port" && (
-              <Field label="Port local de l'application" hint="nginx relaiera le trafic vers 127.0.0.1 sur ce port.">
+              <Field label="Port local de l'application" hint={`${web} relaiera le trafic vers 127.0.0.1 sur ce port.`}>
                 <Input type="number" value={hostPort} onChange={(e) => setHostPort(Number(e.target.value))} />
               </Field>
             )}
@@ -264,7 +277,7 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
               <span>
                 Activer HTTPS avec Let's Encrypt
                 <span className="block text-xs text-muted">
-                  {plan?.certbot ? "Certificat gratuit, redirection automatique de HTTP vers HTTPS, renouvelé tout seul." : "certbot n'est pas installé sur ce serveur (apt install certbot python3-certbot-nginx)."}
+                  {plan?.certbot ? "Certificat gratuit, redirection automatique de HTTP vers HTTPS, renouvelé tout seul." : `certbot n'est pas installé sur ce serveur (apt install certbot python3-certbot-${engine}).`}
                 </span>
               </span>
             </label>
@@ -286,11 +299,11 @@ export default function NewSiteWizard({ serverId, onClose, onDone }: { serverId:
                   </div>
                 )}
                 <div>
-                  <div className="mb-1 font-mono text-[11px] text-muted">/etc/nginx/sites-available/{domain}</div>
+                  <div className="mb-1 font-mono text-[11px] text-muted">{preview.path}</div>
                   <pre className="max-h-72 overflow-auto rounded-md border border-border bg-bg p-2 font-mono text-[11px] select-text">{preview.vhost}</pre>
                 </div>
                 <p className="text-xs text-muted">
-                  Le port de l'application n'est publié que sur 127.0.0.1 : seul nginx peut l'atteindre. Les autres sites et configurations ne sont pas modifiés.
+                  Le port de l'application n'est publié que sur 127.0.0.1 : seul {web} peut l'atteindre. Les autres sites et configurations ne sont pas modifiés.
                 </p>
               </>
             ) : (

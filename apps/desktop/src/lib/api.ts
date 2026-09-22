@@ -426,9 +426,16 @@ export interface NginxState {
   disabled: SiteFile[];
   certificates: Certificate[];
   certbot: boolean;
-  /** Autres serveurs web détectés (Caddy, Apache, Traefik…), non gérés par Helm. */
+  /** Autres serveurs web détectés (Caddy, Apache, Traefik…). */
   others: string[];
+  /** Dossier de configuration (/etc/nginx, /etc/apache2 ou /etc/httpd). */
+  confRoot: string;
 }
+
+/** Serveur web piloté par la page Sites. */
+export type WebEngine = "nginx" | "apache";
+
+export const ENGINE_LABELS: Record<WebEngine, string> = { nginx: "nginx", apache: "Apache" };
 
 export interface ApplyResult {
   ok: boolean;
@@ -759,23 +766,26 @@ export const api = {
   dockerRemoveImage: (serverId: string, id: string) => invoke<void>("docker_remove_image", { serverId, id }),
   dockerPrune: (serverId: string, what: string) => invoke<string>("docker_prune", { serverId, what }),
 
-  sitesState: (serverId: string) => invoke<NginxState>("sites_state", { serverId }),
-  sitesRead: (serverId: string, path: string) => invoke<string>("sites_read", { serverId, path }),
-  sitesWrite: (serverId: string, path: string, content: string, enableLink?: string) =>
-    invoke<ApplyResult>("sites_write", { serverId, path, content, enableLink }),
-  sitesSetEnabled: (serverId: string, available: string, link: string, enabled: boolean) =>
-    invoke<ApplyResult>("sites_set_enabled", { serverId, available, link, enabled }),
-  sitesDelete: (serverId: string, available: string, link: string) => invoke<ApplyResult>("sites_delete", { serverId, available, link }),
-  sitesTest: (serverId: string) => invoke<{ ok: boolean; output: string }>("sites_test", { serverId }),
-  sitesReload: (serverId: string) => invoke<string>("sites_reload", { serverId }),
+  sitesState: (serverId: string, engine: WebEngine = "nginx") => invoke<NginxState>("sites_state", { serverId, engine }),
+  sitesRead: (serverId: string, path: string, engine: WebEngine = "nginx") => invoke<string>("sites_read", { serverId, path, engine }),
+  /** `proxyModules` : active au passage les modules proxy d'Apache (nouveau vhost). */
+  sitesWrite: (serverId: string, path: string, content: string, enableLink?: string, engine: WebEngine = "nginx", proxyModules = false) =>
+    invoke<ApplyResult>("sites_write", { serverId, path, content, enableLink, engine, proxyModules }),
+  sitesSetEnabled: (serverId: string, available: string, link: string, enabled: boolean, engine: WebEngine = "nginx") =>
+    invoke<ApplyResult>("sites_set_enabled", { serverId, available, link, enabled, engine }),
+  sitesDelete: (serverId: string, available: string, link: string, engine: WebEngine = "nginx") =>
+    invoke<ApplyResult>("sites_delete", { serverId, available, link, engine }),
+  sitesTest: (serverId: string, engine: WebEngine = "nginx") => invoke<{ ok: boolean; output: string }>("sites_test", { serverId, engine }),
+  sitesReload: (serverId: string, engine: WebEngine = "nginx") => invoke<string>("sites_reload", { serverId, engine }),
   sitesPlan: (serverId: string) => invoke<NewSitePlan>("sites_plan", { serverId }),
   sitesResolve: (serverId: string, domain: string) => invoke<string | null>("sites_resolve", { serverId, domain }),
   sitesCreateApp: (serverId: string, spec: AppSpec) => invoke<string>("sites_create_app", { serverId, spec }),
-  sitesCertbot: (serverId: string, domain: string, email: string) => invoke<string>("sites_certbot", { serverId, domain, email }),
+  sitesCertbot: (serverId: string, domain: string, email: string, engine: WebEngine = "nginx") =>
+    invoke<string>("sites_certbot", { serverId, domain, email, engine }),
   sitesRenew: (serverId: string) => invoke<string>("sites_renew", { serverId }),
   sitesCheck: (serverId: string, domain: string) => invoke<string>("sites_check", { serverId, domain }),
-  sitesPreview: (domain: string, hostPort: number, app?: AppSpec) =>
-    invoke<{ vhost: string; compose: string | null }>("sites_preview", { domain, hostPort, app }),
+  sitesPreview: (domain: string, hostPort: number, app?: AppSpec, engine: WebEngine = "nginx", confRoot?: string) =>
+    invoke<{ vhost: string; compose: string | null; path: string; link: string | null }>("sites_preview", { domain, hostPort, app, engine, confRoot }),
   tunnels: () => invoke<TunnelView[]>("tunnels_list"),
   tunnelSave: (def: TunnelDef) => invoke<string>("tunnel_save", { def }),
   tunnelDelete: (id: string) => invoke<void>("tunnel_delete", { id }),
@@ -796,9 +806,10 @@ export const api = {
   restrictApply: (serverId: string, project: ComposeProject, hostPort: number) =>
     invoke<string>("docker_restrict_apply", { serverId, project, hostPort }),
 
-  nginxBackups: (serverId: string) => invoke<string[]>("nginx_backups", { serverId }),
-  nginxBackupDiff: (serverId: string, name: string) => invoke<string>("nginx_backup_diff", { serverId, name }),
-  nginxBackupRestore: (serverId: string, name: string) => invoke<ApplyResult>("nginx_backup_restore", { serverId, name }),
+  nginxBackups: (serverId: string, engine: WebEngine = "nginx") => invoke<string[]>("nginx_backups", { serverId, engine }),
+  nginxBackupDiff: (serverId: string, name: string, engine: WebEngine = "nginx") => invoke<string>("nginx_backup_diff", { serverId, name, engine }),
+  nginxBackupRestore: (serverId: string, name: string, engine: WebEngine = "nginx") =>
+    invoke<ApplyResult>("nginx_backup_restore", { serverId, name, engine }),
 
   securityAudit: (serverId: string) => invoke<SecurityReport>("security_audit", { serverId }),
   securityFixPlan: (id: string) => invoke<FixPlan>("security_fix_plan", { id }),

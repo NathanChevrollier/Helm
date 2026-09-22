@@ -264,8 +264,10 @@ pub struct NginxState {
     pub disabled: Vec<SiteFile>,
     pub certificates: Vec<Certificate>,
     pub certbot: bool,
-    /// Autres serveurs web ou reverse proxies détectés (Caddy, Apache, Traefik…), non gérés par Helm.
+    /// Autres serveurs web ou reverse proxies détectés (Caddy, Apache, Traefik…).
     pub others: Vec<String>,
+    /// Dossier de configuration (`/etc/nginx`, `/etc/apache2` ou `/etc/httpd`).
+    pub conf_root: String,
 }
 
 const DISCOVER_SCRIPT: &str = r#"for b in caddy apache2 httpd traefik lighttpd haproxy; do command -v "$b" >/dev/null 2>&1 && echo "@@OTHER $b"; done
@@ -295,6 +297,12 @@ done
 
 /// Analyse la sortie du script de découverte.
 pub fn parse_discovery(out: &str) -> NginxState {
+    parse_discovery_with(out, "@@NONGINX", "nginx version: ", servers)
+}
+
+/// Analyse commune à nginx et Apache : seuls le marqueur « absent », le préfixe de version et
+/// l'analyse des vhosts diffèrent.
+pub(crate) fn parse_discovery_with(out: &str, absent: &str, version_prefix: &str, servers: fn(&str) -> Vec<ServerBlock>) -> NginxState {
     let mut state = NginxState {
         installed: true,
         version: String::new(),
@@ -304,6 +312,7 @@ pub fn parse_discovery(out: &str) -> NginxState {
         certificates: vec![],
         certbot: false,
         others: vec![],
+        conf_root: "/etc/nginx".into(),
     };
     for o in out.lines().filter_map(|l| l.strip_prefix("@@OTHER ")) {
         let (name, docker) = match o.strip_prefix("docker:") {
@@ -325,7 +334,7 @@ pub fn parse_discovery(out: &str) -> NginxState {
             state.others.push(label);
         }
     }
-    if out.contains("@@NONGINX") {
+    if out.lines().any(|l| l == absent) {
         state.installed = false;
         return state;
     }
@@ -342,11 +351,13 @@ pub fn parse_discovery(out: &str) -> NginxState {
     };
     for line in out.lines() {
         if let Some(v) = line.strip_prefix("@@VERSION ") {
-            state.version = v.trim().trim_start_matches("nginx version: ").to_string();
+            state.version = v.trim().trim_start_matches(version_prefix).to_string();
         } else if line == "@@RUNNING" {
             state.running = true;
         } else if line == "@@CERTBOT" {
             state.certbot = true;
+        } else if let Some(root) = line.strip_prefix("@@ROOT ") {
+            state.conf_root = root.trim().to_string();
         } else if let Some(rest) = line.strip_prefix("@@FILE ") {
             flush(&mut current, &mut state);
             let mut parts = rest.splitn(3, ' ');
@@ -409,6 +420,12 @@ fn parse_certs(out: &str) -> Vec<Certificate> {
 pub async fn discover(conn: &Connection, sudo: Option<&str>) -> Result<NginxState> {
     let out = conn.exec(DISCOVER_SCRIPT, None).await?.into_result()?;
     let mut state = parse_discovery(&out.stdout);
+    read_certificates(conn, sudo, &mut state).await?;
+    Ok(state)
+}
+
+/// Lit les certificats référencés par les vhosts (dates d'expiration, domaines).
+pub(crate) async fn read_certificates(conn: &Connection, sudo: Option<&str>, state: &mut NginxState) -> Result<()> {
     let mut paths: Vec<String> =
         state.files.iter().chain(&state.disabled).flat_map(|f| f.servers.iter().filter_map(|s| s.ssl_certificate.clone())).collect();
     paths.sort();
@@ -431,27 +448,94 @@ pub async fn discover(conn: &Connection, sudo: Option<&str>) -> Result<NginxStat
         let certs = conn.exec_sudo(&script, sudo, None).await?;
         state.certificates = parse_certs(&certs.stdout);
     }
-    Ok(state)
+    Ok(())
 }
 
 // ---------- Application sûre ----------
 
-/// `$1` = fichier cible, `$2` = lien à créer dans sites-enabled (ou vide), contenu sur stdin.
-/// Chaque modification est précédée d'une sauvegarde complète de /etc/nginx ; si `nginx -t`
-/// ou le reload échoue, l'état précédent est restauré et nginx n'est jamais laissé cassé.
+/// Serveur web piloté : nginx ou Apache. Les deux passent par les mêmes scripts d'application
+/// sûre (sauvegarde, test de la configuration, rechargement, restauration automatique).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Nginx,
+    Apache,
+}
+
+impl Engine {
+    pub fn label(self) -> &'static str {
+        match self {
+            Engine::Nginx => "nginx",
+            Engine::Apache => "Apache",
+        }
+    }
+
+    /// Dossier des sauvegardes de configuration sur le serveur.
+    pub fn backup_root(self) -> &'static str {
+        match self {
+            Engine::Nginx => BACKUP_ROOT,
+            Engine::Apache => "/var/backups/helm/apache",
+        }
+    }
+
+    /// Définit `CONF` (dossier de configuration), `NAME` (dossier des sauvegardes), `test_conf`
+    /// et `reload_conf`, utilisés par les scripts d'application et de restauration.
+    fn prelude(self) -> &'static str {
+        match self {
+            Engine::Nginx => {
+                "CONF=/etc/nginx; NAME=nginx\n\
+                 test_conf() { nginx -t; }\n\
+                 reload_conf() { systemctl reload nginx 2>/dev/null || nginx -s reload; }\n"
+            }
+            // Debian/Ubuntu : /etc/apache2 et apache2ctl ; RHEL/Fedora : /etc/httpd et apachectl (ou httpd).
+            Engine::Apache => {
+                "if [ -d /etc/apache2 ]; then CONF=/etc/apache2; SVC=apache2; CTL=$(command -v apache2ctl || command -v apachectl); \
+                 else CONF=/etc/httpd; SVC=httpd; CTL=$(command -v apachectl || command -v httpd); fi\n\
+                 NAME=apache\n\
+                 case \"$CTL\" in */httpd) T=-t; G='-k graceful' ;; *) T=configtest; G=graceful ;; esac\n\
+                 test_conf() { \"$CTL\" $T; }\n\
+                 reload_conf() { systemctl reload \"$SVC\" 2>/dev/null || \"$CTL\" $G; }\n"
+            }
+        }
+    }
+
+    /// Seuls les fichiers du dossier de configuration du serveur web peuvent être écrits.
+    pub fn valid_conf_path(self, p: &str) -> Result<()> {
+        let roots: &[&str] = match self {
+            Engine::Nginx => &["/etc/nginx/"],
+            Engine::Apache => &["/etc/apache2/", "/etc/httpd/"],
+        };
+        if roots.iter().any(|r| p.starts_with(r)) && !p.contains("..") && !p.contains('\n') {
+            Ok(())
+        } else {
+            Err(Error::Other(format!("chemin refusé (hors de {}) : {p}", roots.join(" ou "))))
+        }
+    }
+}
+
+/// `$1` = fichier cible, `$2` = lien à créer dans sites-enabled (ou vide), `$3` = mode,
+/// `$4` = commande préalable (activation de modules Apache…), contenu sur stdin.
+/// Chaque modification est précédée d'une sauvegarde complète du dossier de configuration ; si
+/// le test ou le reload échoue, l'état précédent est restauré et le serveur web n'est jamais
+/// laissé cassé.
 pub const APPLY_SCRIPT: &str = r#"set -u
-TARGET="$1"; LINK="${2:-}"; MODE="${3:-write}"
+TARGET="$1"; LINK="${2:-}"; MODE="${3:-write}"; PRE="${4:-}"
+DIR=$(basename "$CONF")
 TS=$(date +%Y%m%d-%H%M%S)
-BK="/var/backups/helm/nginx/$TS"
-mkdir -p "$BK" && cp -a /etc/nginx "$BK/" || { echo "sauvegarde impossible"; exit 1; }
+# Deux modifications dans la même seconde ne partagent pas une sauvegarde.
+while [ -e "/var/backups/helm/$NAME/$TS" ]; do sleep 1; TS=$(date +%Y%m%d-%H%M%S); done
+BK="/var/backups/helm/$NAME/$TS"
+mkdir -p "$BK" && cp -a "$CONF" "$BK/" || { echo "sauvegarde impossible"; exit 1; }
 existed=0; [ -e "$TARGET" ] && existed=1
 link_existed=0; [ -n "$LINK" ] && [ -e "$LINK" -o -L "$LINK" ] && link_existed=1
 restore() {
-  if [ $existed = 1 ]; then cp -a "$BK/nginx/${TARGET#/etc/nginx/}" "$TARGET"; else rm -f "$TARGET"; fi
+  if [ $existed = 1 ]; then cp -a "$BK/$DIR/${TARGET#$CONF/}" "$TARGET"; else rm -f "$TARGET"; fi
   if [ -n "$LINK" ]; then
-    if [ $link_existed = 1 ]; then cp -a "$BK/nginx/${LINK#/etc/nginx/}" "$LINK"; else rm -f "$LINK"; fi
+    if [ $link_existed = 1 ]; then cp -a "$BK/$DIR/${LINK#$CONF/}" "$LINK"; else rm -f "$LINK"; fi
   fi
 }
+[ -n "$PRE" ] && sh -c "$PRE" > "$BK/pre.log" 2>&1
 case "$MODE" in
   write)
     if [ $existed = 1 ]; then cat > "$TARGET"; else cat > "$TARGET"; chmod 0644 "$TARGET"; fi
@@ -460,23 +544,23 @@ case "$MODE" in
   enable) cat > /dev/null; ln -sfn "$TARGET" "$LINK" ;;
   delete) cat > /dev/null; rm -f "$LINK" "$TARGET" ;;
 esac
-if ! nginx -t > "$BK/nginx-t.log" 2>&1; then
+if ! test_conf > "$BK/test.log" 2>&1; then
   restore
   echo "@@FAILED test"
-  cat "$BK/nginx-t.log"
+  cat "$BK/test.log"
   exit 2
 fi
-if ! { systemctl reload nginx 2>/dev/null || nginx -s reload; } > "$BK/reload.log" 2>&1; then
+if ! reload_conf > "$BK/reload.log" 2>&1; then
   restore
-  nginx -t >/dev/null 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; }
+  test_conf >/dev/null 2>&1 && reload_conf
   echo "@@FAILED reload"
   cat "$BK/reload.log"
   exit 3
 fi
 # On ne garde que les 30 dernières sauvegardes.
-ls -1d /var/backups/helm/nginx/* 2>/dev/null | head -n -30 | xargs -r rm -rf
+ls -1d /var/backups/helm/$NAME/* 2>/dev/null | head -n -30 | xargs -r rm -rf
 echo "@@OK $BK"
-cat "$BK/nginx-t.log"
+cat "$BK/test.log"
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -485,7 +569,7 @@ pub struct ApplyResult {
     pub ok: bool,
     /// Dossier de sauvegarde créé avant la modification.
     pub backup: Option<String>,
-    /// Sortie de `nginx -t` (ou du reload en cas d'échec).
+    /// Sortie du test de configuration (ou du reload en cas d'échec).
     pub log: String,
 }
 
@@ -498,22 +582,40 @@ fn parse_apply(out: &str) -> ApplyResult {
     }
 }
 
+#[cfg(test)]
 fn valid_conf_path(p: &str) -> Result<()> {
-    let ok = p.starts_with("/etc/nginx/") && !p.contains("..") && !p.contains('\n');
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::Other(format!("chemin refusé (hors de /etc/nginx) : {p}")))
-    }
+    Engine::Nginx.valid_conf_path(p)
 }
 
-async fn apply_script(conn: &Connection, sudo: Option<&str>, target: &str, link: &str, mode: &str, content: &str) -> Result<ApplyResult> {
-    valid_conf_path(target)?;
+/// Script complet : définitions propres au serveur web, puis le script commun.
+fn full_script(engine: Engine, body: &str) -> String {
+    format!("{}{body}", engine.prelude())
+}
+
+// Paramètres transmis tels quels au script : les regrouper n'apporterait rien.
+#[allow(clippy::too_many_arguments)]
+async fn apply_script(
+    conn: &Connection,
+    sudo: Option<&str>,
+    engine: Engine,
+    target: &str,
+    link: &str,
+    mode: &str,
+    content: &str,
+    pre: &str,
+) -> Result<ApplyResult> {
+    engine.valid_conf_path(target)?;
     if !link.is_empty() {
-        valid_conf_path(link)?;
+        engine.valid_conf_path(link)?;
     }
-    let cmd =
-        format!("bash -c {} helm-nginx {} {} {}", shell_quote(APPLY_SCRIPT), shell_quote(target), shell_quote(link), shell_quote(mode));
+    let cmd = format!(
+        "bash -c {} helm-web {} {} {} {}",
+        shell_quote(&full_script(engine, APPLY_SCRIPT)),
+        shell_quote(target),
+        shell_quote(link),
+        shell_quote(mode),
+        shell_quote(pre)
+    );
     let out = conn.exec_sudo(&cmd, sudo, Some(content.as_bytes())).await?;
     let text = format!("{}{}", out.stdout, out.stderr);
     if !text.contains("@@OK") && !text.contains("@@FAILED") {
@@ -522,7 +624,7 @@ async fn apply_script(conn: &Connection, sudo: Option<&str>, target: &str, link:
     Ok(parse_apply(&text))
 }
 
-/// Écrit un fichier de configuration puis teste et recharge nginx (restauration si échec).
+/// Écrit un fichier de configuration nginx puis teste et recharge nginx (restauration si échec).
 pub async fn write_config(
     conn: &Connection,
     sudo: Option<&str>,
@@ -530,25 +632,64 @@ pub async fn write_config(
     content: &str,
     enable_link: Option<&str>,
 ) -> Result<ApplyResult> {
-    apply_script(conn, sudo, path, enable_link.unwrap_or(""), "write", content).await
+    write_config_for(conn, sudo, Engine::Nginx, path, content, enable_link, "").await
+}
+
+/// Écrit un fichier de configuration du serveur web `engine`, après la commande préalable `pre`
+/// (constante choisie par Helm, jamais une saisie de l'utilisateur).
+pub async fn write_config_for(
+    conn: &Connection,
+    sudo: Option<&str>,
+    engine: Engine,
+    path: &str,
+    content: &str,
+    enable_link: Option<&str>,
+    pre: &str,
+) -> Result<ApplyResult> {
+    apply_script(conn, sudo, engine, path, enable_link.unwrap_or(""), "write", content, pre).await
 }
 
 pub async fn set_enabled(conn: &Connection, sudo: Option<&str>, available: &str, link: &str, enabled: bool) -> Result<ApplyResult> {
-    apply_script(conn, sudo, available, link, if enabled { "enable" } else { "disable" }, "").await
+    set_enabled_for(conn, sudo, Engine::Nginx, available, link, enabled).await
+}
+
+pub async fn set_enabled_for(
+    conn: &Connection,
+    sudo: Option<&str>,
+    engine: Engine,
+    available: &str,
+    link: &str,
+    enabled: bool,
+) -> Result<ApplyResult> {
+    apply_script(conn, sudo, engine, available, link, if enabled { "enable" } else { "disable" }, "", "").await
 }
 
 pub async fn delete_site(conn: &Connection, sudo: Option<&str>, available: &str, link: &str) -> Result<ApplyResult> {
-    apply_script(conn, sudo, available, link, "delete", "").await
+    delete_site_for(conn, sudo, Engine::Nginx, available, link).await
 }
 
-/// Teste la configuration actuelle et renvoie la sortie de `nginx -t`.
+pub async fn delete_site_for(conn: &Connection, sudo: Option<&str>, engine: Engine, available: &str, link: &str) -> Result<ApplyResult> {
+    apply_script(conn, sudo, engine, available, link, "delete", "", "").await
+}
+
+/// Teste la configuration actuelle et renvoie la sortie du test.
 pub async fn test(conn: &Connection, sudo: Option<&str>) -> Result<(bool, String)> {
-    let out = conn.exec_sudo("nginx -t 2>&1", sudo, None).await?;
+    test_for(conn, sudo, Engine::Nginx).await
+}
+
+pub async fn test_for(conn: &Connection, sudo: Option<&str>, engine: Engine) -> Result<(bool, String)> {
+    let cmd = format!("bash -c {}", shell_quote(&full_script(engine, "test_conf 2>&1\n")));
+    let out = conn.exec_sudo(&cmd, sudo, None).await?;
     Ok((out.success(), format!("{}{}", out.stdout, out.stderr)))
 }
 
 pub async fn reload(conn: &Connection, sudo: Option<&str>) -> Result<String> {
-    let out = conn.exec_sudo("nginx -t 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; } 2>&1", sudo, None).await?;
+    reload_for(conn, sudo, Engine::Nginx).await
+}
+
+pub async fn reload_for(conn: &Connection, sudo: Option<&str>, engine: Engine) -> Result<String> {
+    let cmd = format!("bash -c {}", shell_quote(&full_script(engine, "test_conf 2>&1 && reload_conf 2>&1\n")));
+    let out = conn.exec_sudo(&cmd, sudo, None).await?;
     Ok(out.into_result()?.stdout)
 }
 
@@ -563,7 +704,11 @@ pub fn valid_backup_name(name: &str) -> bool {
 
 /// Sauvegardes disponibles, de la plus récente à la plus ancienne.
 pub async fn backups(conn: &Connection, sudo: Option<&str>) -> Result<Vec<String>> {
-    let out = conn.exec_sudo(&format!("ls -1 {BACKUP_ROOT} 2>/dev/null || true"), sudo, None).await?.into_result()?;
+    backups_for(conn, sudo, Engine::Nginx).await
+}
+
+pub async fn backups_for(conn: &Connection, sudo: Option<&str>, engine: Engine) -> Result<Vec<String>> {
+    let out = conn.exec_sudo(&format!("ls -1 {} 2>/dev/null || true", engine.backup_root()), sudo, None).await?.into_result()?;
     let mut list: Vec<String> = out.stdout.lines().map(str::trim).filter(|n| valid_backup_name(n)).map(str::to_string).collect();
     list.sort_unstable_by(|a, b| b.cmp(a));
     Ok(list)
@@ -571,44 +716,57 @@ pub async fn backups(conn: &Connection, sudo: Option<&str>) -> Result<Vec<String
 
 /// Différences entre une sauvegarde et la configuration actuelle (format diff unifié).
 pub async fn backup_diff(conn: &Connection, sudo: Option<&str>, name: &str) -> Result<String> {
+    backup_diff_for(conn, sudo, Engine::Nginx, name).await
+}
+
+pub async fn backup_diff_for(conn: &Connection, sudo: Option<&str>, engine: Engine, name: &str) -> Result<String> {
     if !valid_backup_name(name) {
         return Err(Error::Other("nom de sauvegarde invalide".into()));
     }
     // `diff` renvoie 1 quand il trouve des différences : ce n'est pas une erreur.
-    let out = conn.exec_sudo(&format!("diff -ruN {BACKUP_ROOT}/{name}/nginx /etc/nginx | head -c 800000; true"), sudo, None).await?;
+    let body = format!("diff -ruN /var/backups/helm/$NAME/{name}/$(basename \"$CONF\") \"$CONF\" | head -c 800000; true\n");
+    let out = conn.exec_sudo(&format!("bash -c {}", shell_quote(&full_script(engine, &body))), sudo, None).await?;
     Ok(out.stdout)
 }
 
-/// Restaure une sauvegarde complète de /etc/nginx. L'état actuel est lui-même sauvegardé, la
-/// configuration restaurée est testée, et l'état actuel revient si le test ou le reload échoue.
+/// Restaure une sauvegarde complète du dossier de configuration. L'état actuel est lui-même
+/// sauvegardé, la configuration restaurée est testée, et l'état actuel revient si le test ou le
+/// reload échoue.
 pub const RESTORE_SCRIPT: &str = r#"set -u
-SRC="/var/backups/helm/nginx/$1/nginx"
+DIR=$(basename "$CONF")
+SRC="/var/backups/helm/$NAME/$1/$DIR"
 [ -d "$SRC" ] || { echo "@@FAILED sauvegarde introuvable"; exit 1; }
 TS=$(date +%Y%m%d-%H%M%S)
-BK="/var/backups/helm/nginx/$TS"
-mkdir -p "$BK" && cp -a /etc/nginx "$BK/" || { echo "@@FAILED sauvegarde de l'état actuel impossible"; exit 1; }
-rm -rf /etc/nginx.helm-restore /etc/nginx.helm-old
-cp -a "$SRC" /etc/nginx.helm-restore || { echo "@@FAILED copie impossible"; exit 1; }
-mv /etc/nginx /etc/nginx.helm-old && mv /etc/nginx.helm-restore /etc/nginx
-if nginx -t > "$BK/nginx-t.log" 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; } >> "$BK/nginx-t.log" 2>&1; then
-  rm -rf /etc/nginx.helm-old
+# Deux modifications dans la même seconde ne partagent pas une sauvegarde.
+while [ -e "/var/backups/helm/$NAME/$TS" ]; do sleep 1; TS=$(date +%Y%m%d-%H%M%S); done
+BK="/var/backups/helm/$NAME/$TS"
+mkdir -p "$BK" && cp -a "$CONF" "$BK/" || { echo "@@FAILED sauvegarde de l'état actuel impossible"; exit 1; }
+rm -rf "$CONF.helm-restore" "$CONF.helm-old"
+cp -a "$SRC" "$CONF.helm-restore" || { echo "@@FAILED copie impossible"; exit 1; }
+mv "$CONF" "$CONF.helm-old" && mv "$CONF.helm-restore" "$CONF"
+if test_conf > "$BK/test.log" 2>&1 && reload_conf >> "$BK/test.log" 2>&1; then
+  rm -rf "$CONF.helm-old"
   echo "@@OK $BK"
-  cat "$BK/nginx-t.log"
+  cat "$BK/test.log"
 else
-  rm -rf /etc/nginx
-  mv /etc/nginx.helm-old /etc/nginx
-  nginx -t >/dev/null 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; }
+  rm -rf "$CONF"
+  mv "$CONF.helm-old" "$CONF"
+  test_conf >/dev/null 2>&1 && reload_conf
   echo "@@FAILED test"
-  cat "$BK/nginx-t.log"
+  cat "$BK/test.log"
   exit 2
 fi
 "#;
 
 pub async fn restore_backup(conn: &Connection, sudo: Option<&str>, name: &str) -> Result<ApplyResult> {
+    restore_backup_for(conn, sudo, Engine::Nginx, name).await
+}
+
+pub async fn restore_backup_for(conn: &Connection, sudo: Option<&str>, engine: Engine, name: &str) -> Result<ApplyResult> {
     if !valid_backup_name(name) {
         return Err(Error::Other("nom de sauvegarde invalide".into()));
     }
-    let cmd = format!("bash -c {} helm-restore {name}", shell_quote(RESTORE_SCRIPT));
+    let cmd = format!("bash -c {} helm-restore {name}", shell_quote(&full_script(engine, RESTORE_SCRIPT)));
     let out = conn.exec_sudo(&cmd, sudo, None).await?;
     let text = format!("{}{}", out.stdout, out.stderr);
     if !text.contains("@@OK") && !text.contains("@@FAILED") {
@@ -694,13 +852,22 @@ pub fn first_free(used: &[u16], start: u16) -> u16 {
 
 /// Obtient un certificat Let's Encrypt et active HTTPS (avec redirection) via le plugin nginx de certbot.
 pub async fn certbot(conn: &Connection, sudo: Option<&str>, domain: &str, email: &str) -> Result<String> {
+    certbot_for(conn, sudo, Engine::Nginx, domain, email).await
+}
+
+/// Certificat Let's Encrypt avec le plugin certbot du serveur web (`--nginx` ou `--apache`).
+pub async fn certbot_for(conn: &Connection, sudo: Option<&str>, engine: Engine, domain: &str, email: &str) -> Result<String> {
     crate::ssh::long(async move {
         if !valid_domain(domain) {
             return Err(Error::Other(format!("domaine invalide : {domain}")));
         }
+        let (plugin, package) = match engine {
+            Engine::Nginx => ("--nginx", "python3-certbot-nginx"),
+            Engine::Apache => ("--apache", "python3-certbot-apache"),
+        };
         let cmd = format!(
-            "command -v certbot >/dev/null || {{ echo 'certbot n'\\''est pas installé (apt install certbot python3-certbot-nginx)'; exit 1; }}; \
-             certbot --nginx -d {} --non-interactive --agree-tos -m {} --redirect 2>&1",
+            "command -v certbot >/dev/null || {{ echo 'certbot n'\\''est pas installé (apt install certbot {package})'; exit 1; }}; \
+             certbot {plugin} -d {} --non-interactive --agree-tos -m {} --redirect 2>&1",
             shell_quote(domain),
             shell_quote(email)
         );

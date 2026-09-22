@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, History, RotateCcw, XCircle } from "lucide-react";
-import { api, errorMessage, type ApplyResult } from "../lib/api";
+import { api, ENGINE_LABELS, errorMessage, type ApplyResult, type WebEngine } from "../lib/api";
 import { useAppPick } from "../lib/store";
 import { Button, Modal } from "./ui";
 
@@ -36,8 +36,19 @@ function DiffView({ text }: { text: string }) {
   );
 }
 
-export default function NginxHistory({ serverId, onClose, onRestored }: { serverId: string; onClose: () => void; onRestored: () => void }) {
+export default function NginxHistory({
+  serverId,
+  engine = "nginx",
+  onClose,
+  onRestored,
+}: {
+  serverId: string;
+  engine?: WebEngine;
+  onClose: () => void;
+  onRestored: () => void;
+}) {
   const { ask, notify } = useAppPick("ask", "notify");
+  const web = ENGINE_LABELS[engine];
   const [list, setList] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState<string | null>(null);
@@ -45,31 +56,31 @@ export default function NginxHistory({ serverId, onClose, onRestored }: { server
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.nginxBackups(serverId).then(setList, (e) => {
+    api.nginxBackups(serverId, engine).then(setList, (e) => {
       setList([]);
       notify(errorMessage(e), "error");
     });
-  }, [serverId, notify]);
+  }, [serverId, engine, notify]);
 
   useEffect(() => {
     if (!selected) return;
     setDiff(null);
     setResult(null);
-    api.nginxBackupDiff(serverId, selected).then(setDiff, (e) => setDiff(errorMessage(e)));
-  }, [serverId, selected]);
+    api.nginxBackupDiff(serverId, selected, engine).then(setDiff, (e) => setDiff(errorMessage(e)));
+  }, [serverId, selected, engine]);
 
   const restore = async () => {
     if (!selected) return;
     const ok = await ask({
       title: `Restaurer la configuration du ${when(selected)} ?`,
-      body: "Toute la configuration nginx reviendra à cet état. L'état actuel est d'abord sauvegardé, puis la configuration restaurée est testée : si le test échoue, rien ne change.",
+      body: `Toute la configuration ${web} reviendra à cet état. L'état actuel est d'abord sauvegardé, puis la configuration restaurée est testée : si le test échoue, rien ne change.`,
       confirmLabel: "Restaurer",
       danger: true,
     });
     if (!ok) return;
     setBusy(true);
     try {
-      const r = await api.nginxBackupRestore(serverId, selected);
+      const r = await api.nginxBackupRestore(serverId, selected, engine);
       setResult(r);
       if (r.ok) onRestored();
     } catch (e) {
@@ -80,7 +91,7 @@ export default function NginxHistory({ serverId, onClose, onRestored }: { server
   };
 
   return (
-    <Modal title="Historique des configurations nginx" width="max-w-6xl" onClose={onClose}>
+    <Modal title={`Historique des configurations ${web}`} width="max-w-6xl" onClose={onClose}>
       <div className="grid h-[65vh] grid-cols-[240px_1fr] gap-4">
         <div className="overflow-auto rounded-lg border border-border">
           {list === null && <p className="p-3 text-sm text-muted">Chargement…</p>}
@@ -110,7 +121,7 @@ export default function NginxHistory({ serverId, onClose, onRestored }: { server
                 <div className={`rounded-md border px-3 py-2 text-sm ${result.ok ? "border-ok/40 bg-ok/10" : "border-danger/40 bg-danger/10"}`}>
                   <div className="flex items-center gap-2">
                     {result.ok ? <CheckCircle2 size={15} className="text-ok" /> : <XCircle size={15} className="text-danger" />}
-                    {result.ok ? `Configuration restaurée et nginx rechargé (état précédent sauvegardé : ${result.backup}).` : "Restauration refusée : la configuration actuelle est conservée."}
+                    {result.ok ? `Configuration restaurée et ${web} rechargé (état précédent sauvegardé : ${result.backup}).` : "Restauration refusée : la configuration actuelle est conservée."}
                   </div>
                   {!result.ok && <pre className="mt-2 font-mono text-xs whitespace-pre-wrap">{result.log}</pre>}
                 </div>

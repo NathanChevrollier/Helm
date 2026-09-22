@@ -1,7 +1,9 @@
-//! Sites : vhosts nginx, certificats, et assistant de création d'un nouveau site.
+//! Sites : vhosts nginx ou Apache, certificats, et assistant de création d'un nouveau site.
+//! Chaque commande prend le serveur web visé (`engine`, nginx par défaut).
 
+use helm_core::apache;
 use helm_core::docker::{self, Access};
-use helm_core::nginx::{self, ApplyResult, NginxState};
+use helm_core::nginx::{self, ApplyResult, Engine, NginxState};
 use helm_core::ssh::shell_quote;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -15,17 +17,35 @@ fn err(e: impl ToString) -> String {
     e.to_string()
 }
 
-#[tauri::command]
-pub async fn sites_state(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<NginxState, String> {
-    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::discover(&conn, pw.as_deref()).await.map_err(err)
+/// Préfixe des actions dans le journal (`nginx.write`, `apache.write`…).
+fn action(engine: Engine, what: &str) -> String {
+    format!("{}.{what}", if engine == Engine::Apache { "apache" } else { "nginx" })
 }
 
 #[tauri::command]
-pub async fn sites_read(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String, path: String) -> Result<String, String> {
-    if !path.starts_with("/etc/nginx/") {
-        return Err("chemin hors de /etc/nginx".into());
+pub async fn sites_state(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    engine: Option<Engine>,
+) -> Result<NginxState, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    match engine.unwrap_or_default() {
+        Engine::Nginx => nginx::discover(&conn, pw.as_deref()).await,
+        Engine::Apache => apache::discover(&conn, pw.as_deref()).await,
     }
+    .map_err(err)
+}
+
+#[tauri::command]
+pub async fn sites_read(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+    engine: Option<Engine>,
+) -> Result<String, String> {
+    engine.unwrap_or_default().valid_conf_path(&path).map_err(err)?;
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
     let direct = conn.exec(&format!("cat {}", shell_quote(&path)), None).await.map_err(err)?;
     if direct.success() {
@@ -43,14 +63,19 @@ pub async fn sites_write(
     path: String,
     content: String,
     enable_link: Option<String>,
+    engine: Option<Engine>,
+    proxy_modules: Option<bool>,
 ) -> Result<ApplyResult, String> {
+    let engine = engine.unwrap_or_default();
     let detail = path.clone();
+    // Nouveau vhost Apache en reverse proxy : modules proxy activés au passage (Debian).
+    let pre = if engine == Engine::Apache && proxy_modules.unwrap_or(false) { apache::PROXY_MODULES } else { "" };
     let r: Result<ApplyResult, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        nginx::write_config(&conn, pw.as_deref(), &path, &content, enable_link.as_deref()).await.map_err(err)
+        nginx::write_config_for(&conn, pw.as_deref(), engine, &path, &content, enable_link.as_deref(), pre).await.map_err(err)
     }
     .await;
-    track(&audit, &store, &server_id, "nginx.write", &detail, r)
+    track(&audit, &store, &server_id, &action(engine, "write"), &detail, r)
 }
 
 #[tauri::command]
@@ -62,14 +87,16 @@ pub async fn sites_set_enabled(
     available: String,
     link: String,
     enabled: bool,
+    engine: Option<Engine>,
 ) -> Result<ApplyResult, String> {
+    let engine = engine.unwrap_or_default();
     let detail = format!("{} {available}", if enabled { "activer" } else { "désactiver" });
     let r: Result<ApplyResult, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        nginx::set_enabled(&conn, pw.as_deref(), &available, &link, enabled).await.map_err(err)
+        nginx::set_enabled_for(&conn, pw.as_deref(), engine, &available, &link, enabled).await.map_err(err)
     }
     .await;
-    track(&audit, &store, &server_id, "nginx.enable", &detail, r)
+    track(&audit, &store, &server_id, &action(engine, "enable"), &detail, r)
 }
 
 #[tauri::command]
@@ -80,14 +107,16 @@ pub async fn sites_delete(
     server_id: String,
     available: String,
     link: String,
+    engine: Option<Engine>,
 ) -> Result<ApplyResult, String> {
+    let engine = engine.unwrap_or_default();
     let detail = available.clone();
     let r: Result<ApplyResult, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        nginx::delete_site(&conn, pw.as_deref(), &available, &link).await.map_err(err)
+        nginx::delete_site_for(&conn, pw.as_deref(), engine, &available, &link).await.map_err(err)
     }
     .await;
-    track(&audit, &store, &server_id, "nginx.delete", &detail, r)
+    track(&audit, &store, &server_id, &action(engine, "delete"), &detail, r)
 }
 
 #[derive(Serialize)]
@@ -97,9 +126,14 @@ pub struct TestResult {
 }
 
 #[tauri::command]
-pub async fn sites_test(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<TestResult, String> {
+pub async fn sites_test(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    engine: Option<Engine>,
+) -> Result<TestResult, String> {
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    let (ok, output) = nginx::test(&conn, pw.as_deref()).await.map_err(err)?;
+    let (ok, output) = nginx::test_for(&conn, pw.as_deref(), engine.unwrap_or_default()).await.map_err(err)?;
     Ok(TestResult { ok, output })
 }
 
@@ -109,14 +143,16 @@ pub async fn sites_reload(
     store: State<'_, Store>,
     sessions: State<'_, Sessions>,
     server_id: String,
+    engine: Option<Engine>,
 ) -> Result<String, String> {
+    let engine = engine.unwrap_or_default();
     let detail = String::new();
     let r: Result<String, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        nginx::reload(&conn, pw.as_deref()).await.map_err(err)
+        nginx::reload_for(&conn, pw.as_deref(), engine).await.map_err(err)
     }
     .await;
-    track(&audit, &store, &server_id, "nginx.reload", &detail, r)
+    track(&audit, &store, &server_id, &action(engine, "reload"), &detail, r)
 }
 
 #[derive(Serialize)]
@@ -243,11 +279,12 @@ pub async fn sites_certbot(
     server_id: String,
     domain: String,
     email: String,
+    engine: Option<Engine>,
 ) -> Result<String, String> {
     let detail = domain.clone();
     let r: Result<String, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        nginx::certbot(&conn, pw.as_deref(), &domain, &email).await.map_err(err)
+        nginx::certbot_for(&conn, pw.as_deref(), engine.unwrap_or_default(), &domain, &email).await.map_err(err)
     }
     .await;
     track(&audit, &store, &server_id, "site.certbot", &detail, r)
@@ -269,7 +306,7 @@ pub async fn sites_renew(
     track(&audit, &store, &server_id, "site.renew", &detail, r)
 }
 
-/// Code HTTP renvoyé par nginx pour ce domaine, en interrogeant le serveur lui-même.
+/// Code HTTP renvoyé par le serveur web pour ce domaine, en interrogeant le serveur lui-même.
 #[tauri::command]
 pub async fn sites_check(
     store: State<'_, Store>,
@@ -293,21 +330,37 @@ pub async fn sites_check(
 pub struct Preview {
     vhost: String,
     compose: Option<String>,
+    /// Fichier du vhost et lien d'activation (absent quand le dossier est inclus directement).
+    path: String,
+    link: Option<String>,
 }
 
 /// Fichiers que l'assistant va créer, pour les montrer avant de lancer.
 #[tauri::command]
-pub fn sites_preview(domain: String, host_port: u16, app: Option<AppSpec>) -> Preview {
-    Preview {
-        vhost: nginx::proxy_vhost(&domain, host_port),
-        compose: app.map(|a| nginx::site_compose(&a.name, &a.image, a.host_port, a.container_port, &a.env)),
-    }
+pub fn sites_preview(domain: String, host_port: u16, app: Option<AppSpec>, engine: Option<Engine>, conf_root: Option<String>) -> Preview {
+    let (vhost, path, link) = match engine.unwrap_or_default() {
+        Engine::Nginx => (
+            nginx::proxy_vhost(&domain, host_port),
+            format!("/etc/nginx/sites-available/{domain}"),
+            Some(format!("/etc/nginx/sites-enabled/{domain}")),
+        ),
+        Engine::Apache => {
+            let (path, link) = apache::new_site_paths(conf_root.as_deref().unwrap_or("/etc/apache2"), &domain);
+            (apache::proxy_vhost(&domain, host_port), path, link)
+        }
+    };
+    Preview { vhost, compose: app.map(|a| nginx::site_compose(&a.name, &a.image, a.host_port, a.container_port, &a.env)), path, link }
 }
 
 #[tauri::command]
-pub async fn nginx_backups(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<String>, String> {
+pub async fn nginx_backups(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    engine: Option<Engine>,
+) -> Result<Vec<String>, String> {
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::backups(&conn, pw.as_deref()).await.map_err(err)
+    nginx::backups_for(&conn, pw.as_deref(), engine.unwrap_or_default()).await.map_err(err)
 }
 
 #[tauri::command]
@@ -316,9 +369,10 @@ pub async fn nginx_backup_diff(
     sessions: State<'_, Sessions>,
     server_id: String,
     name: String,
+    engine: Option<Engine>,
 ) -> Result<String, String> {
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-    nginx::backup_diff(&conn, pw.as_deref(), &name).await.map_err(err)
+    nginx::backup_diff_for(&conn, pw.as_deref(), engine.unwrap_or_default(), &name).await.map_err(err)
 }
 
 #[tauri::command]
@@ -328,13 +382,15 @@ pub async fn nginx_backup_restore(
     sessions: State<'_, Sessions>,
     server_id: String,
     name: String,
+    engine: Option<Engine>,
 ) -> Result<ApplyResult, String> {
+    let engine = engine.unwrap_or_default();
     let r = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        nginx::restore_backup(&conn, pw.as_deref(), &name).await.map_err(err)
+        nginx::restore_backup_for(&conn, pw.as_deref(), engine, &name).await.map_err(err)
     }
     .await;
-    track(&audit, &store, &server_id, "nginx.restore", &name, r)
+    track(&audit, &store, &server_id, &action(engine, "restore"), &name, r)
 }
 
 /// DNS (pointe-t-il vers ce VPS ?) et expiration du domaine, pour les sites affichés.

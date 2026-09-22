@@ -2,6 +2,7 @@
 
 pub mod access;
 pub mod agent;
+pub mod apache;
 pub mod backup;
 pub mod deploy;
 pub mod diagnose;
