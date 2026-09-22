@@ -86,6 +86,25 @@ pub struct Snippet {
     pub command: String,
 }
 
+/// Constat d'audit de sécurité mis de côté : il n'apparaît plus dans la liste des problèmes,
+/// mais reste consultable dans les constats ignorés.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoredFinding {
+    /// Serveur concerné.
+    pub server_id: String,
+    /// Identifiant du constat (`ssh.root_login`…).
+    pub finding_id: String,
+    /// Titre au moment où il a été ignoré, pour l'afficher même si l'audit ne le remonte plus.
+    #[serde(default)]
+    pub title: String,
+    /// Raison saisie par l'utilisateur.
+    #[serde(default)]
+    pub reason: String,
+    /// Horodatage (ms).
+    pub at: i64,
+}
+
 /// Bureau à distance (RDP) : ouvert dans le client RDP du système (mstsc sous Windows),
 /// directement ou à travers un tunnel SSH par un serveur de Helm.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -168,6 +187,9 @@ pub struct Data {
     /// Bureaux à distance (RDP).
     #[serde(default)]
     pub desktops: Vec<RemoteDesktop>,
+    /// Constats d'audit ignorés (archivés).
+    #[serde(default)]
+    pub ignored_findings: Vec<IgnoredFinding>,
     /// Synchronisation avec les autres PC (propre à ce PC).
     #[serde(default)]
     pub sync: Option<sync::SyncConfig>,

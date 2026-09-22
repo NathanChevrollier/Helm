@@ -518,6 +518,15 @@ export interface Finding {
   fixLabel: string | null;
 }
 
+/** Constat d'audit mis de côté. */
+export interface IgnoredFinding {
+  serverId: string;
+  findingId: string;
+  title: string;
+  reason: string;
+  at: number;
+}
+
 export interface SecurityReport {
   os: string;
   sshPorts: number[];
@@ -879,6 +888,10 @@ export const api = {
 
   securityAudit: (serverId: string) => invoke<SecurityReport>("security_audit", { serverId }),
   securityFixPlan: (id: string) => invoke<FixPlan>("security_fix_plan", { id }),
+  findingsIgnored: (serverId: string) => invoke<IgnoredFinding[]>("findings_ignored", { serverId }),
+  findingIgnore: (serverId: string, findingId: string, title: string, reason: string) =>
+    invoke<void>("finding_ignore", { serverId, findingId, title, reason }),
+  findingUnignore: (serverId: string, findingId: string) => invoke<void>("finding_unignore", { serverId, findingId }),
   securityFixApply: (serverId: string, id: string) =>
     invoke<{ ok: boolean; output: string; rollback: string | null }>("security_fix_apply", { serverId, id }),
 

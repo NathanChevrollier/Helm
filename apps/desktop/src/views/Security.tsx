@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Info, OctagonAlert, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
-import { api, errorMessage, type Finding, type FixPlan, type SecurityReport, type Severity } from "../lib/api";
+import { Archive, ArchiveRestore, AlertTriangle, BellOff, CheckCircle2, Info, OctagonAlert, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
+import { api, errorMessage, type Finding, type FixPlan, type IgnoredFinding, type SecurityReport, type Severity } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import Fail2ban from "./security/Fail2ban";
@@ -41,6 +41,38 @@ function Security({ serverId }: { serverId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fixing, setFixing] = useState<{ finding: Finding; plan: FixPlan } | null>(null);
+  const [ignored, setIgnored] = useState<IgnoredFinding[]>([]);
+  const [showIgnored, setShowIgnored] = useState(false);
+  const { ask, notify } = useAppPick("ask", "notify");
+
+  const loadIgnored = useCallback(() => void api.findingsIgnored(serverId).then(setIgnored, () => {}), [serverId]);
+  useEffect(loadIgnored, [loadIgnored]);
+
+  /** Met un constat de côté, avec une raison facultative : il rejoint les constats ignorés. */
+  const ignore = async (f: Finding) => {
+    const reason = await ask({
+      title: `Ignorer « ${f.title} » ?`,
+      body: "Ce constat n'apparaîtra plus dans les problèmes de ce serveur. Il reste consultable dans les constats ignorés, où tu peux le réactiver.",
+      input: { label: "Raison (facultatif)", initial: "" },
+      confirmLabel: "Ignorer",
+    });
+    if (reason === null || reason === false) return;
+    try {
+      await api.findingIgnore(serverId, f.id, f.title, typeof reason === "string" ? reason : "");
+      loadIgnored();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const unignore = async (f: IgnoredFinding) => {
+    try {
+      await api.findingUnignore(serverId, f.findingId);
+      loadIgnored();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,7 +100,8 @@ function Security({ serverId }: { serverId: string }) {
     setFixing({ finding: f, plan: await api.securityFixPlan(f.fix!) });
   };
 
-  const problems = report?.findings.filter((f) => f.severity !== "ok") ?? [];
+  const ignoredIds = ignored.map((i) => i.findingId);
+  const problems = report?.findings.filter((f) => f.severity !== "ok" && !ignoredIds.includes(f.id)) ?? [];
   const ok = report?.findings.filter((f) => f.severity === "ok") ?? [];
 
   return (
@@ -129,8 +162,46 @@ function Security({ serverId }: { serverId: string }) {
                     {f.fixLabel}
                   </Button>
                 )}
+                <IconButton title="Ignorer ce constat (il sera archivé)" onClick={() => void ignore(f)}>
+                  <BellOff size={14} />
+                </IconButton>
               </div>
             ))}
+            {ignored.length > 0 && (
+              <div className="mt-4">
+                <button className="flex items-center gap-2 text-sm text-muted hover:text-fg" onClick={() => setShowIgnored((v) => !v)}>
+                  <Archive size={14} />
+                  Constats ignorés ({ignored.length})
+                </button>
+                {showIgnored && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {ignored.map((f) => {
+                      const current = report.findings.find((x) => x.id === f.findingId);
+                      return (
+                        <div key={f.findingId} className="flex items-start gap-3 rounded-lg border border-border bg-panel/60 px-4 py-2.5 text-sm">
+                          <Archive size={15} className="mt-0.5 shrink-0 text-muted" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{current?.title ?? f.title}</span>
+                              {current && current.severity !== "ok" ? (
+                                <Badge tone={TONE[current.severity]}>{LABEL[current.severity]}</Badge>
+                              ) : (
+                                <Badge tone="ok">réglé depuis</Badge>
+                              )}
+                              <span className="text-xs text-muted">ignoré le {new Date(f.at).toLocaleDateString("fr-FR")}</span>
+                            </div>
+                            {f.reason && <p className="mt-0.5 text-xs text-muted">{f.reason}</p>}
+                          </div>
+                          <Button size="sm" variant="ghost" icon={<ArchiveRestore size={13} />} onClick={() => void unignore(f)}>
+                            Réafficher
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             {ok.length > 0 && (
               <div className="mt-4">
                 <h2 className="mb-2 text-sm font-medium text-muted">Points conformes</h2>

@@ -101,6 +101,7 @@ pub(crate) fn fingerprint(p: &Payload) -> String {
     p.tunnels.sort_by(|a, b| a.id.cmp(&b.id));
     p.identities.sort_by(|a, b| a.id.cmp(&b.id));
     p.desktops.sort_by(|a, b| a.id.cmp(&b.id));
+    p.ignored_findings.sort_by(|a, b| (&a.server_id, &a.finding_id).cmp(&(&b.server_id, &b.finding_id)));
     let json = serde_json::to_vec(&p).unwrap_or_default();
     ring::digest::digest(&ring::digest::SHA256, &json).as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -125,6 +126,15 @@ pub(crate) fn merge(remote: &Payload, local: &Payload) -> Payload {
         tunnels: union(&remote.tunnels, &local.tunnels, |t| &t.id),
         identities: union(&remote.identities, &local.identities, |i| &i.id),
         desktops: union(&remote.desktops, &local.desktops, |r| &r.id),
+        ignored_findings: {
+            let mut all = local.ignored_findings.clone();
+            for r in &remote.ignored_findings {
+                if !all.iter().any(|l| l.server_id == r.server_id && l.finding_id == r.finding_id) {
+                    all.push(r.clone());
+                }
+            }
+            all
+        },
         secrets: carry_secrets(remote, &local.secrets),
     }
 }
@@ -153,6 +163,7 @@ fn apply(store: &Store, p: &Payload, include_secrets: bool) -> Result<(Vec<Strin
         d.tunnels = p.tunnels.clone();
         d.identities = p.identities.clone();
         d.desktops = p.desktops.clone();
+        d.ignored_findings = p.ignored_findings.clone();
         d.known_hosts.extend(p.known_hosts.clone());
         (rs, ri, rt, rd)
     })?;

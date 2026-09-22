@@ -14,7 +14,7 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::{secrets, Identity, RemoteDesktop, ServerProfile, Snippet, Store, TunnelDef};
+use crate::{secrets, Identity, IgnoredFinding, RemoteDesktop, ServerProfile, Snippet, Store, TunnelDef};
 
 const FORMAT: &str = "helm-export";
 const ITERATIONS: u32 = 600_000;
@@ -35,6 +35,9 @@ pub(crate) struct Payload {
     /// Bureaux à distance (absents des exports antérieurs).
     #[serde(default)]
     pub desktops: Vec<RemoteDesktop>,
+    /// Constats d'audit ignorés.
+    #[serde(default)]
+    pub ignored_findings: Vec<IgnoredFinding>,
     /// `id du serveur` (ou `identity-<id>`) → (`type de secret` → valeur). Vide si les secrets ne
     /// sont pas exportés.
     #[serde(default)]
@@ -50,6 +53,7 @@ pub(crate) fn snapshot(store: &Store, include_secrets: bool) -> Payload {
         tunnels: d.tunnels.clone(),
         identities: d.identities.clone(),
         desktops: d.desktops.clone(),
+        ignored_findings: d.ignored_findings.clone(),
         secrets: BTreeMap::new(),
     });
     if include_secrets {
@@ -197,6 +201,7 @@ pub fn share(store: &Store, ids: &[String], password: &str, include_secrets: boo
         snippets: vec![],
         tunnels: vec![],
         desktops: vec![],
+        ignored_findings: vec![],
     };
     seal(&payload, password)
 }
@@ -268,6 +273,11 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         merge(&mut d.tunnels, p.tunnels, |t| &t.id);
         merge(&mut d.identities, p.identities, |i| &i.id);
         merge(&mut d.desktops, p.desktops, |r| &r.id);
+        for item in p.ignored_findings {
+            if !d.ignored_findings.iter().any(|x| x.server_id == item.server_id && x.finding_id == item.finding_id) {
+                d.ignored_findings.push(item);
+            }
+        }
         d.known_hosts.extend(p.known_hosts);
     })?;
     store_secrets(&p.secrets)?;

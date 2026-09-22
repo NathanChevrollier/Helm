@@ -12,6 +12,39 @@ use crate::commands::{admin, track};
 use crate::sessions::Sessions;
 use crate::store::{AuditLog, Store};
 
+/// Constats d'audit ignorés pour ce serveur (les plus récents d'abord).
+#[tauri::command]
+pub fn findings_ignored(store: State<'_, Store>, server_id: String) -> Vec<helm_profiles::IgnoredFinding> {
+    let mut list: Vec<_> = store.read(|d| d.ignored_findings.iter().filter(|f| f.server_id == server_id).cloned().collect());
+    list.sort_by_key(|f| std::cmp::Reverse(f.at));
+    list
+}
+
+/// Met un constat de côté : il passe dans les constats ignorés, avec sa raison.
+#[tauri::command]
+pub fn finding_ignore(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    server_id: String,
+    finding_id: String,
+    title: String,
+    reason: String,
+) -> Result<(), String> {
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    let entry = helm_profiles::IgnoredFinding { server_id: server_id.clone(), finding_id: finding_id.clone(), title, reason, at };
+    let r = store.write(|d| {
+        d.ignored_findings.retain(|f| !(f.server_id == entry.server_id && f.finding_id == entry.finding_id));
+        d.ignored_findings.push(entry);
+    });
+    track(&audit, &store, &server_id, "security.ignore", &finding_id, r)
+}
+
+/// Remet un constat ignoré dans la liste des problèmes.
+#[tauri::command]
+pub fn finding_unignore(store: State<'_, Store>, server_id: String, finding_id: String) -> Result<(), String> {
+    store.write(|d| d.ignored_findings.retain(|f| !(f.server_id == server_id && f.finding_id == finding_id)))
+}
+
 fn err(e: impl ToString) -> String {
     e.to_string()
 }
