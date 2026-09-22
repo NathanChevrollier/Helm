@@ -20,18 +20,27 @@ pub async fn term_open(
     let conn = sessions.get(&store, &server_id).await?;
     // Une session tmux remplace le shell : elle survit aux coupures et à la fermeture de l'app.
     let command = match (command, tmux_session) {
-        (Some(c), _) => Some(c),
+        // Onglet ouvert sur une commande (mises à jour, journal…) : elle est lancée par un shell
+        // qui annonce son PID, sinon Helm perdrait le dossier courant de cet onglet.
+        (Some(c), _) => Some(announcing_pid(&c)),
         (None, Some(name)) => Some(helm_core::tmux::attach_command(&name).map_err(|e| e.to_string())?),
         // Shell simple : il annonce son PID (séquence OSC ignorée par l'affichage) pour que
         // Helm retrouve son dossier courant (panneau Fichiers, glisser-déposer).
-        (None, None) => Some(SHELL_WITH_PID.to_string()),
+        (None, None) => Some(announcing_pid(LOGIN_SHELL)),
     };
     sessions.open_terminal(&conn, cols, rows, command, on_event).await
 }
 
-/// Shell de connexion précédé de la séquence OSC privée 7770, qui transmet son PID à l'interface
-/// (`exec` : le shell garde le PID annoncé).
-const SHELL_WITH_PID: &str = r#"exec sh -c 'printf "\033]7770;%s\007" "$$"; exec "${SHELL:-/bin/sh}" -l'"#;
+/// Shell de connexion de l'utilisateur (`exec` : il garde le PID annoncé).
+const LOGIN_SHELL: &str = r#"exec "${SHELL:-/bin/sh}" -l"#;
+
+/// Fait précéder une commande de la séquence OSC privée 7770, qui transmet à l'interface le PID
+/// du shell qui l'exécute (séquence ignorée par l'affichage). Helm retrouve ensuite le dossier
+/// courant de cet onglet via `/proc`, y compris quand un programme y tourne au premier plan.
+fn announcing_pid(command: &str) -> String {
+    let script = format!(r#"printf "\033]7770;%s\007" "$$"; {command}"#);
+    format!("exec sh -c '{}'", script.replace('\'', r"'\''"))
+}
 
 /// Dossier de travail d'un ou plusieurs processus : celui du programme au premier plan du
 /// terminal (après un `cd` dans un éditeur, par exemple), sinon celui du shell lui-même.
@@ -144,6 +153,24 @@ fn parse_history(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{announcing_pid, LOGIN_SHELL};
+
+    #[test]
+    fn annonce_le_pid_avant_le_shell() {
+        let c = announcing_pid(LOGIN_SHELL);
+        assert!(c.starts_with("exec sh -c 'printf "), "{c}");
+        assert!(c.contains("7770"), "{c}");
+        assert!(c.contains(r#"exec "${SHELL:-/bin/sh}" -l"#), "{c}");
+    }
+
+    #[test]
+    fn protege_les_apostrophes_de_la_commande() {
+        let c = announcing_pid("echo 'salut'; exec \"$SHELL\" -l");
+        // Aucune apostrophe de la commande ne doit fermer la chaîne du `sh -c`.
+        assert!(c.contains(r"'\''salut'\''"), "{c}");
+        assert!(c.ends_with("-l'"), "{c}");
+    }
+
     #[test]
     fn history() {
         let h = super::parse_history("ls\n#1700000000\ndocker ps\n: 1700000001:0;htop\nls\n");

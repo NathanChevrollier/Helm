@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowUp, Crosshair, Download, File, Folder, FolderInput, FolderOpen, RefreshCw, TextCursorInput, Upload } from "lucide-react";
 import { api, errorMessage, formatBytes, shellQuote, type FsEntry } from "../lib/api";
@@ -11,6 +11,17 @@ import { IconButton, Input } from "./ui";
 const FileEditor = lazy(() => import("./FileEditor"));
 
 const isDir = (e: FsEntry) => e.kind === "dir" || e.targetIsDir;
+
+/** Largeur du panneau : réglable à la souris, retenue d'une session à l'autre. */
+const WIDTH_KEY = "helm.terminalFiles.width";
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 900;
+const clampWidth = (w: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
+
+function storedWidth(): number {
+  const n = Number(localStorage.getItem(WIDTH_KEY));
+  return Number.isFinite(n) && n > 0 ? clampWidth(n) : 288;
+}
 
 function parent(path: string): string {
   const p = path.replace(/\/+$/, "");
@@ -37,6 +48,27 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
   const [editing, setEditing] = useState<string | null>(null);
   /** Dernier dossier vu dans le terminal : on ne suit que ses changements (la navigation manuelle reste). */
   const lastCwd = useRef<string | null>(null);
+  const [width, setWidth] = useState(storedWidth);
+
+  // Glissement de la poignée gauche : le panneau est à droite, sa largeur suit le bord de l'écran.
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const move = (ev: PointerEvent) => setWidth(clampWidth(window.innerWidth - ev.clientX));
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setWidth((w) => {
+        localStorage.setItem(WIDTH_KEY, String(w));
+        return w;
+      });
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  };
 
   const load = useCallback(
     async (dir: string) => {
@@ -113,7 +145,19 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
   const shown = entries.filter((e) => showHidden || !e.name.startsWith("."));
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l border-border bg-panel">
+    <aside className="relative flex shrink-0 flex-col border-l border-border bg-panel" style={{ width }}>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Redimensionner le panneau Fichiers"
+        title="Glisser pour redimensionner · double-clic pour la largeur par défaut"
+        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30"
+        onPointerDown={startResize}
+        onDoubleClick={() => {
+          setWidth(288);
+          localStorage.setItem(WIDTH_KEY, "288");
+        }}
+      />
       <div className="flex items-center gap-0.5 border-b border-border px-2 py-1.5">
         <span className="mr-auto pl-1 text-xs font-semibold tracking-wide text-muted uppercase">Fichiers</span>
         <IconButton title={follow ? "Suit le dossier du terminal (cliquer pour arrêter)" : "Suivre le dossier du terminal"} className={follow ? "text-accent" : ""} onClick={() => {
@@ -174,13 +218,19 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
             {isDir(e) ? <Folder size={14} className="shrink-0 text-accent" /> : <File size={14} className="shrink-0 text-muted" />}
             <span className="min-w-0 flex-1 truncate">{e.name}</span>
             <span className="flex opacity-0 group-hover:opacity-100">
-              <IconButton title="Insérer le chemin dans le terminal" className="size-6" onClick={() => sendToTerminal(`${shellQuote(e.path)} `)}>
-                <TextCursorInput size={13} />
-              </IconButton>
-              {!isDir(e) && (
-                <IconButton title="Télécharger" className="size-6" onClick={() => void download(e)}>
-                  <Download size={13} />
+              {isDir(e) ? (
+                <IconButton title="Aller dans ce dossier (cd) dans le terminal" className="size-6" onClick={() => sendToTerminal(`cd ${shellQuote(e.path)}\r`)}>
+                  <FolderInput size={13} />
                 </IconButton>
+              ) : (
+                <>
+                  <IconButton title="Insérer le chemin dans le terminal" className="size-6" onClick={() => sendToTerminal(`${shellQuote(e.path)} `)}>
+                    <TextCursorInput size={13} />
+                  </IconButton>
+                  <IconButton title="Télécharger" className="size-6" onClick={() => void download(e)}>
+                    <Download size={13} />
+                  </IconButton>
+                </>
               )}
             </span>
           </div>
