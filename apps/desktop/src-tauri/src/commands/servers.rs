@@ -7,6 +7,7 @@ use crate::commands::track;
 use crate::sessions::Sessions;
 use crate::store::AuditLog;
 use crate::store::{secrets, ServerProfile, Snippet, Store};
+#[cfg(windows)]
 use helm_profiles::AuthKind;
 
 /// Secrets transmis avec un profil : `None` = inchangé, `Some("")` = supprimé.
