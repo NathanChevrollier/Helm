@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Circle, Search, Square, X } from "lucide-react";
-import { save } from "@tauri-apps/plugin-dialog";
+import { ClipboardPaste, Circle, Copy, Eraser, FolderOpen, Search, Square, TextSelect, Upload, X } from "lucide-react";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { ClipboardAddon, type ClipboardSelectionType } from "@xterm/addon-clipboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorMessage, type TermEvent } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
@@ -13,6 +15,8 @@ import { broadcastInput, isBroadcasting, useBroadcast } from "../lib/broadcast";
 import { useTheme } from "../lib/theme";
 import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
+import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
 
 
 const THEME = {
@@ -109,9 +113,23 @@ async function offerTmux(serverId: string) {
     tmuxPresent.set(serverId, Promise.resolve(true));
     notify("tmux installé : les prochains terminaux seront persistants", "success");
   } catch (e) {
-    notify(`Installation de tmux impossible : ${errorMessage(e)}`, "error");
+    const msg = errorMessage(e);
+    // Aucun gestionnaire de paquets utilisable (Unraid…) : on explique quoi faire, une seule fois,
+    // et on n'en reparle plus pour ce serveur (réactivable dans les réglages).
+    if (msg.startsWith("UNSUPPORTED:")) {
+      setSettings({ tmuxDeclined: { ...useApp.getState().settings.tmuxDeclined, [serverId]: true } });
+      await ask({ title: "tmux non installable automatiquement", body: msg.slice("UNSUPPORTED:".length).trim(), confirmLabel: "Compris" });
+      return;
+    }
+    notify(`Installation de tmux impossible : ${msg}`, "error");
   }
 }
+
+/** Presse-papiers pour les séquences OSC 52 (sélection à la souris dans tmux, vim…) : écriture seule. */
+const writeOnlyClipboard = {
+  readText: (_s: ClipboardSelectionType) => "",
+  writeText: (_s: ClipboardSelectionType, text: string) => navigator.clipboard.writeText(text),
+};
 
 export default function TerminalPane({
   serverId,
@@ -149,6 +167,7 @@ export default function TerminalPane({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const openSearchRef = useRef<() => void>(() => {});
+  const safePasteRef = useRef<(text: string) => Promise<void>>(async () => {});
   openSearchRef.current = () => {
     setSearching(true);
     // Déjà ouverte : on resélectionne le texte ; sinon autoFocus prend le relais au montage.
@@ -157,6 +176,9 @@ export default function TerminalPane({
   /** Enregistrement asciicast v2 : [secondes depuis le début, "o", texte]. */
   const recording = useRef<{ start: number; cols: number; rows: number; events: [number, "o", string][]; decoder: TextDecoder } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
+  /** Fichiers du PC glissés au-dessus du panneau : dossier de destination (null : en cours de lecture). */
+  const [dropTarget, setDropTarget] = useState<string | null | false>(false);
 
   useEffect(() => {
     const term = new Terminal({
@@ -174,6 +196,24 @@ export default function TerminalPane({
     searchRef.current = search;
     // Seuls les liens web s'ouvrent : une sortie de commande ne doit pas pouvoir lancer autre chose.
     term.loadAddon(new WebLinksAddon((_e, url) => /^https?:\/\//i.test(url) && void openUrl(url)));
+    // Copie demandée par le serveur (OSC 52) ; la lecture du presse-papiers lui reste interdite.
+    term.loadAddon(new ClipboardAddon(undefined, writeOnlyClipboard));
+    // PID du shell simple (séquence privée envoyée au démarrage) et dossier courant annoncé par le
+    // shell (OSC 7) : servent au panneau Fichiers et au dépôt de fichiers dans le terminal.
+    term.parser.registerOscHandler(7770, (data) => {
+      const pid = Number(data);
+      if (Number.isInteger(pid) && pid > 0) usePanes.getState().set(paneId, { pid });
+      return true;
+    });
+    term.parser.registerOscHandler(7, (data) => {
+      try {
+        const url = new URL(data);
+        if (url.protocol === "file:") usePanes.getState().set(paneId, { cwd: decodeURIComponent(url.pathname) });
+      } catch {
+        /* URL invalide : ignorée */
+      }
+      return true;
+    });
     // Liens OSC 8 envoyés par le serveur lui-même : mêmes règles (web uniquement, sur clic).
     term.options.linkHandler = { activate: (_e, url) => void (/^https?:\/\//i.test(url) && openUrl(url)), allowNonHttpProtocols: false };
     term.open(host.current!);
@@ -186,6 +226,7 @@ export default function TerminalPane({
     termRef.current = term;
     fitRef.current = fit;
     useBroadcast.getState().register(paneId, { termId: null, label });
+    usePanes.getState().set(paneId, { serverId, termId: null });
 
     let disposed = false;
     let waitingReconnect = false;
@@ -195,6 +236,7 @@ export default function TerminalPane({
     const setTerm = (id: number | null) => {
       idRef.current = id;
       useBroadcast.getState().register(paneId, { termId: id, label });
+      usePanes.getState().set(paneId, { termId: id });
     };
 
     // Reconnexion automatique : 1 s, 2 s, 4 s… jusqu'à 30 s entre deux tentatives.
@@ -220,6 +262,8 @@ export default function TerminalPane({
       }
       const hasTmux = !command && tmux ? await tmuxAvailable(serverId) : null;
       const useTmux = hasTmux === true;
+      // Nouveau shell : son PID et son dossier seront annoncés à nouveau.
+      usePanes.getState().set(paneId, { tmux: useTmux ? tmux : undefined, pid: undefined, cwd: undefined });
       try {
         const id = await api.termOpen(
           serverId,
@@ -291,6 +335,7 @@ export default function TerminalPane({
     term.textarea?.addEventListener("focus", () => {
       focusedTerminal.id = idRef.current;
       focusedTerminal.focus = () => term.focus();
+      usePanes.getState().setActive(paneId);
     });
 
     // Collage : un bloc de plusieurs lignes s'exécuterait ligne par ligne dès le collage ; on
@@ -366,10 +411,19 @@ export default function TerminalPane({
       }
       return true;
     });
-    // Clic droit : colle, comme PuTTY.
+    // Clic droit : menu contextuel, ou copier/coller direct comme PuTTY (réglage). Il n'est jamais
+    // transmis au serveur : avec la souris activée, tmux ouvrait son propre menu, aussitôt refermé.
+    const swallowRight = (e: MouseEvent) => {
+      if (e.button === 2) e.stopPropagation();
+    };
     const onContext = (e: MouseEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       const sel = term.getSelection();
+      if (useApp.getState().settings.terminalRightClick === "menu") {
+        setMenu({ x: e.clientX, y: e.clientY, selection: sel });
+        return;
+      }
       if (sel) {
         void navigator.clipboard.writeText(sel);
         term.clearSelection();
@@ -377,7 +431,46 @@ export default function TerminalPane({
         void navigator.clipboard.readText().then(safePaste);
       }
     };
-    host.current!.addEventListener("contextmenu", onContext);
+    safePasteRef.current = safePaste;
+    hostEl.addEventListener("mousedown", swallowRight, true);
+    hostEl.addEventListener("mouseup", swallowRight, true);
+    hostEl.addEventListener("contextmenu", onContext, true);
+
+    // Fichiers glissés depuis l'explorateur Windows : envoyés dans le dossier courant du shell.
+    let unlistenDrop: (() => void) | undefined;
+    let dropCwd: Promise<string | null> | null = null;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === "leave") {
+          dropCwd = null;
+          return setDropTarget(false);
+        }
+        const { x, y } = p.position;
+        const el = document.elementFromPoint(x / window.devicePixelRatio, y / window.devicePixelRatio);
+        const inside = visibleRef.current && useApp.getState().section === "terminal" && !!el && hostEl.contains(el);
+        if (!inside) {
+          dropCwd = null;
+          return setDropTarget(false);
+        }
+        if (p.type === "drop") {
+          dropCwd = null;
+          setDropTarget(false);
+          if (idRef.current == null) return useApp.getState().notify("Terminal non connecté : impossible d'y déposer des fichiers.", "info");
+          void uploadToPane(paneId, p.paths);
+          return;
+        }
+        if (!dropCwd) {
+          const pending = paneCwd(paneId);
+          dropCwd = pending;
+          setDropTarget(null);
+          void pending.then((cwd) => dropCwd === pending && setDropTarget(cwd ?? ""));
+        }
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlistenDrop = fn;
+      });
 
     const observer = new ResizeObserver(() => {
       if (host.current && host.current.offsetWidth > 0) fit.fit();
@@ -392,6 +485,11 @@ export default function TerminalPane({
       observer.disconnect();
       hostEl.removeEventListener("paste", onPaste, true);
       hostEl.removeEventListener("wheel", onWheel);
+      hostEl.removeEventListener("mousedown", swallowRight, true);
+      hostEl.removeEventListener("mouseup", swallowRight, true);
+      hostEl.removeEventListener("contextmenu", onContext, true);
+      unlistenDrop?.();
+      usePanes.getState().remove(paneId);
       useBroadcast.getState().unregister(paneId);
       // Fermer le canal détache simplement la session tmux : elle continue sur le serveur.
       if (idRef.current != null) void api.termClose(idRef.current);
@@ -465,6 +563,43 @@ export default function TerminalPane({
     }
   };
 
+  const menuItems = (selection: string): MenuItem[] => {
+    const term = termRef.current;
+    const connected = idRef.current != null;
+    return [
+      { label: "Copier", icon: <Copy size={14} />, hint: "Ctrl+Maj+C", disabled: !selection, onClick: () => void navigator.clipboard.writeText(selection) },
+      { label: "Coller", icon: <ClipboardPaste size={14} />, hint: "Ctrl+Maj+V", disabled: !connected, onClick: () => void navigator.clipboard.readText().then((t) => safePasteRef.current(t)) },
+      { label: "Tout sélectionner", icon: <TextSelect size={14} />, onClick: () => term?.selectAll() },
+      { label: "Rechercher…", icon: <Search size={14} />, hint: display(shortcutOf("termSearch")), onClick: () => openSearchRef.current() },
+      { label: "Effacer l'écran", icon: <Eraser size={14} />, onClick: () => term?.clear() },
+      "separator",
+      {
+        label: "Envoyer des fichiers ici…",
+        icon: <Upload size={14} />,
+        disabled: !connected,
+        onClick: async () => {
+          const files = await open({ multiple: true, title: "Fichiers à envoyer dans le dossier courant du terminal" });
+          if (files && files.length) void uploadToPane(paneId, Array.isArray(files) ? files : [files]);
+        },
+      },
+      {
+        label: "Ouvrir le dossier courant dans Fichiers",
+        icon: <FolderOpen size={14} />,
+        disabled: !connected,
+        onClick: async () => {
+          const cwd = await paneCwd(paneId);
+          const { setFilesPath, setSection, setActiveServer, notify } = useApp.getState();
+          if (!cwd) return notify("Dossier courant introuvable pour ce terminal.", "info");
+          setActiveServer(serverId);
+          setFilesPath(serverId, cwd);
+          setSection("files");
+        },
+      },
+      "separator",
+      { label: isRecording ? "Arrêter l'enregistrement" : "Enregistrer la session", icon: <Circle size={14} />, onClick: () => void toggleRecording() },
+    ];
+  };
+
   return (
     <div className="group/term relative h-full w-full">
       <div ref={host} className="h-full w-full overflow-hidden bg-bg" />
@@ -505,6 +640,18 @@ export default function TerminalPane({
           {isRecording ? <Square size={13} fill="currentColor" /> : <Circle size={13} />}
         </button>
       </div>
+      {dropTarget !== false && (
+        <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10">
+          <span className="flex items-center gap-2 rounded-md bg-panel px-3 py-2 text-sm shadow-lg">
+            <Upload size={15} className="text-accent" />
+            {dropTarget === null ? "Lecture du dossier courant…" : dropTarget ? <>Déposer pour envoyer dans <span className="font-mono">{dropTarget}</span></> : "Déposer pour envoyer sur le serveur"}
+          </span>
+        </div>
+      )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.selection)} onClose={() => {
+        setMenu(null);
+        termRef.current?.focus();
+      }} />}
       {broadcasting && (
         <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 bg-danger/85 px-3 py-0.5 text-center text-[11px] font-medium text-white">
           Saisie diffusée à {broadcastCount} terminaux

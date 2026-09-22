@@ -22,9 +22,41 @@ pub async fn term_open(
     let command = match (command, tmux_session) {
         (Some(c), _) => Some(c),
         (None, Some(name)) => Some(helm_core::tmux::attach_command(&name).map_err(|e| e.to_string())?),
-        (None, None) => None,
+        // Shell simple : il annonce son PID (séquence OSC ignorée par l'affichage) pour que
+        // Helm retrouve son dossier courant (panneau Fichiers, glisser-déposer).
+        (None, None) => Some(SHELL_WITH_PID.to_string()),
     };
     sessions.open_terminal(&conn, cols, rows, command, on_event).await
+}
+
+/// Shell de connexion précédé de la séquence OSC privée 7770, qui transmet son PID à l'interface
+/// (`exec` : le shell garde le PID annoncé).
+const SHELL_WITH_PID: &str = r#"exec sh -c 'printf "\033]7770;%s\007" "$$"; exec "${SHELL:-/bin/sh}" -l'"#;
+
+/// Dossier courant d'un terminal : celui du panneau tmux, ou celui du programme au premier plan
+/// du shell `pid` (à défaut, du shell lui-même). `None` si le serveur n'est pas connecté.
+#[tauri::command]
+pub async fn term_cwd(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    tmux_session: Option<String>,
+    pid: Option<u32>,
+) -> Result<Option<String>, String> {
+    if !sessions.is_connected(&server_id).await {
+        return Ok(None);
+    }
+    let cmd = match (tmux_session, pid) {
+        (Some(name), _) => helm_core::tmux::pane_path_command(&name).map_err(|e| e.to_string())?,
+        (None, Some(pid)) => format!(
+            "for p in $(ps -o tpgid= -p {pid} 2>/dev/null) {pid}; do d=$(readlink /proc/$p/cwd 2>/dev/null) && [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; done; true"
+        ),
+        (None, None) => return Ok(None),
+    };
+    let conn = sessions.get(&store, &server_id).await?;
+    let out = conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
+    let path = out.stdout.lines().next().unwrap_or_default().trim().to_string();
+    Ok(path.starts_with('/').then_some(path))
 }
 
 #[tauri::command]

@@ -207,6 +207,27 @@ function Preferences() {
       </label>
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
         <span className="flex-1">
+          <span className="font-medium">Clic droit dans le terminal</span>
+          <span className="block text-sm text-muted">Menu (copier, coller, envoyer des fichiers, ouvrir le dossier…) ou copier/coller immédiat, comme PuTTY.</span>
+        </span>
+        <select
+          className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
+          value={settings.terminalRightClick}
+          onChange={(e) => setSettings({ terminalRightClick: e.target.value as "menu" | "paste" })}
+        >
+          <option value="menu">Menu contextuel</option>
+          <option value="paste">Copier / coller (PuTTY)</option>
+        </select>
+      </div>
+      <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
+        <input type="checkbox" className="mt-1" checked={settings.terminalStatusBar} onChange={(e) => setSettings({ terminalStatusBar: e.target.checked })} />
+        <span>
+          <span className="font-medium">Monitoring sous le terminal</span>
+          <span className="block text-sm text-muted">CPU, mémoire, disque, charge et réseau du serveur du terminal actif, rafraîchis toutes les 3 secondes.</span>
+        </span>
+      </label>
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
+        <span className="flex-1">
           <span className="font-medium">Thème</span>
           <span className="block text-sm text-muted">« Système » suit le thème de Windows.</span>
         </span>

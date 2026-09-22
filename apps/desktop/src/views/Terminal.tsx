@@ -1,24 +1,53 @@
 import { useCallback, useEffect, useState } from "react";
-import { Columns2, History, Plus, Radio, ScrollText, SquareTerminal, X } from "lucide-react";
+import { Columns2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, SquareTerminal, X } from "lucide-react";
 import TerminalPane from "../components/TerminalPane";
 import SnippetsPanel from "../components/SnippetsPanel";
+import TerminalFiles from "../components/TerminalFiles";
+import TerminalStatusBar from "../components/TerminalStatusBar";
+import TransfersBar from "../components/TransfersBar";
+import { ContextMenu } from "../components/ContextMenu";
 import { api, errorMessage, type TmuxSession } from "../lib/api";
 import { useBroadcast } from "../lib/broadcast";
+import { usePanes } from "../lib/panes";
 import { newTmuxName, useApp, useAppPick, type TermTab } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import { matches } from "../lib/shortcuts";
 
 const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
 
+/** Sessions tmux d'un onglet, avec le serveur de chacune (un onglet peut en couvrir plusieurs). */
+function tabSessions(tab: TermTab): { serverId: string; name: string }[] {
+  const out: { serverId: string; name: string }[] = [];
+  if (tab.tmux) out.push({ serverId: tab.serverId, name: tab.tmux });
+  if (tab.split) out.push({ serverId: tab.splitServerId ?? tab.serverId, name: tab.split });
+  for (const g of tab.grid ?? []) if (g.tmux) out.push({ serverId: g.serverId, name: g.tmux });
+  return out;
+}
+
+/** Identifiants des panneaux d'un onglet (diffusion, panneau actif). */
+function tabPaneIds(tab: TermTab): string[] {
+  if (tab.grid) return tab.grid.map((_, i) => `${tab.key}:g${i}`);
+  return tab.split != null ? [`${tab.key}:0`, `${tab.key}:1`] : [`${tab.key}:0`];
+}
+
 export default function TerminalView({ visible }: { visible: boolean }) {
-  const { tabs, activeTab, setActiveTab, closeTab, openTab, updateTab, activeServerId, servers, ask, notify } = useAppPick("tabs", "activeTab", "setActiveTab", "closeTab", "openTab", "updateTab", "activeServerId", "servers", "ask", "notify");
+  const { tabs, activeTab, setActiveTab, closeTab, openTab, openGridTab, updateTab, activeServerId, servers, ask, notify, settings } = useAppPick("tabs", "activeTab", "setActiveTab", "closeTab", "openTab", "openGridTab", "updateTab", "activeServerId", "servers", "ask", "notify", "settings");
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [showSnippets, setShowSnippets] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [splitMenu, setSplitMenu] = useState<{ x: number; y: number } | null>(null);
+  const [multiPicker, setMultiPicker] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<string | null>(null);
   const [broadcastPicker, setBroadcastPicker] = useState(false);
   const broadcast = useBroadcast();
   const current = tabs.find((t) => t.key === activeTab);
   const serverOf = useCallback((id: string) => servers.find((s) => s.id === id), [servers]);
+  // Panneau qui a le focus dans l'onglet affiché (à défaut, le premier) : cible du panneau
+  // Fichiers et de la barre de monitoring.
+  const focusedPane = usePanes((s) => s.active);
+  const currentPanes = current ? tabPaneIds(current) : [];
+  const activePane = focusedPane && currentPanes.includes(focusedPane) ? focusedPane : (currentPanes[0] ?? null);
+  const activePaneServer = usePanes((s) => (activePane ? s.panes[activePane]?.serverId : undefined)) ?? current?.serverId;
 
   // La diffusion s'arrête dès qu'on quitte le terminal.
   useEffect(() => {
@@ -31,24 +60,27 @@ export default function TerminalView({ visible }: { visible: boolean }) {
    */
   const close = useCallback(
     async (tab: TermTab) => {
-      const names = [tab.tmux, tab.split].filter((n): n is string => !!n);
-      if (names.length) {
+      const sessions = tabSessions(tab);
+      const byServer = new Map<string, string[]>();
+      for (const s of sessions) byServer.set(s.serverId, [...(byServer.get(s.serverId) ?? []), s.name]);
+      const live: { serverId: string; name: string; command: string }[] = [];
+      for (const [serverId, names] of byServer) {
         try {
-          const live = (await api.tmuxSessions(tab.serverId)).filter((s) => names.includes(s.name));
-          const busy = live.filter((s) => !SHELLS.includes(s.command));
-          let keep = false;
-          if (busy.length) {
-            keep = !!(await ask({
-              title: "Un programme tourne encore",
-              body: `« ${busy.map((b) => b.command).join(", ")} » est en cours dans ce terminal. Le laisser continuer en arrière-plan ? Tu pourras le retrouver via « Sessions ». Sinon, il sera arrêté.`,
-              confirmLabel: "Laisser tourner",
-            }));
-          }
-          if (!keep) for (const s of live) await api.tmuxKill(tab.serverId, s.name).catch(() => {});
+          for (const s of await api.tmuxSessions(serverId)) if (names.includes(s.name)) live.push({ serverId, name: s.name, command: s.command });
         } catch {
           /* serveur injoignable : la session sera visible dans « Sessions » à la prochaine connexion */
         }
       }
+      const busy = live.filter((s) => !SHELLS.includes(s.command));
+      let keep = false;
+      if (busy.length) {
+        keep = !!(await ask({
+          title: "Un programme tourne encore",
+          body: `« ${busy.map((b) => b.command).join(", ")} » est en cours dans ce terminal. Le laisser continuer en arrière-plan ? Tu pourras le retrouver via « Sessions ». Sinon, il sera arrêté.`,
+          confirmLabel: "Laisser tourner",
+        }));
+      }
+      if (!keep) for (const s of live) await api.tmuxKill(s.serverId, s.name).catch(() => {});
       closeTab(tab.key);
     },
     [ask, closeTab],
@@ -75,18 +107,32 @@ export default function TerminalView({ visible }: { visible: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, activeServerId, current, openTab, close, tabs, setActiveTab]);
 
-  const toggleSplit = () => {
+  /** Divise l'onglet ; le second panneau peut ouvrir un autre serveur (deux hôtes côte à côte). */
+  const splitWith = (serverId: string) => {
     if (!current) return;
+    const other = serverId !== current.serverId;
+    const persistent = other
+      ? settings.persistentSessions && !settings.tmuxDeclined[serverId]
+      : !current.command && !!current.tmux;
+    updateTab(current.key, { split: persistent ? newTmuxName() : "", splitServerId: other ? serverId : undefined });
+  };
+  const toggleSplit = (e: React.MouseEvent) => {
+    if (!current || current.grid) return;
     if (current.split != null) {
       const name = current.split;
-      updateTab(current.key, { split: null });
-      if (name) void api.tmuxKill(current.serverId, name).catch(() => {});
+      const on = current.splitServerId ?? current.serverId;
+      updateTab(current.key, { split: null, splitServerId: undefined });
+      if (name) void api.tmuxKill(on, name).catch(() => {});
+    } else if (servers.length > 1) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setSplitMenu({ x: r.left, y: r.bottom + 4 });
     } else {
-      updateTab(current.key, { split: !current.command && current.tmux ? newTmuxName() : "" });
+      splitWith(current.serverId);
     }
   };
 
-  const labelOf = (t: TermTab, right = false) => `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}${right ? " (droite)" : ""}`;
+  const labelOf = (t: TermTab, right = false) =>
+    right ? `${serverOf(t.splitServerId ?? t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title} (droite)` : `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -104,7 +150,11 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                   active ? "border-accent bg-bg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
                 }`}
               >
-                <span className="size-[7px] shrink-0 rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
+                {t.grid ? (
+                  <LayoutGrid size={12} className="shrink-0 text-accent" />
+                ) : (
+                  <span className="size-[7px] shrink-0 rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
+                )}
                 <span className="flex-1 truncate" title={titles[t.key] ?? t.title}>
                   {t.title}
                 </span>
@@ -139,8 +189,10 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           ) : (
             <ToolButton label="Diffuser" title="Diffuser la saisie à plusieurs terminaux" icon={<Radio size={13} />} disabled={Object.keys(broadcast.panes).length < 2} onClick={() => setBroadcastPicker(true)} />
           )}
+          <ToolButton label="Multi-serveurs" title="Un terminal par serveur, côte à côte, avec la saisie diffusée à tous" icon={<LayoutGrid size={13} />} disabled={servers.length < 2} onClick={() => setMultiPicker(true)} />
           <ToolButton label="Sessions" title="Sessions persistantes (tmux)" icon={<History size={13} />} disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)} />
-          <ToolButton label="Diviser" title="Diviser l'écran" icon={<Columns2 size={13} />} disabled={!current} active={current?.split != null} onClick={toggleSplit} />
+          <ToolButton label="Diviser" title="Diviser l'écran (même serveur ou un autre)" icon={<Columns2 size={13} />} disabled={!current || !!current.grid} active={current?.split != null} onClick={toggleSplit} />
+          <ToolButton label="Fichiers" title="Fichiers du serveur, au dossier courant du terminal" icon={<FolderTree size={13} />} active={showFiles} disabled={!current} onClick={() => setShowFiles((v) => !v)} />
           <ToolButton label="Snippets" title="Snippets" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
         </div>
       </div>
@@ -162,36 +214,73 @@ export default function TerminalView({ visible }: { visible: boolean }) {
             const show = visible && t.key === activeTab;
             return (
               <div key={t.key} className={`absolute inset-0 flex ${t.key === activeTab ? "" : "invisible"}`}>
-                <div className="min-w-0 flex-1">
-                  <TerminalPane
-                    serverId={t.serverId}
-                    command={t.command}
-                    tmux={t.tmux}
-                    paneId={`${t.key}:0`}
-                    label={labelOf(t)}
-                    visible={show}
-                    onTitle={(title) => setTitles((x) => ({ ...x, [t.key]: title }))}
-                  />
-                </div>
-                {t.split != null && (
-                  <div className="min-w-0 flex-1 border-l border-border">
-                    <TerminalPane serverId={t.serverId} tmux={t.split || undefined} paneId={`${t.key}:1`} label={labelOf(t, true)} visible={show} />
-                  </div>
+                {t.grid ? (
+                  <GridPanes tab={t} visible={show} />
+                ) : (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <TerminalPane
+                        serverId={t.serverId}
+                        command={t.command}
+                        tmux={t.tmux}
+                        paneId={`${t.key}:0`}
+                        label={labelOf(t)}
+                        visible={show}
+                        onTitle={(title) => setTitles((x) => ({ ...x, [t.key]: title }))}
+                      />
+                    </div>
+                    {t.split != null && (
+                      <div className="flex min-w-0 flex-1 flex-col border-l border-border">
+                        {t.splitServerId && <PaneHeader serverId={t.splitServerId} />}
+                        <div className="min-h-0 flex-1">
+                          <TerminalPane serverId={t.splitServerId ?? t.serverId} tmux={t.split || undefined} paneId={`${t.key}:1`} label={labelOf(t, true)} visible={show} />
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );
           })}
         </div>
+        {showFiles && activePane && <TerminalFiles paneId={activePane} visible={visible} />}
         {showSnippets && <SnippetsPanel />}
       </div>
+      <TransfersBar />
+      {settings.terminalStatusBar && activePaneServer && <TerminalStatusBar serverId={activePaneServer} visible={visible} />}
+
+      {splitMenu && current && (
+        <ContextMenu
+          x={splitMenu.x}
+          y={splitMenu.y}
+          onClose={() => setSplitMenu(null)}
+          items={[
+            { label: `Même serveur (${serverOf(current.serverId)?.name ?? "?"})`, icon: <Columns2 size={14} />, onClick: () => splitWith(current.serverId) },
+            "separator",
+            ...servers
+              .filter((s) => s.id !== current.serverId)
+              .map((s) => ({ label: s.name, hint: s.host, icon: <Server size={14} style={{ color: s.color ?? undefined }} />, onClick: () => splitWith(s.id) })),
+          ]}
+        />
+      )}
+      {multiPicker && (
+        <MultiServerPicker
+          onClose={() => setMultiPicker(false)}
+          onOpen={(ids, broadcastOn) => {
+            const key = openGridTab(ids);
+            if (broadcastOn) useBroadcast.getState().setActive(true, ids.map((_, i) => `${key}:g${i}`));
+            setMultiPicker(false);
+          }}
+        />
+      )}
 
       {broadcastPicker && <BroadcastPicker onClose={() => setBroadcastPicker(false)} />}
       {sessionsOf && (
         <SessionsModal
           serverId={sessionsOf}
-          openNames={tabs.flatMap((t) => [t.tmux, t.split]).filter((n): n is string => !!n)}
+          openNames={tabs.flatMap((t) => tabSessions(t).map((x) => x.name))}
           onOpen={(name) => {
-            const existing = tabs.find((t) => t.tmux === name || t.split === name);
+            const existing = tabs.find((t) => tabSessions(t).some((x) => x.name === name));
             if (existing) setActiveTab(existing.key);
             else openTab(sessionsOf, { title: `${serverOf(sessionsOf)?.name} (reprise)`, tmux: name });
             setSessionsOf(null);
@@ -201,6 +290,90 @@ export default function TerminalView({ visible }: { visible: boolean }) {
         />
       )}
     </div>
+  );
+}
+
+/** Nom et couleur du serveur, en tête d'un panneau (grille multi-serveurs, écran divisé sur deux hôtes). */
+function PaneHeader({ serverId }: { serverId: string }) {
+  const s = useApp((st) => st.servers.find((x) => x.id === serverId));
+  return (
+    <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-border bg-rail px-2 text-[11px]">
+      <span className="size-[7px] rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
+      <span className="font-medium">{s?.name ?? "?"}</span>
+      <span className="truncate font-mono text-muted">
+        {s?.username}@{s?.host}
+      </span>
+    </div>
+  );
+}
+
+/** Onglet multi-serveurs : un terminal par serveur, en grille. */
+function GridPanes({ tab, visible }: { tab: TermTab; visible: boolean }) {
+  const servers = useApp((s) => s.servers);
+  const grid = tab.grid ?? [];
+  const cols = grid.length <= 1 ? 1 : grid.length <= 4 ? 2 : 3;
+  return (
+    <div className="grid min-w-0 flex-1 gap-px bg-border" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)" }}>
+      {grid.map((g, i) => (
+        <div key={i} className="flex min-h-0 min-w-0 flex-col bg-bg">
+          <PaneHeader serverId={g.serverId} />
+          <div className="min-h-0 flex-1">
+            <TerminalPane
+              serverId={g.serverId}
+              tmux={g.tmux}
+              paneId={`${tab.key}:g${i}`}
+              label={servers.find((s) => s.id === g.serverId)?.name ?? "?"}
+              visible={visible}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Choix des serveurs d'un onglet multi-serveurs. */
+function MultiServerPicker({ onClose, onOpen }: { onClose: () => void; onOpen: (ids: string[], broadcast: boolean) => void }) {
+  const servers = useApp((s) => s.servers);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [broadcastOn, setBroadcastOn] = useState(true);
+  return (
+    <Modal
+      title="Terminaux multi-serveurs"
+      onClose={onClose}
+      footer={
+        <Button variant="primary" icon={<LayoutGrid size={14} />} disabled={selected.length < 2} onClick={() => onOpen(selected, broadcastOn)}>
+          Ouvrir {selected.length} terminaux
+        </Button>
+      }
+    >
+      <p className="mb-3 text-sm text-muted">Un terminal par serveur, affichés côte à côte dans un même onglet. Pratique pour lancer la même commande sur plusieurs hôtes et comparer les résultats.</p>
+      <ul className="mb-3 flex flex-col gap-1">
+        {servers.map((s) => (
+          <li key={s.id}>
+            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
+              <input
+                type="checkbox"
+                checked={selected.includes(s.id)}
+                onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)))}
+              />
+              <span className="size-[7px] rounded-full" style={{ background: s.color ?? "var(--color-accent)" }} />
+              <span className="text-sm">{s.name}</span>
+              <span className="ml-auto font-mono text-xs text-muted">
+                {s.username}@{s.host}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <label className="flex items-start gap-3 rounded-md border border-border p-3 text-sm">
+        <input type="checkbox" className="mt-0.5" checked={broadcastOn} onChange={(e) => setBroadcastOn(e.target.checked)} />
+        <span>
+          Diffuser la saisie à tous les terminaux
+          <span className="block text-xs text-muted">Les commandes sensibles (rm -rf, reboot…) demandent confirmation. Arrêt avec « Arrêter la diffusion ».</span>
+        </span>
+      </label>
+    </Modal>
   );
 }
 
@@ -312,7 +485,7 @@ function SessionsModal({
 }
 
 /** Bouton texte de la barre d'onglets du terminal. */
-function ToolButton({ label, title, icon, active, disabled, onClick }: { label: string; title: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick: () => void }) {
+function ToolButton({ label, title, icon, active, disabled, onClick }: { label: string; title: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
       title={title}

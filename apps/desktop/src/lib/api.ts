@@ -649,6 +649,7 @@ export const api = {
   termWrite: (id: number, data: string) => invoke<void>("term_write", { id, data }),
   termResize: (id: number, cols: number, rows: number) => invoke<void>("term_resize", { id, cols, rows }),
   termClose: (id: number) => invoke<void>("term_close", { id }),
+  termCwd: (serverId: string, tmuxSession?: string, pid?: number) => invoke<string | null>("term_cwd", { serverId, tmuxSession, pid }),
 
   fsHome: (serverId: string) => invoke<string>("fs_home", { serverId }),
   fsList: (serverId: string, path: string) => invoke<Listing>("fs_list", { serverId, path }),

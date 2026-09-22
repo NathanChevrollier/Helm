@@ -33,6 +33,16 @@ export interface TermTab {
   tmux?: string;
   /** Écran divisé : session tmux du second panneau, ou "" pour un shell simple. */
   split?: string | null;
+  /** Serveur du second panneau, s'il diffère de celui de l'onglet (deux hôtes côte à côte). */
+  splitServerId?: string;
+  /** Onglet multi-serveurs : une grille de panneaux, un par serveur, pour diffuser la saisie. */
+  grid?: GridPane[];
+}
+
+export interface GridPane {
+  serverId: string;
+  /** Session tmux du panneau (sessions persistantes), absente pour un shell simple. */
+  tmux?: string;
 }
 
 /** Raccourci vers un dossier du serveur, dans l'explorateur de fichiers. */
@@ -56,6 +66,12 @@ export interface Settings {
   theme: ThemeSetting;
   /** Raccourcis personnalisés (les autres gardent leur valeur par défaut). */
   shortcuts?: Record<string, string>;
+  /** Clic droit dans le terminal : menu contextuel, ou copier/coller direct comme PuTTY. */
+  terminalRightClick: "menu" | "paste";
+  /** Petit monitoring (CPU, RAM, disque, réseau) sous le terminal. */
+  terminalStatusBar: boolean;
+  /** Actualisation automatique des pages (Docker, sites, fichiers…), en secondes (0 : manuelle). */
+  autoRefreshSecs: number;
 }
 
 /** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
@@ -95,6 +111,8 @@ interface State {
   tabs: TermTab[];
   activeTab: string | null;
   openTab: (serverId: string, opts?: { title?: string; command?: string; tmux?: string }) => void;
+  /** Ouvre un onglet avec un terminal par serveur, en grille ; renvoie sa clé. */
+  openGridTab: (serverIds: string[]) => string;
   closeTab: (key: string) => void;
   setActiveTab: (key: string) => void;
   updateTab: (key: string, patch: Partial<TermTab>) => void;
@@ -166,7 +184,14 @@ export const useApp = create<State>((set, get) => ({
       servers,
       activeServerId: active && servers.some((x) => x.id === active) ? active : (servers[0]?.id ?? null),
       // Les onglets et raccourcis d'un serveur supprimé disparaissent.
-      tabs: s.tabs.filter((t) => servers.some((x) => x.id === t.serverId)),
+      tabs: s.tabs
+        .filter((t) => servers.some((x) => x.id === t.serverId))
+        .map((t) => {
+          const known = (id: string) => servers.some((x) => x.id === id);
+          if (t.splitServerId && !known(t.splitServerId)) return { ...t, split: null, splitServerId: undefined };
+          if (t.grid && !t.grid.every((g) => known(g.serverId))) return { ...t, grid: t.grid.filter((g) => known(g.serverId)) };
+          return t;
+        }),
       bookmarks: Object.fromEntries(Object.entries(s.bookmarks).filter(([id]) => servers.some((x) => x.id === id))),
     }));
   },
@@ -194,7 +219,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark" },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15 },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],
@@ -207,6 +232,18 @@ export const useApp = create<State>((set, get) => ({
     // Un shell simple devient persistant ; une commande (logs, exec…) reste éphémère.
     const tmux = opts.tmux ?? (!opts.command && settings.persistentSessions && !settings.tmuxDeclined[serverId] ? newTmuxName() : undefined);
     set((s) => ({ tabs: [...s.tabs, { key, serverId, title, command: opts.command, tmux }], activeTab: key, section: "terminal" }));
+  },
+  openGridTab: (serverIds) => {
+    const { servers, settings } = get();
+    const key = newId();
+    const grid = serverIds.map((serverId) => ({
+      serverId,
+      tmux: settings.persistentSessions && !settings.tmuxDeclined[serverId] ? newTmuxName() : undefined,
+    }));
+    const names = serverIds.map((id) => servers.find((s) => s.id === id)?.name ?? "?");
+    const title = names.length > 2 ? `${names.slice(0, 2).join(" + ")} +${names.length - 2}` : names.join(" + ");
+    set((s) => ({ tabs: [...s.tabs, { key, serverId: serverIds[0], title, grid }], activeTab: key, section: "terminal" }));
+    return key;
   },
   closeTab: (key) =>
     set((s) => {
