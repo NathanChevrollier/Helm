@@ -49,8 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = deploy.exec_sudo("id -u", Some("deploy"), None).await?;
     assert_eq!(out.stdout.trim(), "0", "sudo : {out:?}");
     println!("✓ sudo -S fonctionne pour deploy");
-    let out = deploy.exec_sudo("id -u", Some("mauvais"), None).await?;
-    assert!(!out.success());
+    // Refus explicite (erreur « mot de passe sudo incorrect ») plutôt qu'une sortie en échec.
+    match deploy.exec_sudo("id -u", Some("mauvais"), None).await {
+        Ok(out) => assert!(!out.success(), "sudo accepté avec un mauvais mot de passe : {out:?}"),
+        Err(e) => assert!(e.to_string().contains("sudo"), "erreur inattendue : {e}"),
+    }
     println!("✓ mauvais mot de passe sudo refusé");
 
     // 6. SFTP.
