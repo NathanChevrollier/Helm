@@ -64,15 +64,28 @@ pub async fn docker_overview(
     server_id: String,
 ) -> Result<Overview, String> {
     let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
-    let (access, version) = docker::access(&conn, sudo.as_deref()).await.map_err(err)?;
+    let s = sudo.as_deref();
+    let known = cache.0.lock().await.get(&server_id).copied().filter(|a| *a != Access::Unavailable);
+    // Accès déjà connu : sa vérification part en même temps que les listes (un aller-retour de moins).
+    let (checked, lists) = match known {
+        Some(a) => {
+            let (checked, lists) = tokio::join!(docker::access(&conn, s), async {
+                tokio::try_join!(docker::containers(&conn, a, s), docker::compose_projects(&conn, a, s))
+            });
+            (checked, Some((a, lists)))
+        }
+        None => (docker::access(&conn, s).await, None),
+    };
+    let (access, version) = checked.map_err(err)?;
     cache.0.lock().await.insert(server_id.clone(), access);
     let engine = if version.starts_with("podman") { "podman" } else { "docker" }.to_string();
     if access == Access::Unavailable {
         return Ok(Overview { access, version, engine, containers: vec![], projects: vec![] });
     }
-    let s = sudo.as_deref();
-    let (containers, projects) =
-        tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?;
+    let (containers, projects) = match lists {
+        Some((a, lists)) if a == access => lists.map_err(err)?,
+        _ => tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?,
+    };
     Ok(Overview { access, version, engine, containers, projects })
 }
 

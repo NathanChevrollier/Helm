@@ -188,10 +188,32 @@ impl Sessions {
         tauri::async_runtime::spawn(async move {
             let b64 = base64::engine::general_purpose::STANDARD;
             let mut code = None;
-            while let Some(msg) = reader.wait().await {
+            let mut next = None;
+            loop {
+                let msg = match next.take() {
+                    Some(m) => m,
+                    None => match reader.wait().await {
+                        Some(m) => m,
+                        None => break,
+                    },
+                };
                 match msg {
                     ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-                        if events.send(TermEvent::Data { data: b64.encode(&data) }).is_err() {
+                        // Sortie abondante (cat, logs) : les paquets déjà arrivés partent en un seul
+                        // message vers l'interface au lieu d'un par paquet SSH. Rien n'est attendu :
+                        // la frappe interactive garde la même latence.
+                        let mut buf = data.to_vec();
+                        while buf.len() < 512 * 1024 {
+                            match tokio::time::timeout(std::time::Duration::ZERO, reader.wait()).await {
+                                Ok(Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. })) => buf.extend_from_slice(&data),
+                                Ok(Some(other)) => {
+                                    next = Some(other);
+                                    break;
+                                }
+                                Ok(None) | Err(_) => break,
+                            }
+                        }
+                        if events.send(TermEvent::Data { data: b64.encode(&buf) }).is_err() {
                             break;
                         }
                     }
