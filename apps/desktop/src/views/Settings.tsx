@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bot, CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } from "lucide-react";
 import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
-import { useApp } from "../lib/store";
+import { useAppPick } from "../lib/store";
 import { hashPassword, useLock } from "../lib/lock";
 import type { ThemeSetting } from "../lib/theme";
 import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib/shortcuts";
@@ -113,7 +113,7 @@ function Journal() {
 }
 
 function AiAccess() {
-  const { servers, refreshServers, notify } = useApp();
+  const { servers, refreshServers, notify } = useAppPick("servers", "refreshServers", "notify");
   const [config, setConfig] = useState<McpConfig | null>(null);
   useEffect(() => {
     void api.mcpConfig().then(setConfig);
@@ -190,7 +190,7 @@ function AiAccess() {
 }
 
 function Preferences() {
-  const { settings, setSettings, servers, notify } = useApp();
+  const { settings, setSettings, servers, notify } = useAppPick("settings", "setSettings", "servers", "notify");
   const declined = Object.keys(settings.tmuxDeclined).filter((id) => settings.tmuxDeclined[id]);
   return (
     <div className="flex max-w-2xl flex-col gap-4">
@@ -259,7 +259,7 @@ const LOCK_DELAYS = [
 
 /** Mot de passe de verrouillage de Helm et délai de verrouillage automatique. */
 function AppLock() {
-  const { settings, setSettings, notify, ask } = useApp();
+  const { settings, setSettings, notify, ask } = useAppPick("settings", "setSettings", "notify", "ask");
   const configured = useLock((s) => s.configured);
   const [editing, setEditing] = useState(false);
   const [pw, setPw] = useState("");
@@ -352,7 +352,7 @@ function AppLock() {
 
 /** Export / import des réglages (changement de PC, copie de secours). */
 function ExportImport() {
-  const { notify, ask, refreshServers } = useApp();
+  const { notify, ask, refreshServers } = useAppPick("notify", "ask", "refreshServers");
   const [exporting, setExporting] = useState(false);
   const [pw, setPw] = useState("");
   const [withSecrets, setWithSecrets] = useState(false);
@@ -429,7 +429,7 @@ function ExportImport() {
 
 /** Raccourcis clavier : clique sur un raccourci puis appuie sur la nouvelle combinaison. */
 function Shortcuts() {
-  const { settings, setSettings, notify } = useApp();
+  const { settings, setSettings, notify } = useAppPick("settings", "setSettings", "notify");
   const [recording, setRecording] = useState<ShortcutId | null>(null);
 
   useEffect(() => {

@@ -4,14 +4,14 @@ import TerminalPane from "../components/TerminalPane";
 import SnippetsPanel from "../components/SnippetsPanel";
 import { api, errorMessage, type TmuxSession } from "../lib/api";
 import { useBroadcast } from "../lib/broadcast";
-import { newTmuxName, useApp, type TermTab } from "../lib/store";
+import { newTmuxName, useApp, useAppPick, type TermTab } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import { matches } from "../lib/shortcuts";
 
 const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
 
 export default function TerminalView({ visible }: { visible: boolean }) {
-  const { tabs, activeTab, setActiveTab, closeTab, openTab, updateTab, activeServerId, servers, ask, notify } = useApp();
+  const { tabs, activeTab, setActiveTab, closeTab, openTab, updateTab, activeServerId, servers, ask, notify } = useAppPick("tabs", "activeTab", "setActiveTab", "closeTab", "openTab", "updateTab", "activeServerId", "servers", "ask", "notify");
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [showSnippets, setShowSnippets] = useState(false);
   const [sessionsOf, setSessionsOf] = useState<string | null>(null);

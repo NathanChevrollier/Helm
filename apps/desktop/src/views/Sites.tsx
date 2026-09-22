@@ -5,8 +5,9 @@ import {
   History, RefreshCw, ShieldCheck, Trash2, Zap,
 } from "lucide-react";
 import { api, errorMessage, type Certificate, type Container, type NginxState, type DomainInfo, type ServerBlock, type SiteFile } from "../lib/api";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import { useCachedState } from "../lib/cache";
 
 const NginxEditor = lazy(() => import("../components/NginxEditor"));
 const NewSiteWizard = lazy(() => import("../components/NewSiteWizard"));
@@ -44,9 +45,9 @@ function linkFor(file: SiteFile) {
 }
 
 function Sites({ serverId }: { serverId: string }) {
-  const { ask, notify } = useApp();
-  const [state, setState] = useState<NginxState | null>(null);
-  const [containers, setContainers] = useState<Container[]>([]);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [state, setState] = useCachedState<NginxState | null>(`sites:${serverId}`, null);
+  const [containers, setContainers] = useCachedState<Container[]>(`sitesContainers:${serverId}`, []);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<SiteFile | null>(null);
@@ -54,7 +55,7 @@ function Sites({ serverId }: { serverId: string }) {
   const [history, setHistory] = useState(false);
   const [output, setOutput] = useState<{ title: string; text: string; ok: boolean } | null>(null);
   const [checks, setChecks] = useState<Record<string, string>>({});
-  const [dns, setDns] = useState<Record<string, DomainInfo>>({});
+  const [dns, setDns] = useCachedState<Record<string, DomainInfo>>(`sitesDns:${serverId}`, {});
 
   const load = useCallback(async () => {
     setLoading(true);

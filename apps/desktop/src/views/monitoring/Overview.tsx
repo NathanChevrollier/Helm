@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, OctagonAlert } from "lucide-react";
 import { api, errorMessage, formatBytes, formatDuration, type AgentInfo, type HistoryPoint, type Metrics } from "../../lib/api";
 import TimeChart from "../../components/TimeChart";
 import { usePolling } from "../../lib/poll";
+import { useCachedState } from "../../lib/cache";
 
 const RANGES = [
   { id: "live", label: "Direct", secs: 0 },
@@ -55,7 +56,7 @@ function Panel({ title, children, right }: { title: string; children: React.Reac
 }
 
 export default function Overview({ serverId, agent, visible }: { serverId: string; agent: AgentInfo | null; visible: boolean }) {
-  const [live, setLive] = useState<Metrics[]>([]);
+  const [live, setLive] = useCachedState<Metrics[]>(`live:${serverId}`, []);
   const [range, setRange] = useState<RangeId>("live");
   const [history, setHistory] = useState<HistoryPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);

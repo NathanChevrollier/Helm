@@ -1,15 +1,16 @@
 import { useCallback, useMemo, useState } from "react";
 import { RefreshCw, Skull, X } from "lucide-react";
 import { api, errorMessage, formatBytes, formatDuration, type Process } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useAppPick } from "../../lib/store";
 import { usePolling } from "../../lib/poll";
 import { IconButton, Input } from "../../components/ui";
+import { useCachedState } from "../../lib/cache";
 
 type SortKey = "cpu" | "mem" | "rss" | "pid" | "elapsed" | "name";
 
 export default function Processes({ serverId, visible }: { serverId: string; visible: boolean }) {
-  const { ask, notify } = useApp();
-  const [list, setList] = useState<Process[]>([]);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [list, setList] = useCachedState<Process[]>(`processes:${serverId}`, []);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("cpu");
   const [loading, setLoading] = useState(false);

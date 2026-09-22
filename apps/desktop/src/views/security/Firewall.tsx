@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { BrickWall, Globe, Lock, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, errorMessage, type FwState } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input } from "../../components/ui";
+import { useCachedState } from "../../lib/cache";
 
 const STATUS = {
   open: { label: "exposé", tone: "warn" },
@@ -11,8 +12,8 @@ const STATUS = {
 } as const;
 
 export default function Firewall({ serverId }: { serverId: string }) {
-  const { ask, notify } = useApp();
-  const [state, setState] = useState<FwState | null>(null);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [state, setState] = useCachedState<FwState | null>(`firewall:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [port, setPort] = useState("");

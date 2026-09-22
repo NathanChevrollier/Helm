@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Download, KeyRound, Pencil, Plug, PlugZap, Plus, Server, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import { forgetCached } from "../lib/cache";
 
 const SOURCES = [
   ["putty", "PuTTY"],
@@ -65,7 +66,7 @@ export default function ServersView() {
 }
 
 function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void }) {
-  const { openTab, setActiveServer, activeServerId, refreshServers, notify, ask } = useApp();
+  const { openTab, setActiveServer, activeServerId, refreshServers, notify, ask } = useAppPick("openTab", "setActiveServer", "activeServerId", "refreshServers", "notify", "ask");
   const [busy, setBusy] = useState(false);
   const active = server.id === activeServerId;
 
@@ -85,6 +86,7 @@ function ServerCard({ server, onEdit }: { server: ServerView; onEdit: () => void
     });
     if (!ok) return;
     await api.deleteServer(server.id);
+    forgetCached(server.id);
     void refreshServers();
   };
 

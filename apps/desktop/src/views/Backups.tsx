@@ -3,8 +3,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowUp, CheckCircle2, DatabaseBackup, File, Folder, OctagonAlert, Play, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { api, errorMessage, formatBytes, type BackupConfig, type BackupOverview, type DbSource, type Snapshot, type SnapshotNode } from "../lib/api";
 import { track } from "../lib/transfers";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import { useCachedState } from "../lib/cache";
 
 export default function BackupsView() {
   const serverId = useApp((s) => s.activeServerId);
@@ -13,8 +14,8 @@ export default function BackupsView() {
 }
 
 function Backups({ serverId }: { serverId: string }) {
-  const { notify, openTab } = useApp();
-  const [data, setData] = useState<BackupOverview | null>(null);
+  const { notify, openTab } = useAppPick("notify", "openTab");
+  const [data, setData] = useCachedState<BackupOverview | null>(`backups:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [checkOut, setCheckOut] = useState<string | null>(null);

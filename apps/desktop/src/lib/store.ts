@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import { api, errorMessage, type ServerView } from "./api";
 import type { SectionId } from "../sections";
 import type { ThemeSetting } from "./theme";
@@ -338,4 +339,18 @@ export async function ensureConnected(serverId: string, opts: { interactive?: bo
     }
   }
   return false;
+}
+
+/**
+ * Abonne le composant aux seuls champs demandés : il ne se redessine que si l'un d'eux change,
+ * pas à chaque notification, onglet ou changement d'état d'un serveur.
+ */
+export function useAppPick<K extends keyof State>(...keys: K[]): Pick<State, K> {
+  return useApp(
+    useShallow((s) => {
+      const out = {} as Pick<State, K>;
+      for (const k of keys) out[k] = s[k];
+      return out;
+    }),
+  );
 }

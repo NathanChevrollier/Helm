@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Box, Cable, FolderOpen, Globe, History, Layers, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
 import { useDoctor } from "./ConnectionDoctor";
-import { focusedTerminal } from "./TerminalPane";
+import { focusedTerminal } from "../lib/focus";
 import { api, errorMessage, shellQuote, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
 import { SECTIONS } from "../sections";
 import { ensureConnected, useApp } from "../lib/store";

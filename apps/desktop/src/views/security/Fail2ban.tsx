@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Ban, Plus, RefreshCw, ShieldOff, Trash2, UserCheck } from "lucide-react";
 import { api, errorMessage, formatDuration, type F2bState } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input } from "../../components/ui";
+import { useCachedState } from "../../lib/cache";
 
 /** Adresses que Helm ajoute toujours à la liste (boucle locale). */
 const LOOPBACK = ["127.0.0.1/8", "127.0.0.0/8", "::1"];
@@ -12,8 +13,8 @@ function duration(secs: number): string {
 }
 
 export default function Fail2ban({ serverId }: { serverId: string }) {
-  const { ask, notify } = useApp();
-  const [state, setState] = useState<F2bState | null>(null);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [state, setState] = useCachedState<F2bState | null>(`fail2ban:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [myIp, setMyIp] = useState<string | null>(null);

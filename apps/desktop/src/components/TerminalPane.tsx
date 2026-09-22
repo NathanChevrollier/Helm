@@ -12,9 +12,8 @@ import { ensureConnected, useApp } from "../lib/store";
 import { broadcastInput, isBroadcasting, useBroadcast } from "../lib/broadcast";
 import { useTheme } from "../lib/theme";
 import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
+import { focusedTerminal } from "../lib/focus";
 
-/** Terminal actuellement focalisé : cible des snippets. */
-export const focusedTerminal: { id: number | null; focus?: () => void } = { id: null };
 
 const THEME = {
   background: "#0b0c0e",
@@ -62,7 +61,11 @@ const LIGHT_THEME = {
   brightWhite: "#8c959f",
 };
 
+// Décodage natif quand le moteur le propose (bien plus rapide que la boucle ci-dessous).
+const nativeFromBase64 = (Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array }).fromBase64?.bind(Uint8Array);
+
 function decode(b64: string): Uint8Array {
+  if (nativeFromBase64) return nativeFromBase64(b64);
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);

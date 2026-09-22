@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Play, RefreshCw, RotateCw, ScrollText, Square } from "lucide-react";
 import { api, errorMessage, type Service } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../../components/ui";
+import { useCachedState } from "../../lib/cache";
 
 export default function Services({ serverId }: { serverId: string }) {
-  const { ask, notify } = useApp();
-  const [list, setList] = useState<Service[] | null | undefined>(undefined);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [list, setList] = useCachedState<Service[] | null | undefined>(`services:${serverId}`, undefined);
   const [filter, setFilter] = useState("");
   const [onlyActive, setOnlyActive] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);

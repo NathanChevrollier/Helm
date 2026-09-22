@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { api, errorMessage, formatBytes, shellQuote, type FsEntry, type Listing } from "../lib/api";
 import { cancel, track, useTransfers } from "../lib/transfers";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
@@ -72,7 +72,7 @@ async function copyToOther(from: PaneId, serverId: string, paths: string[]) {
 }
 
 export default function FilesView() {
-  const { activeServerId, servers } = useApp();
+  const { activeServerId, servers } = useAppPick("activeServerId", "servers");
   const [dual, setDual] = useState(false);
   const [rightServer, setRightServer] = useState<string | null>(null);
   const drag = usePanes((s) => s.drag);
@@ -155,7 +155,7 @@ function Explorer({
   onToggleDual: () => void;
   onServerChange?: (id: string) => void;
 }) {
-  const { notify, ask, openTab, servers, filesPaths, setFilesPath, addBookmark, removeBookmark, renameBookmark } = useApp();
+  const { notify, ask, openTab, servers, filesPaths, setFilesPath, addBookmark, removeBookmark, renameBookmark } = useAppPick("notify", "ask", "openTab", "servers", "filesPaths", "setFilesPath", "addBookmark", "removeBookmark", "renameBookmark");
   const bookmarks = useApp((s) => s.bookmarks[serverId]) ?? [];
   const root = useRef<HTMLDivElement>(null);
   const version = usePanes((s) => s.version[pane]);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BellRing, CheckCircle2, Download, OctagonAlert, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { api, errorMessage, type AgentConfig, type AgentInfo, type AlertMetric } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useAppPick } from "../../lib/store";
 import { Badge, Button, Field, IconButton, Input } from "../../components/ui";
 
 const METRICS: { id: AlertMetric; label: string; unit: string }[] = [
@@ -12,7 +12,7 @@ const METRICS: { id: AlertMetric; label: string; unit: string }[] = [
 ];
 
 export default function Agent({ serverId, agent, reload }: { serverId: string; agent: AgentInfo | null; reload: () => Promise<void> }) {
-  const { ask, notify } = useApp();
+  const { ask, notify } = useAppPick("ask", "notify");
   const [busy, setBusy] = useState<string | null>(null);
   const [cfg, setCfg] = useState<AgentConfig | null>(null);
 

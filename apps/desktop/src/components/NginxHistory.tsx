@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, History, RotateCcw, XCircle } from "lucide-react";
 import { api, errorMessage, type ApplyResult } from "../lib/api";
-import { useApp } from "../lib/store";
+import { useAppPick } from "../lib/store";
 import { Button, Modal } from "./ui";
 
 /** `20260921-133323` → date lisible. */
@@ -37,7 +37,7 @@ function DiffView({ text }: { text: string }) {
 }
 
 export default function NginxHistory({ serverId, onClose, onRestored }: { serverId: string; onClose: () => void; onRestored: () => void }) {
-  const { ask, notify } = useApp();
+  const { ask, notify } = useAppPick("ask", "notify");
   const [list, setList] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState<string | null>(null);

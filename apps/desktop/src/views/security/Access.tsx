@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Plus, RefreshCw, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { api, errorMessage, type ServerUser } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton } from "../../components/ui";
+import { useCachedState } from "../../lib/cache";
 
 export default function Access({ serverId }: { serverId: string }) {
-  const { ask, notify } = useApp();
-  const [users, setUsers] = useState<ServerUser[] | null>(null);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [users, setUsers] = useCachedState<ServerUser[] | null>(`users:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 

@@ -9,6 +9,7 @@ import Services from "./monitoring/Services";
 import Agent from "./monitoring/Agent";
 import ScheduleView from "./monitoring/Schedule";
 import { usePolling } from "../lib/poll";
+import { useCachedState } from "../lib/cache";
 
 const TABS = [
   { id: "overview", label: "Vue d'ensemble" },
@@ -29,7 +30,7 @@ function Monitoring({ serverId }: { serverId: string }) {
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
   const [tab, setTab] = useState<TabId>("overview");
   const [ready, setReady] = useState<boolean | null>(null);
-  const [agent, setAgent] = useState<AgentInfo | null>(null);
+  const [agent, setAgent] = useCachedState<AgentInfo | null>(`agent:${serverId}`, null);
 
   const loadAgent = useCallback(async () => {
     try {

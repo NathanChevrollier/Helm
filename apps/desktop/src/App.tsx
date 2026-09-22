@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
 import { Lock, Plus, Search, ShipWheel, type LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
-import { useApp } from "./lib/store";
+import { useApp, useAppPick } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
 import CommandPalette from "./components/CommandPalette";
@@ -12,7 +12,9 @@ import { watchAlerts } from "./lib/alerts";
 import { applyTheme } from "./lib/theme";
 import { display, matches, shortcutOf } from "./lib/shortcuts";
 import HomeView from "./views/Home";
-import TerminalView from "./views/Terminal";
+
+// Chargé à part : xterm pèse un tiers de l'app et n'est pas nécessaire pour afficher l'accueil.
+const TerminalView = lazy(() => import("./views/Terminal"));
 
 const VIEWS: Partial<Record<SectionId, ComponentType>> = {
   servers: lazy(() => import("./views/Servers")),
@@ -28,7 +30,7 @@ const VIEWS: Partial<Record<SectionId, ComponentType>> = {
 };
 
 export default function App() {
-  const { section, setSection, servers, activeServerId, setActiveServer, refreshServers, hydrated, hydrate } = useApp();
+  const { section, setSection, servers, activeServerId, setActiveServer, refreshServers, hydrated, hydrate } = useAppPick("section", "setSection", "servers", "activeServerId", "setActiveServer", "refreshServers", "hydrated", "hydrate");
   const [version, setVersion] = useState<string>();
   const [palette, setPalette] = useState(false);
   const active = servers.find((s) => s.id === activeServerId);
@@ -148,7 +150,9 @@ export default function App() {
             <>
               {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
               <div className={`absolute inset-0 ${section === "terminal" ? "" : "invisible"}`}>
-                <TerminalView visible={section === "terminal"} />
+                <Suspense fallback={null}>
+                  <TerminalView visible={section === "terminal"} />
+                </Suspense>
               </div>
               {section === "home" && (
                 <div className="absolute inset-0 bg-bg">

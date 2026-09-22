@@ -3,13 +3,19 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
+// @ts-expect-error type error without @types/node package
+import { fileURLToPath } from "node:url";
 const host = process.env.TAURI_DEV_HOST;
+const monacoEsm = fileURLToPath(new URL("./node_modules/monaco-editor/esm/vs/", import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
-  // Monaco est chargé à la demande : on le pré-optimise pour éviter un rechargement de page en dev.
-  optimizeDeps: { include: ["monaco-editor", "@monaco-editor/react"] },
+  // Styles internes de Monaco, non exposés par son champ `exports` (voir src/lib/monaco-editor.ts).
+  resolve: { alias: [{ find: /^monaco-esm\//, replacement: monacoEsm.replaceAll("\\", "/") }] },
+  // Monaco est chargé à la demande depuis ses modules ESM (sous-ensemble) : pas de pré-optimisation,
+  // qui en créerait une seconde copie.
+  optimizeDeps: { include: ["@monaco-editor/react"], exclude: ["monaco-editor"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

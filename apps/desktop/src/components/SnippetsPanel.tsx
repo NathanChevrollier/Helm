@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { focusedTerminal } from "./TerminalPane";
+import { focusedTerminal } from "../lib/focus";
 import { api, type Snippet } from "../lib/api";
 import { useApp } from "../lib/store";
 import { Button, Field, IconButton, Input, Modal } from "./ui";

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { CalendarClock, Pencil, Play, RefreshCw, Timer } from "lucide-react";
 import { api, errorMessage, type CronSource, type Schedule } from "../../lib/api";
-import { useApp } from "../../lib/store";
+import { useApp, useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../../components/ui";
+import { useCachedState } from "../../lib/cache";
 
 export default function ScheduleView({ serverId }: { serverId: string }) {
-  const { ask, notify } = useApp();
-  const [data, setData] = useState<Schedule | null>(null);
+  const { ask, notify } = useAppPick("ask", "notify");
+  const [data, setData] = useCachedState<Schedule | null>(`schedule:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<CronSource | null>(null);

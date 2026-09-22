@@ -7,10 +7,11 @@ import {
   api, errorMessage, shellQuote, type ComposeProject, type Container, type ContainerStats, type DockerDiskUsage,
   type DockerImage, type DockerOverview,
 } from "../lib/api";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
 import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../components/DockerExtras";
 import { usePolling } from "../lib/poll";
+import { useCachedState } from "../lib/cache";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
@@ -32,9 +33,9 @@ function stateTone(state: string) {
 }
 
 function Docker({ serverId }: { serverId: string }) {
-  const { notify } = useApp();
+  const { notify } = useAppPick("notify");
   const [tab, setTab] = useState<TabId>("containers");
-  const [data, setData] = useState<DockerOverview | null>(null);
+  const [data, setData] = useCachedState<DockerOverview | null>(`docker:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -110,8 +111,8 @@ function Docker({ serverId }: { serverId: string }) {
 }
 
 function Containers({ serverId, data, docker, reload }: { serverId: string; data: DockerOverview; docker: string; reload: () => Promise<void> }) {
-  const { ask, notify, openTab } = useApp();
-  const [stats, setStats] = useState<Record<string, ContainerStats>>({});
+  const { ask, notify, openTab } = useAppPick("ask", "notify", "openTab");
+  const [stats, setStats] = useCachedState<Record<string, ContainerStats>>(`dockerStats:${serverId}`, {});
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [inspect, setInspect] = useState<{ name: string; json: string } | null>(null);
@@ -288,7 +289,7 @@ function Containers({ serverId, data, docker, reload }: { serverId: string; data
 }
 
 function Compose({ serverId, data, docker, reload }: { serverId: string; data: DockerOverview; docker: string; reload: () => Promise<void> }) {
-  const { ask, notify, openTab } = useApp();
+  const { ask, notify, openTab } = useAppPick("ask", "notify", "openTab");
   const [busy, setBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);

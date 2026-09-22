@@ -3,7 +3,7 @@ import { DiffEditor } from "@monaco-editor/react";
 import { Copy, KeyRound, Lock, Trash2 } from "lucide-react";
 import "../lib/monaco";
 import { api, errorMessage, type ComposeProject, type Container, type DeployKey } from "../lib/api";
-import { useApp } from "../lib/store";
+import { useApp, useAppPick } from "../lib/store";
 import { Button, Field, IconButton, Input, Modal } from "./ui";
 import { useMonacoTheme } from "../lib/theme";
 
@@ -119,7 +119,7 @@ export async function deployProject(serverId: string, project: ComposeProject) {
 
 /** Clé de déploiement restreinte pour GitHub Actions. */
 export function GithubDeployDialog({ serverId, project, onClose }: { serverId: string; project: ComposeProject; onClose: () => void }) {
-  const { notify, ask } = useApp();
+  const { notify, ask } = useAppPick("notify", "ask");
   const [host, setHost] = useState("");
   const [keys, setKeys] = useState<string[]>([]);
   const [created, setCreated] = useState<DeployKey | null>(null);

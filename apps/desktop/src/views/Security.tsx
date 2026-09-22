@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
 import { api, errorMessage, type Finding, type FixPlan, type SecurityReport, type Severity } from "../lib/api";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import Fail2ban from "./security/Fail2ban";
 import Firewall from "./security/Firewall";
 import Access from "./security/Access";
+import { useCachedState } from "../lib/cache";
 
 const LABEL: Record<Severity, string> = { critical: "critique", high: "élevé", medium: "moyen", low: "faible", ok: "OK" };
 const TONE: Record<Severity, "danger" | "warn" | "accent" | "muted" | "ok"> = { critical: "danger", high: "danger", medium: "warn", low: "muted", ok: "ok" };
@@ -32,10 +33,10 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 function Security({ serverId }: { serverId: string }) {
-  const { openTab } = useApp();
+  const { openTab } = useAppPick("openTab");
   const [tab, setTab] = useState<TabId>("audit");
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
-  const [report, setReport] = useState<SecurityReport | null>(null);
+  const [report, setReport] = useCachedState<SecurityReport | null>(`security:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fixing, setFixing] = useState<{ finding: Finding; plan: FixPlan } | null>(null);

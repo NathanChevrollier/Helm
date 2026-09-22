@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { LayoutDashboard, RefreshCw, SquareTerminal } from "lucide-react";
 import { useDoctor } from "../components/ConnectionDoctor";
 import { api, errorMessage, formatBytes, formatDuration, type AuditEntry, type DashboardSummary, type ServerView } from "../lib/api";
-import { ensureConnected, useApp } from "../lib/store";
+import { ensureConnected, useAppPick } from "../lib/store";
 import { usePolling } from "../lib/poll";
 import { Button, EmptyState, IconButton } from "../components/ui";
+import { useCachedState } from "../lib/cache";
 
 const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
@@ -23,9 +24,10 @@ interface Todo {
 }
 
 export default function HomeView({ visible }: { visible: boolean }) {
-  const { servers, setSection, setActiveServer, openTab, notify } = useApp();
-  const [results, setResults] = useState<Record<string, Result>>({});
-  const [activity, setActivity] = useState<AuditEntry[]>([]);
+  const { servers, setSection, setActiveServer, openTab, notify } = useAppPick("servers", "setSection", "setActiveServer", "openTab", "notify");
+  const [results, setResults] = useCachedState<Record<string, Result>>("home:results", {});
+  const [activity, setActivity] = useCachedState<AuditEntry[]>("home:activity", []);
+  const ids = servers.map((s) => s.id).join(",");
   const running = useRef(false);
   const [loading, setLoading] = useState(false);
 
@@ -33,12 +35,11 @@ export default function HomeView({ visible }: { visible: boolean }) {
     if (running.current) return;
     running.current = true;
     setLoading(true);
-    const queue = [...servers];
-    setResults((r) => Object.fromEntries(servers.map((s) => [s.id, r[s.id] ?? "loading"])));
+    const queue = ids.split(",").filter(Boolean);
+    setResults((r) => Object.fromEntries(queue.map((id) => [id, r[id] ?? "loading"])));
     // Au plus 4 serveurs interrogés en même temps.
     const worker = async () => {
-      for (let s = queue.shift(); s; s = queue.shift()) {
-        const id = s.id;
+      for (let id = queue.shift(); id; id = queue.shift()) {
         const summary = await api.dashboardSummary(id).catch((e) => ({ connected: false, error: String(e) }) as DashboardSummary);
         setResults((r) => ({ ...r, [id]: summary }));
       }
@@ -47,7 +48,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
     void api.auditList(6).then(setActivity).catch(() => {});
     running.current = false;
     setLoading(false);
-  }, [servers]);
+    // Dépend des seuls identifiants : un serveur qui se connecte ne relance pas tout le tour.
+  }, [ids]);
 
   usePolling(refresh, REFRESH_MS, [refresh], visible);
   useEffect(() => {

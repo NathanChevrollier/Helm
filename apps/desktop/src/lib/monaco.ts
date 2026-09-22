@@ -1,5 +1,5 @@
 // Monaco empaqueté localement (pas de CDN) + coloration syntaxique nginx.
-import * as monaco from "monaco-editor";
+import * as monaco from "./monaco-editor";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import { loader } from "@monaco-editor/react";
 
@@ -51,7 +51,7 @@ export function languageFor(path: string): string {
   const ext = name.includes(".") ? name.split(".").pop()! : "";
   const map: Record<string, string> = {
     js: "javascript", mjs: "javascript", cjs: "javascript", ts: "typescript", tsx: "typescript", jsx: "javascript",
-    json: "json", yml: "yaml", yaml: "yaml", md: "markdown", html: "html", htm: "html", css: "css", scss: "scss",
+    json: "javascript", yml: "yaml", yaml: "yaml", md: "markdown", html: "html", htm: "html", css: "css", scss: "scss",
     py: "python", sh: "shell", bash: "shell", zsh: "shell", php: "php", go: "go", rs: "rust", sql: "sql",
     xml: "xml", toml: "ini", ini: "ini", conf: "ini", service: "ini", java: "java", rb: "ruby", c: "c", h: "c", cpp: "cpp",
   };

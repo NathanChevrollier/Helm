@@ -1,13 +1,14 @@
 import { useCallback, useState } from "react";
 import { Cable, Copy, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { api, errorMessage, type TunnelDef, type TunnelView } from "../lib/api";
-import { useApp } from "../lib/store";
+import { useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { usePolling } from "../lib/poll";
+import { useCachedState } from "../lib/cache";
 
 export default function TunnelsView() {
-  const { servers, notify, ask, activeServerId } = useApp();
-  const [list, setList] = useState<TunnelView[]>([]);
+  const { servers, notify, ask, activeServerId } = useAppPick("servers", "notify", "ask", "activeServerId");
+  const [list, setList] = useCachedState<TunnelView[]>("tunnels:list", []);
   const [editing, setEditing] = useState<TunnelDef | null>(null);
 
   const load = useCallback(() => api.tunnels().then(setList), []);
@@ -134,7 +135,7 @@ export default function TunnelsView() {
 }
 
 export function TunnelForm({ initial, onClose, onSaved }: { initial: TunnelDef; onClose: () => void; onSaved: (id: string, start: boolean) => void }) {
-  const { servers, notify } = useApp();
+  const { servers, notify } = useAppPick("servers", "notify");
   const [t, setT] = useState(initial);
   const set = <K extends keyof TunnelDef>(k: K, v: TunnelDef[K]) => setT((x) => ({ ...x, [k]: v }));
   const save = async (start: boolean) => {
