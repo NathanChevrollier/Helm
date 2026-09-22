@@ -9,7 +9,7 @@ import { ContextMenu } from "../components/ContextMenu";
 import { api, errorMessage, type TmuxSession } from "../lib/api";
 import { useBroadcast } from "../lib/broadcast";
 import { usePanes } from "../lib/panes";
-import { newTmuxName, useApp, useAppPick, type TermTab } from "../lib/store";
+import { ensureConnected, newTmuxName, useApp, useAppPick, type TermTab } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
 import { matches } from "../lib/shortcuts";
 
@@ -108,9 +108,11 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   }, [visible, activeServerId, current, openTab, close, tabs, setActiveTab]);
 
   /** Divise l'onglet ; le second panneau peut ouvrir un autre serveur (deux hôtes côte à côte). */
-  const splitWith = (serverId: string) => {
+  const splitWith = async (serverId: string) => {
     if (!current) return;
     const other = serverId !== current.serverId;
+    // Autre serveur : connecté d'abord, pour que ses dialogues (clé d'hôte, mot de passe) passent seuls.
+    if (other && !(await ensureConnected(serverId, { force: true }))) return;
     const persistent = other
       ? settings.persistentSessions && !settings.tmuxDeclined[serverId]
       : !current.command && !!current.tmux;
@@ -127,7 +129,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setSplitMenu({ x: r.left, y: r.bottom + 4 });
     } else {
-      splitWith(current.serverId);
+      void splitWith(current.serverId);
     }
   };
 
@@ -255,21 +257,26 @@ export default function TerminalView({ visible }: { visible: boolean }) {
           y={splitMenu.y}
           onClose={() => setSplitMenu(null)}
           items={[
-            { label: `Même serveur (${serverOf(current.serverId)?.name ?? "?"})`, icon: <Columns2 size={14} />, onClick: () => splitWith(current.serverId) },
+            { label: `Même serveur (${serverOf(current.serverId)?.name ?? "?"})`, icon: <Columns2 size={14} />, onClick: () => void splitWith(current.serverId) },
             "separator",
             ...servers
               .filter((s) => s.id !== current.serverId)
-              .map((s) => ({ label: s.name, hint: s.host, icon: <Server size={14} style={{ color: s.color ?? undefined }} />, onClick: () => splitWith(s.id) })),
+              .map((s) => ({ label: s.name, hint: s.host, icon: <Server size={14} style={{ color: s.color ?? undefined }} />, onClick: () => void splitWith(s.id) })),
           ]}
         />
       )}
       {multiPicker && (
         <MultiServerPicker
           onClose={() => setMultiPicker(false)}
-          onOpen={(ids, broadcastOn) => {
-            const key = openGridTab(ids);
-            if (broadcastOn) useBroadcast.getState().setActive(true, ids.map((_, i) => `${key}:g${i}`));
+          onOpen={async (ids, broadcastOn) => {
             setMultiPicker(false);
+            // Un serveur après l'autre : un seul dialogue de connexion à la fois.
+            const ready: string[] = [];
+            for (const id of ids) if (await ensureConnected(id, { force: true })) ready.push(id);
+            if (ready.length < ids.length) notify(`${ids.length - ready.length} serveur(s) non connecté(s), laissé(s) de côté`, "info");
+            if (!ready.length) return;
+            const key = openGridTab(ready);
+            if (broadcastOn && ready.length > 1) useBroadcast.getState().setActive(true, ready.map((_, i) => `${key}:g${i}`));
           }}
         />
       )}
