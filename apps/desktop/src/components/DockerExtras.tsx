@@ -3,6 +3,7 @@ import { DiffEditor } from "@monaco-editor/react";
 import { Copy, KeyRound, Lock, Trash2 } from "lucide-react";
 import "../lib/monaco";
 import { api, errorMessage, type ComposeProject, type Container, type DeployKey } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
 import { useApp, useAppPick } from "../lib/store";
 import { Button, Field, IconButton, Input, Modal } from "./ui";
 import { useMonacoTheme } from "../lib/theme";
@@ -14,7 +15,7 @@ export async function tunnelTo(serverId: string, c: Container, remotePort: numbe
     const localPort = await api.tunnelFreePort(remotePort < 1024 ? remotePort + 10000 : remotePort);
     const id = await api.tunnelSave({ id: "", serverId, name: `${c.name}:${remotePort}`, localPort, remoteHost: "127.0.0.1", remotePort, autoStart: false });
     await api.tunnelStart(id);
-    void navigator.clipboard.writeText(`127.0.0.1:${localPort}`);
+    void writeClipboard(`127.0.0.1:${localPort}`);
     notify(`${c.name} accessible sur 127.0.0.1:${localPort} (adresse copiée). Gère-le dans l'onglet Tunnels.`, "success");
   } catch (e) {
     notify(errorMessage(e), "error");
@@ -131,7 +132,7 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
   }, [serverId, project.name]);
 
   const copy = (t: string, what: string) => {
-    void navigator.clipboard.writeText(t);
+    void writeClipboard(t);
     notify(`${what} copié`, "success");
   };
 

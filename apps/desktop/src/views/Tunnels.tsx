@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Cable, Copy, Pencil, Play, Plus, Square, Trash2 } from "lucide-react";
 import { api, errorMessage, type TunnelDef, type TunnelView } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
 import { useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import { usePolling } from "../lib/poll";
@@ -89,7 +90,7 @@ export default function TunnelsView() {
                       <IconButton
                         title="Copier l'adresse locale"
                         onClick={() => {
-                          void navigator.clipboard.writeText(`127.0.0.1:${t.localPort}`);
+                          void writeClipboard(`127.0.0.1:${t.localPort}`);
                           notify("Adresse copiée", "success");
                         }}
                       >

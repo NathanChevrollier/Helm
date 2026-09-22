@@ -2,6 +2,7 @@ import { useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Copy, FileDown, FileUp, Share2 } from "lucide-react";
 import { api, errorMessage } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
 import { useApp, useAppPick } from "../lib/store";
 import { Button, Field, Input, Modal } from "./ui";
 
@@ -27,7 +28,7 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       const code = await api.settingsShareCode(selected, password, withSecrets);
-      await navigator.clipboard.writeText(code);
+      await writeClipboard(code);
       notify("Code copié : colle-le à ton correspondant, et donne-lui le mot de passe par un autre canal.", "success");
       onClose();
     } catch (e) {

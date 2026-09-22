@@ -33,8 +33,23 @@ pub async fn term_open(
 /// (`exec` : le shell garde le PID annoncé).
 const SHELL_WITH_PID: &str = r#"exec sh -c 'printf "\033]7770;%s\007" "$$"; exec "${SHELL:-/bin/sh}" -l'"#;
 
-/// Dossier courant d'un terminal : celui du panneau tmux, ou celui du programme au premier plan
-/// du shell `pid` (à défaut, du shell lui-même). `None` si le serveur n'est pas connecté.
+/// Dossier de travail d'un ou plusieurs processus : celui du programme au premier plan du
+/// terminal (après un `cd` dans un éditeur, par exemple), sinon celui du shell lui-même.
+fn cwd_of_pids(pids: &[u32]) -> String {
+    let list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(" ");
+    format!(
+        "for base in {list}; do \
+           for p in $(ps -o tpgid= -p $base 2>/dev/null) $base; do \
+             d=$(readlink /proc/$p/cwd 2>/dev/null); \
+             [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; \
+           done; \
+         done; true"
+    )
+}
+
+/// Dossier courant d'un terminal. Plusieurs pistes sont tentées dans l'ordre : le panneau tmux,
+/// le PID annoncé par le shell, puis le PID du panneau tmux. `None` si aucune n'aboutit
+/// (serveur déconnecté, système sans /proc, terminal lancé sur une commande).
 #[tauri::command]
 pub async fn term_cwd(
     store: State<'_, Store>,
@@ -46,15 +61,29 @@ pub async fn term_cwd(
     if !sessions.is_connected(&server_id).await {
         return Ok(None);
     }
-    let cmd = match (tmux_session, pid) {
-        (Some(name), _) => helm_core::tmux::pane_path_command(&name).map_err(|e| e.to_string())?,
-        (None, Some(pid)) => format!(
-            "for p in $(ps -o tpgid= -p {pid} 2>/dev/null) {pid}; do d=$(readlink /proc/$p/cwd 2>/dev/null) && [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; done; true"
-        ),
-        (None, None) => return Ok(None),
-    };
+    if tmux_session.is_none() && pid.is_none() {
+        return Ok(None);
+    }
     let conn = sessions.get(&store, &server_id).await?;
-    let out = conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
+
+    if let Some(name) = tmux_session {
+        let cmd = helm_core::tmux::pane_path_command(&name).map_err(|e| e.to_string())?;
+        let out = conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
+        let mut lines = out.stdout.lines().map(str::trim).filter(|l| !l.is_empty());
+        // Première ligne : le chemin donné par tmux ; deuxième : le PID du panneau, pour /proc.
+        let path = lines.next().unwrap_or_default();
+        if path.starts_with('/') {
+            return Ok(Some(path.to_string()));
+        }
+        if let Some(pane_pid) = lines.next().and_then(|p| p.parse::<u32>().ok()) {
+            let out = conn.exec(&cwd_of_pids(&[pane_pid]), None).await.map_err(|e| e.to_string())?;
+            let path = out.stdout.lines().next().unwrap_or_default().trim().to_string();
+            return Ok(path.starts_with('/').then_some(path));
+        }
+        return Ok(None);
+    }
+
+    let out = conn.exec(&cwd_of_pids(&[pid.unwrap_or(0)]), None).await.map_err(|e| e.to_string())?;
     let path = out.stdout.lines().next().unwrap_or_default().trim().to_string();
     Ok(path.starts_with('/').then_some(path))
 }

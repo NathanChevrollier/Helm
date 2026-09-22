@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { CheckCircle2, Copy, ShieldAlert, Stethoscope, XCircle } from "lucide-react";
 import { api, errorMessage, type Diagnosis } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
 import { useApp } from "../lib/store";
 import { Button, Modal } from "./ui";
 
@@ -86,7 +87,7 @@ export default function ConnectionDoctor() {
                 className="self-start"
                 icon={<Copy size={13} />}
                 onClick={() => {
-                  void navigator.clipboard.writeText(unban);
+                  void writeClipboard(unban);
                   notify("Commande de déblocage copiée", "success");
                 }}
               >

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bot, CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } from "lucide-react";
 import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
 import { useAppPick } from "../lib/store";
 import { hashPassword, useLock } from "../lib/lock";
 import type { ThemeSetting } from "../lib/theme";
@@ -122,7 +123,7 @@ function AiAccess() {
     void api.mcpConfig().then(setConfig);
   }, []);
   const copy = (text: string) => {
-    void navigator.clipboard.writeText(text);
+    void writeClipboard(text);
     notify("Copié", "success");
   };
 

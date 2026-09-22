@@ -14,12 +14,15 @@ pub fn valid_session(name: &str) -> bool {
 
 /// Commande d'attache (ou de création) d'une session, avec des réglages propres à cette session
 /// uniquement : le `.tmux.conf` de l'utilisateur n'est jamais modifié.
+///
+/// La souris reste volontairement désactivée côté tmux : sinon c'est lui qui reçoit les clics et
+/// la molette, et l'on perd la sélection à la souris, le copier et le défilement de Helm.
 pub fn attach_command(name: &str) -> Result<String> {
     if !valid_session(name) {
         return Err(Error::Other(format!("nom de session invalide : {name}")));
     }
     Ok(format!(
-        "tmux new-session -A -s {name} \\; set-option -q -t {name} status off \\; set-option -q -t {name} mouse on \\; set-option -q -t {name} history-limit 50000"
+        "tmux new-session -A -s {name} \\; set-option -q -t {name} status off \\; set-option -q -t {name} mouse off \\; set-option -q -t {name} history-limit 50000"
     ))
 }
 
@@ -73,12 +76,17 @@ pub async fn kill(conn: &Connection, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Dossier courant du panneau actif d'une session (celui du programme au premier plan).
+/// Dossier courant du panneau actif d'une session : tmux le donne directement, et à défaut on
+/// lit celui du programme au premier plan du panneau (tmux compilé sans cette information,
+/// serveur sans /proc…).
 pub fn pane_path_command(name: &str) -> Result<String> {
     if !valid_session(name) {
         return Err(Error::Other(format!("nom de session invalide : {name}")));
     }
-    Ok(format!("tmux display-message -p -t {name} '#{{pane_current_path}}' 2>/dev/null"))
+    Ok(format!(
+        "tmux display-message -p -t {name} '#{{pane_current_path}}' 2>/dev/null; \
+         tmux display-message -p -t {name} '#{{pane_pid}}' 2>/dev/null"
+    ))
 }
 
 /// Préfixe des erreurs « pas de gestionnaire de paquets utilisable » : l'UI cesse alors de

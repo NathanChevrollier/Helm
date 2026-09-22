@@ -46,6 +46,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         // Mises à jour signées, publiées par la CI sur les releases GitHub.
         .plugin(tauri_plugin_updater::Builder::new().build())

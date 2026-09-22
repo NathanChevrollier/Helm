@@ -17,6 +17,7 @@ import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
 import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
 import { explain } from "../lib/assistant";
+import { readClipboard, writeClipboard } from "../lib/clipboard";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { Button, Modal } from "./ui";
 
@@ -130,7 +131,7 @@ async function offerTmux(serverId: string) {
 /** Presse-papiers pour les séquences OSC 52 (sélection à la souris dans tmux, vim…) : écriture seule. */
 const writeOnlyClipboard = {
   readText: (_s: ClipboardSelectionType) => "",
-  writeText: (_s: ClipboardSelectionType, text: string) => navigator.clipboard.writeText(text),
+  writeText: (_s: ClipboardSelectionType, text: string) => writeClipboard(text),
 };
 
 export default function TerminalPane({
@@ -238,6 +239,13 @@ export default function TerminalPane({
     fitRef.current = fit;
     useBroadcast.getState().register(paneId, { termId: null, label });
     usePanes.getState().set(paneId, { serverId, termId: null });
+    // En développement, les terminaux sont joignables depuis la console : le rendu WebGL n'est pas
+    // lisible dans le DOM, et les tests d'interface ont besoin de leur contenu.
+    if (import.meta.env.DEV) {
+      const bag = (window as unknown as { __helmTerms?: Record<string, Terminal> }).__helmTerms ?? {};
+      bag[paneId] = term;
+      (window as unknown as { __helmTerms?: Record<string, Terminal> }).__helmTerms = bag;
+    }
 
     let disposed = false;
     let waitingReconnect = false;
@@ -449,11 +457,11 @@ export default function TerminalPane({
       if (!e.shiftKey) return true;
       if (e.code === "KeyC") {
         const sel = term.getSelection();
-        if (sel) void navigator.clipboard.writeText(sel);
+        if (sel) void writeClipboard(sel);
         return false;
       }
       if (e.code === "KeyV") {
-        void navigator.clipboard.readText().then(safePaste);
+        void readClipboard().then(safePaste);
         return false;
       }
       return true;
@@ -472,10 +480,10 @@ export default function TerminalPane({
         return;
       }
       if (sel) {
-        void navigator.clipboard.writeText(sel);
+        void writeClipboard(sel);
         term.clearSelection();
       } else {
-        void navigator.clipboard.readText().then(safePaste);
+        void readClipboard().then(safePaste);
       }
     };
     safePasteRef.current = safePaste;
@@ -528,6 +536,10 @@ export default function TerminalPane({
 
     return () => {
       disposed = true;
+      // Le panneau peut être reconstruit (changement de serveur, rechargement à chaud) : sans
+      // cette remise à zéro, le terminal suivant resterait vide, faute de démarrer.
+      started.current = false;
+      if (import.meta.env.DEV) delete (window as unknown as { __helmTerms?: Record<string, Terminal> }).__helmTerms?.[paneId];
       clearTimeout(retryTimer);
       observer.disconnect();
       hostEl.removeEventListener("paste", onPaste, true);
@@ -595,7 +607,7 @@ export default function TerminalPane({
         }
       });
       setShare({ invite: info.invite, mode: info.mode });
-      await navigator.clipboard.writeText(info.invite).catch(() => {});
+      await writeClipboard(info.invite).catch(() => {});
       notify("Invitation copiée : envoie-la à la personne. Elle la colle dans Terminal → Rejoindre.", "success");
     } catch (e) {
       notify(errorMessage(e), "error");
@@ -652,8 +664,8 @@ export default function TerminalPane({
     const term = termRef.current;
     const connected = idRef.current != null;
     return [
-      { label: "Copier", icon: <Copy size={14} />, hint: "Ctrl+Maj+C", disabled: !selection, onClick: () => void navigator.clipboard.writeText(selection) },
-      { label: "Coller", icon: <ClipboardPaste size={14} />, hint: "Ctrl+Maj+V", disabled: !connected, onClick: () => void navigator.clipboard.readText().then((t) => safePasteRef.current(t)) },
+      { label: "Copier", icon: <Copy size={14} />, hint: "Ctrl+Maj+C", disabled: !selection, onClick: () => void writeClipboard(selection) },
+      { label: "Coller", icon: <ClipboardPaste size={14} />, hint: "Ctrl+Maj+V", disabled: !connected, onClick: () => void readClipboard().then((t) => safePasteRef.current(t)) },
       { label: "Tout sélectionner", icon: <TextSelect size={14} />, onClick: () => term?.selectAll() },
       { label: "Rechercher…", icon: <Search size={14} />, hint: display(shortcutOf("termSearch")), onClick: () => openSearchRef.current() },
       { label: "Effacer l'écran", icon: <Eraser size={14} />, onClick: () => term?.clear() },
@@ -755,7 +767,7 @@ export default function TerminalPane({
         <div className="absolute top-0 right-0 left-0 z-10 flex items-center justify-center gap-2 bg-accent/85 px-3 py-0.5 text-[11px] font-medium text-accent-fg">
           <Users size={12} />
           Partagé ({share.mode === "control" ? "avec le contrôle" : "lecture seule"})
-          <button className="underline" onClick={() => void navigator.clipboard.writeText(share.invite)}>
+          <button className="underline" onClick={() => void writeClipboard(share.invite)}>
             copier l'invitation
           </button>
           <button className="underline" onClick={() => void stopShare()}>

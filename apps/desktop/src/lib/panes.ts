@@ -12,7 +12,7 @@ export interface PaneInfo {
   tmux?: string;
   /** PID du shell simple (annoncé par la séquence OSC 7770 au démarrage). */
   pid?: number;
-  /** Dossier annoncé par le shell lui-même (OSC 7), prioritaire quand il existe. */
+  /** Dossier annoncé par le shell lui-même (OSC 7) : secours quand le serveur ne répond pas. */
   cwd?: string;
 }
 
@@ -40,19 +40,23 @@ export const usePanes = create<PanesState>((set) => ({
 }));
 
 /**
- * Dossier courant d'un panneau : celui annoncé par le shell (OSC 7), sinon demandé au serveur
- * (tmux ou /proc du shell). `null` si inconnu (serveur non Linux, déconnecté…).
+ * Dossier courant d'un panneau, demandé au serveur (tmux ou /proc du shell) pour qu'il suive les
+ * `cd`. Le dossier annoncé par le shell (OSC 7) ne sert que si la question échoue, car il date du
+ * dernier message reçu. `null` quand il reste introuvable (terminal lancé sur une commande,
+ * serveur sans /proc, déconnecté…).
  */
 export async function paneCwd(paneId: string): Promise<string | null> {
   const p = usePanes.getState().panes[paneId];
   if (!p) return null;
-  if (p.cwd) return p.cwd;
-  if (!p.tmux && !p.pid) return null;
-  try {
-    return await api.termCwd(p.serverId, p.tmux, p.pid);
-  } catch {
-    return null;
+  if (p.tmux || p.pid) {
+    try {
+      const live = await api.termCwd(p.serverId, p.tmux, p.pid);
+      if (live) return live;
+    } catch {
+      /* serveur momentanément injoignable : on retombe sur ce que le shell avait annoncé */
+    }
   }
+  return p.cwd ?? null;
 }
 
 /**
