@@ -19,13 +19,14 @@ import {
 import type { Env } from "../config/env.js";
 import { formatIssueBody, formatIssueTitle } from "../services/feedbackService.js";
 import { GitHubService } from "../services/githubService.js";
+import { RoadmapService } from "../services/roadmapService.js";
 import type { FeedbackInput, FeedbackKind } from "../types/feedback.js";
 
-export function createInteractionHandler(client: Client, env: Env, github: GitHubService) {
+export function createInteractionHandler(client: Client, env: Env, github: GitHubService, roadmap: RoadmapService) {
   return async (interaction: Interaction): Promise<void> => {
     try {
       if (interaction.isChatInputCommand()) {
-        await handleCommand(interaction, client, env, github);
+        await handleCommand(interaction, client, env, github, roadmap);
         return;
       }
       if (interaction.isButton() && (interaction.customId === "feedback:bug" || interaction.customId === "feedback:suggestion")) {
@@ -47,6 +48,7 @@ async function handleCommand(
   client: Client,
   env: Env,
   github: GitHubService,
+  roadmap: RoadmapService,
 ): Promise<void> {
   switch (interaction.commandName) {
     case "setup-feedback":
@@ -58,10 +60,34 @@ async function handleCommand(
     case "suggestion":
       await showFeedbackModal("suggestion", interaction);
       break;
+    case "sync-roadmap":
+      await syncRoadmap(interaction, roadmap);
+      break;
+    case "roadmap":
+      await showRoadmap(interaction, roadmap);
+      break;
     case "helm":
       await showStatus(interaction, client, github);
       break;
   }
+}
+
+async function syncRoadmap(interaction: ChatInputCommandInteraction, roadmap: RoadmapService): Promise<void> {
+  if (!interaction.inGuild() || !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({ content: "Seuls les membres ayant la permission Gérer le serveur peuvent synchroniser la roadmap.", ephemeral: true });
+    return;
+  }
+  await interaction.deferReply({ ephemeral: true });
+  const snapshot = await roadmap.sync();
+  await interaction.editReply(
+    `Roadmap synchronisée : ${snapshot.brainstorming.length} brainstorming, ${snapshot.inProgress.length} en cours, ${snapshot.test.length} en test, ${snapshot.done.length} terminée(s).`,
+  );
+}
+
+async function showRoadmap(interaction: ChatInputCommandInteraction, roadmap: RoadmapService): Promise<void> {
+  await interaction.deferReply({ ephemeral: true });
+  const snapshot = await roadmap.getCurrent();
+  await interaction.editReply(roadmap.formatText(snapshot));
 }
 
 async function setupFeedback(interaction: ChatInputCommandInteraction, env: Env): Promise<void> {

@@ -8,6 +8,11 @@ export const commandDefinitions = [
   new SlashCommandBuilder().setName("bug").setDescription("Signaler un bug à l'équipe Helm"),
   new SlashCommandBuilder().setName("suggestion").setDescription("Proposer une amélioration pour Helm"),
   new SlashCommandBuilder()
+    .setName("sync-roadmap")
+    .setDescription("Met à jour le panneau public de la roadmap Helm")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+  new SlashCommandBuilder().setName("roadmap").setDescription("Afficher les chantiers actuels de Helm"),
+  new SlashCommandBuilder()
     .setName("helm")
     .setDescription("Informations sur le bot et le projet Helm")
     .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Afficher l'état du bot et la dernière release")),

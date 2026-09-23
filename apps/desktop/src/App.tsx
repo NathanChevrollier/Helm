@@ -180,7 +180,7 @@ export default function App() {
             onClick={() => useLock.getState().lock()}
           />
         )}
-        <RailButton label="Contact" icon={GitBranch} expanded={railOpen} active={false} onClick={() => void openUrl("https://github.com/NathanChevrollier/Helm/invitations?invite_token=ctEWWqCj9B")} />
+        <RailButton label="Contact" icon={GitBranch} expanded={railOpen} active={false} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")} />
         <RailButton label={helpSection.label} icon={helpSection.icon} expanded={railOpen} active={section === "help"} onClick={() => setSection("help")} />
         <RailButton label={settingsSection.label} icon={settingsSection.icon} expanded={railOpen} active={section === "settings"} onClick={() => setSection("settings")} />
       </nav>

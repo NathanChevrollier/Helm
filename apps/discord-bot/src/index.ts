@@ -3,6 +3,7 @@ import { loadEnv } from "./config/env.js";
 import { registerCommands } from "./events/ready.js";
 import { createInteractionHandler } from "./events/interactionCreate.js";
 import { GitHubService } from "./services/githubService.js";
+import { RoadmapService } from "./services/roadmapService.js";
 
 const env = loadEnv();
 const github = new GitHubService(env.GITHUB_OWNER, env.GITHUB_REPO, env.GITHUB_TOKEN, {
@@ -10,18 +11,22 @@ const github = new GitHubService(env.GITHUB_OWNER, env.GITHUB_REPO, env.GITHUB_T
   suggestion: env.GITHUB_SUGGESTION_LABEL,
 });
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const roadmap = new RoadmapService(client, env, github);
 
 client.once(Events.ClientReady, (readyClient) => {
-  void registerCommands(readyClient, env).catch((error: unknown) => {
-    console.error("[discord] impossible d'enregistrer les commandes:", error);
-    void readyClient.destroy();
-    process.exitCode = 1;
-  });
+  void registerCommands(readyClient, env)
+    .then(() => roadmap.start())
+    .catch((error: unknown) => {
+      console.error("[discord] impossible d'enregistrer les commandes:", error);
+      void readyClient.destroy();
+      process.exitCode = 1;
+    });
 });
-client.on(Events.InteractionCreate, createInteractionHandler(client, env, github));
+client.on(Events.InteractionCreate, createInteractionHandler(client, env, github, roadmap));
 
 async function shutdown(signal: string): Promise<void> {
   console.info(`[process] arrêt demandé (${signal})`);
+  roadmap.stop();
   client.destroy();
 }
 
