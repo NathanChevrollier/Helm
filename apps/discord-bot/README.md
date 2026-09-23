@@ -33,18 +33,18 @@ Une fois connecté, exécuter `/setup-feedback` avec un membre qui dispose de `M
 
 ## Configuration des secrets
 
-| Variable | Rôle |
-| --- | --- |
-| `DISCORD_TOKEN` | Token privé du bot Discord; ne jamais le publier. |
-| `CLIENT_ID` | Application ID du bot Discord. |
-| `GUILD_ID` | ID du serveur où enregistrer les commandes. |
-| `GITHUB_TOKEN` | Fine-grained token GitHub limité aux issues du dépôt. |
-| `GITHUB_OWNER` | Propriétaire du dépôt, par défaut `NathanChevrollier`. |
-| `GITHUB_REPO` | Nom du dépôt, par défaut `Helm`. |
-| `SUGGESTION_CHANNEL_NAME` | Nom exact du salon de suggestions. |
-| `BUG_CHANNEL_NAME` | Nom exact du salon de bugs. |
-| `GITHUB_BUG_LABEL` | Label appliqué aux bugs. |
-| `GITHUB_SUGGESTION_LABEL` | Label appliqué aux suggestions. |
+| Variable                  | Rôle                                                   |
+| ------------------------- | ------------------------------------------------------ |
+| `DISCORD_TOKEN`           | Token privé du bot Discord; ne jamais le publier.      |
+| `CLIENT_ID`               | Application ID du bot Discord.                         |
+| `GUILD_ID`                | ID du serveur où enregistrer les commandes.            |
+| `GITHUB_TOKEN`            | Fine-grained token GitHub limité aux issues du dépôt.  |
+| `GITHUB_OWNER`            | Propriétaire du dépôt, par défaut `NathanChevrollier`. |
+| `GITHUB_REPO`             | Nom du dépôt, par défaut `Helm`.                       |
+| `SUGGESTION_CHANNEL_NAME` | Nom exact du salon de suggestions.                     |
+| `BUG_CHANNEL_NAME`        | Nom exact du salon de bugs.                            |
+| `GITHUB_BUG_LABEL`        | Label appliqué aux bugs.                               |
+| `GITHUB_SUGGESTION_LABEL` | Label appliqué aux suggestions.                        |
 
 ## Déploiement Docker
 
