@@ -9,6 +9,12 @@ import PageLayout from "../components/PageLayout";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 
+/**
+ * Colonnes du tableau des serveurs. Chacune garde une largeur minimale : sans elle, les colonnes
+ * souples s'écrasaient et les titres se chevauchaient dès que la fenêtre se resserrait.
+ */
+const ROW_GRID = "grid grid-cols-[minmax(150px,1.3fr)_repeat(3,minmax(104px,1fr))_minmax(130px,1fr)_auto] gap-4 px-4 min-w-[860px]";
+
 const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
 const CERT_WARN_DAYS = 21;
@@ -160,7 +166,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
         </IconButton>
       }
     >
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
       <section className="flex min-h-0 flex-col gap-[18px] overflow-auto px-6 py-[22px]">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5">
           <Kpi label="Serveurs en ligne" value={online.length} total={servers.length} />
@@ -169,8 +175,10 @@ export default function HomeView({ visible }: { visible: boolean }) {
           <Kpi label="Alertes actives" value={alerts} tone={alerts ? "danger" : undefined} />
         </div>
 
-        <div className="overflow-hidden rounded-[10px] border border-border bg-panel">
-          <div className="grid grid-cols-[200px_repeat(3,minmax(0,1fr))_150px_110px] gap-4 border-b border-border px-4 py-2.5 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase">
+        {/* Le tableau défile horizontalement plutôt que d'écraser ses colonnes : les titres restaient
+            lisibles en large, mais se chevauchaient dès que la fenêtre se resserrait. */}
+        <div className="overflow-x-auto rounded-[10px] border border-border bg-panel">
+          <div className={`${ROW_GRID} border-b border-border py-2.5 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase`}>
             <span>Serveur</span>
             <span>CPU</span>
             <span>Mémoire</span>
@@ -304,7 +312,7 @@ function ServerRow({
       <div className="mt-0.5 truncate font-mono text-xs text-muted">{server.host}</div>
     </div>
   );
-  const grid = "grid grid-cols-[200px_repeat(3,minmax(0,1fr))_150px_110px] items-center gap-4 border-b border-border/60 px-4 py-3.5 text-[13px] last:border-b-0";
+  const grid = `${ROW_GRID} items-center border-b border-border/60 py-3.5 text-[13px] last:border-b-0`;
 
   if (!result || result === "loading" || !result.connected) {
     return (

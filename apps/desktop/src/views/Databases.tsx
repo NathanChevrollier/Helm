@@ -1,6 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Database, Download, Play, RefreshCw, Table2, TriangleAlert } from "lucide-react";
+import { Database, Download, Play, Plus, RefreshCw, Table2, TriangleAlert } from "lucide-react";
 import { api, errorMessage, formatBytes, type DbInstance, type DbNamed, type DbQueryResult } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { useCachedState } from "../lib/cache";
@@ -45,20 +45,25 @@ function Databases({ serverId }: { serverId: string }) {
   const instance = instances?.find((i) => i.id === instanceId) ?? null;
 
   // Version de l'instance affichée : demandée après coup, elle ne retarde ni la liste ni les tables.
+  // Elle est gardée à part et jamais réécrite dans `instances` : y toucher changeait l'identité de
+  // l'objet, ce qui relançait cet effet en boucle et faisait clignoter la page.
+  const [versions, setVersions] = useState<Record<string, string>>({});
+  const instanceKey = instance?.id ?? null;
+  /** Incrémenté pour relire bases et tables après une création. */
+  const [refreshKey, setRefreshKey] = useState(0);
   useEffect(() => {
-    if (!instance || instance.version) return;
+    if (!instanceKey || !instance || versions[instanceKey] !== undefined) return;
     let cancelled = false;
     void api.dbVersion(serverId, instance).then(
-      (v) => {
-        if (cancelled || !v) return;
-        setInstances((list) => (list ?? []).map((i) => (i.id === instance.id ? { ...i, version: v } : i)));
-      },
-      () => {},
+      (v) => !cancelled && setVersions((x) => ({ ...x, [instanceKey]: v || instance.version || "" })),
+      () => !cancelled && setVersions((x) => ({ ...x, [instanceKey]: "" })),
     );
     return () => {
       cancelled = true;
     };
-  }, [serverId, instance, setInstances]);
+    // `instance` ne figure pas dans les dépendances : seul son identifiant compte ici.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, instanceKey, versions]);
 
   const loadInstances = useCallback(
     async (auto = false) => {
@@ -82,13 +87,18 @@ function Databases({ serverId }: { serverId: string }) {
   }, [loadInstances]);
   useAutoRefresh((auto) => loadInstances(auto), { serverId });
 
-  // Bases de l'instance choisie.
+  // Bases de l'instance choisie. Les effets suivants dépendent de l'IDENTIFIANT de l'instance, pas
+  // de l'objet : l'actualisation automatique recrée la liste, et dépendre de l'objet relançait tout
+  // (avec un passage par « null ») toutes les quelques secondes — d'où le clignotement.
+  const instanceRef = useRef(instance);
+  instanceRef.current = instance;
+
   useEffect(() => {
+    if (!instanceKey) return;
+    let cancelled = false;
     setDatabases(null);
     setTables(null);
-    if (!instance) return;
-    let cancelled = false;
-    api.dbDatabases(serverId, instance).then(
+    api.dbDatabases(serverId, instanceRef.current!).then(
       (list) => {
         if (cancelled) return;
         setDatabases(list);
@@ -99,21 +109,41 @@ function Databases({ serverId }: { serverId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [serverId, instance, setDatabase]);
+  }, [serverId, instanceKey, refreshKey, setDatabase]);
 
   // Tables de la base choisie.
   useEffect(() => {
     setTables(null);
-    if (!instance || !database) return;
+    if (!instanceKey || !database) return;
     let cancelled = false;
-    api.dbTables(serverId, instance, database).then(
+    api.dbTables(serverId, instanceRef.current!, database).then(
       (list) => !cancelled && setTables(list),
       (e) => !cancelled && setError(errorMessage(e)),
     );
     return () => {
       cancelled = true;
     };
-  }, [serverId, instance, database]);
+  }, [serverId, instanceKey, database, refreshKey]);
+
+  /** Crée une base vide dans l'instance affichée, puis la sélectionne. */
+  const createDatabase = async () => {
+    if (!instance) return;
+    const name = await ask({
+      title: "Nouvelle base de données",
+      body: `Sur ${instance.label}. Lettres, chiffres, « _ » et « - » uniquement. L'encodage est UTF-8.`,
+      input: { label: "Nom de la base" },
+      confirmLabel: "Créer",
+    });
+    if (typeof name !== "string" || !name.trim()) return;
+    try {
+      await api.dbCreate(serverId, instance, name.trim());
+      notify(`Base « ${name.trim()} » créée.`, "success");
+      setDatabase(name.trim());
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
 
   const run = async (text = sql) => {
     if (!instance || running || !text.trim()) return;
@@ -191,12 +221,15 @@ function Databases({ serverId }: { serverId: string }) {
             value={instanceId ?? ""}
             onChange={(e) => setInstanceId(e.target.value)}
           >
-            {(instances ?? []).map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.label}
-                {i.version && ` — ${i.version}`}
-              </option>
-            ))}
+            {(instances ?? []).map((i) => {
+              const v = versions[i.id] || i.version;
+              return (
+                <option key={i.id} value={i.id}>
+                  {i.label}
+                  {v && ` — ${v}`}
+                </option>
+              );
+            })}
           </select>
           <select
             className="h-9 max-w-56 rounded-md border border-border bg-bg px-2 text-sm"
@@ -211,6 +244,9 @@ function Databases({ serverId }: { serverId: string }) {
               </option>
             ))}
           </select>
+          <Button size="sm" icon={<Plus size={13} />} disabled={!instance} onClick={() => void createDatabase()}>
+            Nouvelle base
+          </Button>
           <IconButton title="Actualiser" onClick={() => void loadInstances()}>
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
           </IconButton>

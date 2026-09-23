@@ -3,6 +3,7 @@ import { CalendarClock, Pencil, Play, RefreshCw, Timer } from "lucide-react";
 import { api, errorMessage, type CronSource, type Schedule } from "../../lib/api";
 import { useApp, useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../../components/ui";
+import { describeCron } from "../../lib/cron";
 import { useCachedState } from "../../lib/cache";
 import { useAutoRefresh } from "../../lib/refresh";
 
@@ -34,7 +35,7 @@ export default function ScheduleView({ serverId }: { serverId: string }) {
   if (!data) return <EmptyState icon={<CalendarClock size={36} className="animate-pulse" />} title="Lecture des tâches planifiées…" />;
 
   return (
-    <div className="flex max-w-5xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <div className="flex items-center gap-2 text-sm text-muted">
         Crontabs des utilisateurs, fichiers système (/etc/crontab, /etc/cron.d) et timers systemd.
         <IconButton title="Actualiser" className="ml-auto" onClick={() => void load()}>
@@ -60,16 +61,23 @@ export default function ScheduleView({ serverId }: { serverId: string }) {
           ) : (
             <table className="w-full text-sm">
               <tbody>
-                {c.jobs.map((j, i) => (
-                  <tr key={i} className="border-t border-border/50 align-top first:border-t-0">
-                    <td className="w-56 px-4 py-2">
-                      <div className="font-mono text-xs">{j.schedule}</div>
-                      {j.human && <div className="text-xs text-muted">{j.human}</div>}
-                    </td>
-                    {j.user !== null && <td className="w-20 px-2 py-2 text-xs text-muted">{j.user}</td>}
-                    <td className="px-2 py-2 font-mono text-xs break-all">{j.command}</td>
-                  </tr>
-                ))}
+                {c.jobs.map((j, i) => {
+                  const role = describeCron(j.command);
+                  return (
+                    <tr key={i} className="border-t border-border/50 align-top first:border-t-0">
+                      <td className="w-52 px-4 py-2.5">
+                        <div className="font-mono text-xs">{j.schedule}</div>
+                        {j.human && <div className="text-xs text-muted">{j.human}</div>}
+                      </td>
+                      {j.user !== null && <td className="w-24 px-2 py-2.5 text-xs text-muted">{j.user}</td>}
+                      <td className="px-2 py-2.5">
+                        <div className="font-mono text-xs break-all">{j.command}</div>
+                        {/* Ce que la commande fait réellement : une crontab ne se relit pas toute seule. */}
+                        {role && <div className="mt-1 text-xs leading-relaxed text-muted">{role}</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

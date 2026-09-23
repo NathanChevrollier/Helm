@@ -113,9 +113,13 @@ interface State {
   section: SectionId;
   setSection: (s: SectionId) => void;
 
-  /** Fiche d'aide à ouvrir dans la section Aide (« ? » d'une page, palette de commandes). */
+  /** Fiche d'aide courante : en fenêtre depuis le « ? » d'une page, ou dépliée dans la section Aide. */
   guide: GuideId | null;
+  guideInPage: boolean;
+  /** « ? » d'une page : montre uniquement la fiche de cette page, sans quitter l'écran. */
   openGuide: (id: GuideId | null) => void;
+  /** Palette ou section Aide : ouvre la fiche dans la page Aide. */
+  openHelpPage: (id: GuideId) => void;
 
   servers: ServerView[];
   refreshServers: () => Promise<void>;
@@ -208,8 +212,9 @@ export const useApp = create<State>((set, get) => ({
   setSection: (section) => set({ section }),
 
   guide: null,
-  // Ouvrir une fiche amène toujours sur la section Aide : sinon le « ? » d'une page ne ferait rien.
-  openGuide: (guide) => set(guide ? { guide, section: "help" } : { guide: null }),
+  guideInPage: false,
+  openGuide: (guide) => set({ guide, guideInPage: false }),
+  openHelpPage: (guide) => set({ guide, guideInPage: true, section: "help" }),
 
   servers: [],
   refreshServers: async () => {

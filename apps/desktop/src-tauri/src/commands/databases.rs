@@ -63,6 +63,24 @@ pub async fn db_version(
     Ok(db::version(&conn, pw.as_deref(), &instance).await)
 }
 
+/// Crée une base vide dans l'instance choisie. L'action est inscrite au journal.
+#[tauri::command]
+pub async fn db_create(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    name: String,
+) -> Result<(), String> {
+    let r: Result<(), String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        db::create_database(&conn, pw.as_deref(), &instance, &name).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.create", &format!("{} · {name}", instance.label), r)
+}
+
 #[tauri::command]
 pub async fn db_databases(
     store: State<'_, Store>,

@@ -7,6 +7,7 @@ import { DialogHost, EmptyState, FOCUS_RING, Toasts } from "./components/ui";
 import CommandPalette from "./components/CommandPalette";
 import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
+import GuideDialog from "./components/GuideDialog";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
 import { watchSync } from "./lib/sync";
@@ -122,8 +123,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const railSections = SECTIONS.filter((s) => s.id !== "settings");
+  // Aide et Réglages vivent ensemble en bas de la colonne : ce sont les deux entrées « à part ».
+  const railSections = SECTIONS.filter((s) => s.id !== "settings" && s.id !== "help");
   const settingsSection = SECTIONS.find((s) => s.id === "settings")!;
+  const helpSection = SECTIONS.find((s) => s.id === "help")!;
 
   return (
     <div className="flex h-full">
@@ -168,6 +171,7 @@ export default function App() {
             onClick={() => useLock.getState().lock()}
           />
         )}
+        <RailButton label={helpSection.label} icon={helpSection.icon} expanded={railOpen} active={section === "help"} onClick={() => setSection("help")} />
         <RailButton label={settingsSection.label} icon={settingsSection.icon} expanded={railOpen} active={section === "settings"} onClick={() => setSection("settings")} />
       </nav>
 
@@ -262,6 +266,7 @@ export default function App() {
       </div>
 
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
+      <GuideDialog />
       <ConnectionDoctor />
       <DialogHost />
       <Toasts />

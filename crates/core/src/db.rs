@@ -327,6 +327,29 @@ fn to_named(r: &QueryResult) -> Vec<Named> {
         .collect()
 }
 
+/// Nom de base acceptable : lettres, chiffres, tiret bas et tiret. Tout le reste est refusé plutôt
+/// qu'échappé, car un nom de base ne peut pas être passé en paramètre lié.
+pub fn valid_db_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 63 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Crée une base vide. L'encodage est fixé à UTF-8 pour éviter les surprises d'un serveur ancien.
+pub async fn create_database(conn: &Connection, sudo: Option<&str>, instance: &Instance, name: &str) -> Result<()> {
+    if !valid_db_name(name) {
+        return Err(Error::Other("nom de base invalide : lettres, chiffres, « _ » et « - » seulement".into()));
+    }
+    let sql = match instance.engine {
+        Engine::Mysql => format!("CREATE DATABASE `{name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+        Engine::Postgres => format!("CREATE DATABASE \"{name}\" ENCODING 'UTF8'"),
+    };
+    let out = run_sql(conn, sudo, instance, None, &sql, None).await?;
+    let lower = out.to_lowercase();
+    if lower.contains("error") || lower.contains("échec") {
+        return Err(Error::Other(out.trim().to_string()));
+    }
+    Ok(())
+}
+
 /// Bases de l'instance, avec leur taille.
 pub async fn databases(conn: &Connection, sudo: Option<&str>, instance: &Instance) -> Result<Vec<Named>> {
     let sql = match instance.engine {

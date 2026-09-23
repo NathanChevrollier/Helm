@@ -73,7 +73,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
     const list: Action[] = SECTIONS.map((s) => ({ id: `go:${s.id}`, label: `Aller à ${s.label}`, icon: <s.icon size={15} />, run: () => setSection(s.id) }));
     // Les fiches d'aide sont cherchables ici : « tmux », « compose », « restic »… mènent droit au mode d'emploi.
     for (const g of GUIDES) {
-      list.push({ id: `guide:${g.id}`, label: `Aide : ${g.title}`, hint: g.summary, icon: <CircleHelp size={15} />, run: () => useApp.getState().openGuide(g.id) });
+      list.push({ id: `guide:${g.id}`, label: `Aide : ${g.title}`, hint: g.summary, icon: <CircleHelp size={15} />, run: () => useApp.getState().openHelpPage(g.id) });
     }
     for (const s of servers) {
       list.push({ id: `server:${s.id}`, label: `Serveur : ${s.name}`, hint: s.host, icon: <Server size={15} />, run: () => setActiveServer(s.id) });

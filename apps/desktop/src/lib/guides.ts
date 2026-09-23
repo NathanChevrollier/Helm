@@ -1,19 +1,31 @@
-// Fiches d'aide affichées dans la section « Aide » et depuis le « ? » de chaque page.
+// Fiches d'aide : section Aide (toutes les fiches) et « ? » d'une page (uniquement la sienne).
 //
-// Chaque fiche répond à trois questions dans cet ordre : à quoi ça sert, ce qu'il faut sur le
-// serveur, comment le relier à Helm. Les commandes sont prêtes à coller ; celles marquées `sudo`
-// sont préfixées à l'affichage. Quand Helm sait installer la chose lui-même, la fiche le dit et
-// les commandes ne servent que de recours.
+// Chaque fiche suit le même plan, du plus utile au plus rare :
+//   1. à quoi ça sert            → `summary`
+//   2. ce que Helm fait tout seul → `automatic`
+//   3. comment ça marche ici      → `how`
+//   4. ce qu'il faut sur le serveur → `requirements`
+//   5. mise en place, commandes prêtes → `steps`
+//   6. quand ça coince            → `troubleshooting`
+//   7. bon à savoir               → `notes`
+//
+// Les commandes sont exactes et vérifiées contre le code de Helm (plans d'installation tmux,
+// préparation restic, sondes Docker) : elles ne servent que de recours quand l'automatique échoue.
 import type { SectionId } from "../sections";
 
 export type GuideId =
+  | "home"
+  | "servers"
   | "terminal"
   | "sessions"
   | "files"
+  | "monitoring"
+  | "schedule"
   | "docker"
   | "compose"
   | "databases"
   | "sites"
+  | "logs"
   | "agent"
   | "backups"
   | "tunnels"
@@ -21,34 +33,51 @@ export type GuideId =
   | "share"
   | "sync"
   | "ai"
-  | "rdp";
+  | "rdp"
+  | "settings";
+
+/** Famille de fiches, pour ranger la section Aide. */
+export type GuideTopic = "prise-en-main" | "exploitation" | "securite" | "partage";
 
 export interface GuideStep {
-  /** Ce que fait cette étape, en une phrase. */
   text: string;
-  /** Commande à coller dans un terminal du serveur. */
   command?: string;
-  /** La commande a besoin des droits root. */
+  /** La commande a besoin des droits root : elle s'affiche préfixée de `sudo`. */
+  sudo?: boolean;
+}
+
+export interface GuideProblem {
+  /** Ce que l'on constate. */
+  symptom: string;
+  /** Pourquoi, et quoi faire. */
+  answer: string;
+  command?: string;
   sudo?: boolean;
 }
 
 export interface Guide {
   id: GuideId;
   title: string;
-  /** Ce que la fonctionnalité apporte, sans jargon. */
+  topic: GuideTopic;
   summary: string;
-  /** Section de l'app concernée, pour le bouton « Ouvrir ». */
   section?: SectionId;
-  /** Ce que Helm fait tout seul : évite de lancer des commandes pour rien. */
   automatic?: string;
-  /** Ce qui doit exister sur le serveur. */
-  requirements: string[];
-  steps: GuideStep[];
-  /** Pièges constatés, limites, cas particuliers. */
+  /** Comment la fonctionnalité marche dans Helm : ce que l'app fait, où l'on clique. */
+  how?: string[];
+  requirements?: string[];
+  steps?: GuideStep[];
+  troubleshooting?: GuideProblem[];
   notes?: string[];
 }
 
-/** Installation d'un paquet, dans l'ordre des gestionnaires reconnus par Helm. */
+export const TOPICS: { id: GuideTopic; label: string; description: string }[] = [
+  { id: "prise-en-main", label: "Prise en main", description: "Se connecter, travailler au quotidien." },
+  { id: "exploitation", label: "Exploitation", description: "Conteneurs, sites, bases, supervision, sauvegardes." },
+  { id: "securite", label: "Sécurité et accès", description: "Audit, pare-feu, tunnels, bureau à distance." },
+  { id: "partage", label: "Partage et réglages", description: "Plusieurs postes, plusieurs personnes, assistant IA." },
+];
+
+/** Installation d'un paquet, dans l'ordre des gestionnaires que Helm sait utiliser. */
 const install = (paquet: string): GuideStep[] => [
   { text: "Debian, Ubuntu, Raspberry Pi OS", command: `apt-get update && apt-get install -y ${paquet}`, sudo: true },
   { text: "Fedora, Rocky, Alma, CentOS", command: `dnf install -y ${paquet}`, sudo: true },
@@ -57,257 +86,433 @@ const install = (paquet: string): GuideStep[] => [
 ];
 
 export const GUIDES: Guide[] = [
+  // ---------------------------------------------------------------- prise en main
   {
-    id: "sessions",
-    title: "Sessions persistantes (tmux)",
-    section: "terminal",
-    summary:
-      "Un terminal qui survit à une coupure réseau, à la mise en veille du PC et à la fermeture de Helm : le programme continue de tourner sur le serveur et l'onglet se rebranche dessus.",
-    automatic:
-      "Helm installe tmux lui-même : Terminal → Sessions → Installer tmux. Les commandes ci-dessous ne servent que si l'installation automatique échoue.",
-    requirements: ["tmux sur le serveur", "un compte qui peut installer des paquets (sudo), seulement pour l'installation"],
-    steps: [
-      { text: "Vérifier si tmux est déjà là", command: "command -v tmux || echo 'tmux absent'" },
-      ...install("tmux"),
-      { text: "Unraid n'a pas de gestionnaire de paquets : passer par le plugin « un-get »", command: "un-get update && un-get install tmux" },
-      { text: "Vérifier après installation", command: "tmux -V" },
-      { text: "Lister les sessions ouvertes par Helm (préfixées « helm- »)", command: "tmux ls" },
+    id: "servers",
+    title: "Ajouter et connecter un serveur",
+    topic: "prise-en-main",
+    section: "servers",
+    summary: "Un profil rassemble l'adresse, l'utilisateur et la façon de s'authentifier. Tout le reste de Helm s'appuie dessus.",
+    how: [
+      "Les secrets ne sont jamais écrits dans les fichiers de configuration : ils vont dans le coffre-fort du système (Credential Manager, Trousseau, Secret Service).",
+      "À la première connexion, l'empreinte de la clé d'hôte est mémorisée ; si elle change ensuite, Helm bloque et prévient au lieu de se connecter quand même.",
+      "Le mot de passe sudo enregistré dans le profil sert aux actions qui en ont besoin : écriture nginx, pare-feu, agent, sauvegardes.",
+      "Un serveur de rebond (bastion) se choisit dans le profil : Helm traverse le premier pour joindre le second.",
+      "Une identité de la banque (Serveurs → Identifiants) remplace l'utilisateur et les secrets sur plusieurs profils à la fois.",
     ],
-    notes: [
-      "Sans tmux, les terminaux fonctionnent normalement : ils ne survivent simplement pas à une coupure.",
-      "Helm force « mouse off » sur ses sessions, sinon tmux capte la sélection et la molette à la place du terminal de l'app.",
-      "Une session laissée ouverte continue de consommer les ressources de ses programmes : Terminal → Sessions permet de la reprendre ou de la fermer.",
+    requirements: ["un accès SSH (mot de passe, clé OpenSSH, clé PuTTY .ppk, agent OpenSSH ou Pageant)"],
+    steps: [
+      { text: "Créer une clé dédiée à Helm sur ton PC, plutôt qu'un mot de passe", command: "ssh-keygen -t ed25519 -C helm" },
+      { text: "L'installer sur le serveur", command: "ssh-copy-id -i ~/.ssh/id_ed25519.pub utilisateur@serveur" },
+      { text: "Vérifier l'empreinte du serveur, côté serveur, pour la comparer à celle que Helm affiche", command: "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub", sudo: true },
+    ],
+    troubleshooting: [
+      { symptom: "« Permission denied » alors que le mot de passe est bon", answer: "sshd refuse peut-être l'authentification par mot de passe, ou le compte est limité. Vérifier :", command: "grep -E 'PasswordAuthentication|PermitRootLogin|AllowUsers' /etc/ssh/sshd_config", sudo: true },
+      { symptom: "Connexion qui échoue depuis peu, sans rien avoir changé", answer: "Ton IP est peut-être bannie par fail2ban. Le diagnostic de connexion de Helm (palette Ctrl+K → « Diagnostiquer ») le détecte ; côté serveur :", command: "fail2ban-client status sshd", sudo: true },
+      { symptom: "« L'empreinte de l'hôte a changé »", answer: "Le serveur a été réinstallé, ou quelqu'un s'interpose. Ne valider qu'après avoir comparé l'empreinte affichée avec celle lue sur la console du serveur." },
     ],
   },
   {
     id: "terminal",
-    title: "Terminal, fichiers et dépôt de fichiers",
+    title: "Terminal : dossier courant, fichiers, copier-coller",
+    topic: "prise-en-main",
     section: "terminal",
-    summary:
-      "Le panneau Fichiers du terminal suit le dossier courant du shell : un « cd » et la liste se recale. Un fichier glissé depuis Windows est envoyé dans ce dossier.",
-    requirements: ["un shell POSIX (bash, zsh, sh)", "/proc monté, c'est-à-dire un Linux classique"],
-    steps: [
-      { text: "Vérifier que le suivi de dossier peut fonctionner", command: "readlink /proc/$$/cwd" },
-      { text: "Si la commande ci-dessus ne répond rien, le serveur n'expose pas /proc : le panneau restera sur le dossier de connexion" },
+    summary: "Le terminal de Helm connaît le dossier où tu te trouves : le panneau Fichiers suit tes « cd », et un fichier déposé depuis Windows atterrit au bon endroit.",
+    how: [
+      "Au démarrage, le shell annonce son identifiant de processus par une séquence invisible ; Helm lit ensuite /proc pour connaître le dossier courant, même quand un programme tourne au premier plan.",
+      "Le panneau Fichiers se recale tout seul après chaque « cd » (relevé toutes les 2,5 secondes).",
+      "Le viseur du panneau coupe ce suivi quand tu veux naviguer ailleurs à la main ; recliquer le réactive et recale le panneau.",
+      "Glisser des fichiers Windows sur le terminal les envoie dans le dossier courant du shell.",
+      "Copier-coller : Ctrl+Maj+C et Ctrl+Maj+V, ou le clic droit. Un collage de plusieurs lignes demande confirmation.",
+      "Le panneau Fichiers se redimensionne en tirant son bord gauche ; double-clic pour revenir à la largeur d'origine.",
     ],
-    notes: [
-      "Le suivi est automatique (relevé toutes les 2,5 s). Le bouton en forme de viseur sert à le couper pour naviguer à la main.",
-      "Le bouton « Ouvrir ce dossier » vide la ligne en cours avant d'envoyer le « cd », pour ne pas coller la commande à une saisie en cours.",
+    requirements: ["un shell POSIX (bash, zsh, sh)", "/proc monté, c'est-à-dire un Linux classique"],
+    steps: [{ text: "Vérifier que le suivi de dossier est possible sur ce serveur", command: "readlink /proc/$$/cwd" }],
+    troubleshooting: [
+      { symptom: "« Dossier courant du terminal introuvable »", answer: "Le serveur n'expose pas /proc (BSD, certains conteneurs), ou le terminal est déconnecté. Les autres fonctions du terminal marchent quand même." },
+      { symptom: "La sélection à la souris ne fonctionne pas dans une session tmux", answer: "tmux capte la souris quand « mouse on » est actif. Helm force « mouse off » sur ses propres sessions ; pour une session créée à la main :", command: "tmux set-option -g mouse off" },
+    ],
+  },
+  {
+    id: "sessions",
+    title: "Sessions persistantes (tmux)",
+    topic: "prise-en-main",
+    section: "terminal",
+    summary: "Un terminal qui survit à une coupure réseau, à la veille du PC et à la fermeture de Helm : le programme continue de tourner sur le serveur et l'onglet se rebranche dessus.",
+    automatic: "Helm installe tmux lui-même : Terminal → Sessions → Installer tmux. Les commandes ci-dessous ne servent que si l'installation automatique échoue.",
+    how: [
+      "Chaque onglet persistant correspond à une session tmux nommée « helm-… » sur le serveur.",
+      "Terminal → Sessions liste les sessions existantes : les reprendre dans un onglet, ou les fermer.",
+      "Les onglets et la division de l'écran sont restaurés au démarrage de Helm.",
+    ],
+    requirements: ["tmux sur le serveur", "un compte capable d'installer des paquets, seulement pour l'installation"],
+    steps: [
+      { text: "Vérifier si tmux est déjà présent", command: "command -v tmux || echo 'tmux absent'" },
+      ...install("tmux"),
+      { text: "Unraid n'a pas de gestionnaire de paquets : passer par le plugin « un-get » (Apps → un-get)", command: "un-get update && un-get install tmux" },
+      { text: "Lister les sessions créées par Helm", command: "tmux ls" },
+    ],
+    troubleshooting: [
+      { symptom: "Le bouton d'installation dit qu'aucun gestionnaire de paquets n'est reconnu", answer: "Installer tmux à la main avec l'outil de ta distribution. Sans tmux, les terminaux fonctionnent : ils ne survivent simplement pas aux coupures." },
+      { symptom: "Une session laissée ouverte consomme des ressources", answer: "Un programme lancé dans une session continue de tourner. La reprendre puis l'arrêter, ou la fermer depuis Terminal → Sessions." },
     ],
   },
   {
     id: "files",
     title: "Fichiers et transferts",
+    topic: "prise-en-main",
     section: "files",
     summary: "Explorateur SFTP, copie d'un serveur à l'autre en double panneau, édition distante, repli sudo pour les fichiers protégés.",
+    how: [
+      "Tout passe par le canal SFTP de la connexion SSH : aucun service à installer.",
+      "Le double panneau copie d'un serveur à l'autre en passant par ton PC ; le transfert s'annule en cours de route.",
+      "Un fichier ouvert s'édite dans l'éditeur intégré et repart sur le serveur à l'enregistrement.",
+      "Un fichier appartenant à root est lu et écrit via sudo si le profil a un mot de passe sudo.",
+    ],
     requirements: ["le sous-système SFTP activé dans sshd (cas par défaut)"],
     steps: [
-      { text: "Vérifier que SFTP est activé côté serveur", command: "grep -i sftp /etc/ssh/sshd_config" },
+      { text: "Vérifier que SFTP est activé", command: "grep -i sftp /etc/ssh/sshd_config" },
       { text: "L'activer s'il manque, puis recharger sshd", command: "printf 'Subsystem sftp internal-sftp\\n' >> /etc/ssh/sshd_config && systemctl reload ssh", sudo: true },
     ],
-    notes: ["Un fichier appartenant à root est lu et écrit via sudo si le profil a un mot de passe sudo enregistré."],
+  },
+
+  // ---------------------------------------------------------------- exploitation
+  {
+    id: "home",
+    title: "Vue d'ensemble",
+    topic: "exploitation",
+    section: "home",
+    summary: "L'état de tous les serveurs sur un écran : charge, mémoire, disque, conteneurs arrêtés, alertes, certificats proches de l'expiration.",
+    how: [
+      "Les relevés viennent de l'agent quand il est installé, sinon d'une lecture directe à la connexion.",
+      "« À traiter » regroupe ce qui demande une action : conteneurs arrêtés, alertes actives, certificats qui expirent.",
+      "L'activité récente est le journal local de Helm : toutes les actions faites depuis l'app, le MCP ou l'assistant.",
+    ],
+  },
+  {
+    id: "monitoring",
+    title: "Supervision : ce que montrent les chiffres",
+    topic: "exploitation",
+    section: "monitoring",
+    summary: "Charge, mémoire, disques, réseau, processus et services, en direct ou sur 30 jours avec l'agent.",
+    how: [
+      "Sans agent : les chiffres sont lus à la demande pendant que Helm est ouvert, sans historique.",
+      "Avec l'agent : 30 jours de moyennes par minute, et des alertes qui partent même PC éteint.",
+      "La charge (« load ») se compare au nombre de cœurs : 2.00 sur 4 cœurs, c'est la moitié de la machine.",
+      "La mémoire affichée exclut le cache : un cache élevé n'est pas un problème.",
+    ],
+  },
+  {
+    id: "schedule",
+    title: "Tâches planifiées (cron et timers)",
+    topic: "exploitation",
+    section: "monitoring",
+    summary: "Tout ce qui se déclenche tout seul sur le serveur : crontabs des utilisateurs, fichiers système de /etc/cron.d, et timers systemd.",
+    how: [
+      "Helm lit les crontabs de chaque utilisateur, /etc/crontab, /etc/cron.d, les dossiers cron.hourly/daily/weekly/monthly, et « systemctl list-timers ».",
+      "Chaque ligne est traduite en français (« chaque jour à 03:00 ») et accompagnée de ce que la commande fait réellement quand Helm la reconnaît.",
+      "« Modifier » ouvre le crontab dans l'éditeur ; la syntaxe est vérifiée avant enregistrement.",
+    ],
+    requirements: ["cron ou systemd (les deux sont lus)"],
+    steps: [
+      { text: "Voir un crontab utilisateur", command: "crontab -l -u root", sudo: true },
+      { text: "Voir les prochains déclenchements systemd", command: "systemctl list-timers --all --no-pager" },
+      { text: "Suivre l'exécution de cron en direct", command: "journalctl -u cron -f", sudo: true },
+    ],
+    notes: [
+      "Une tâche qui écrit dans un fichier de log sans rotation finit par remplir le disque : vérifier /var/log.",
+      "Les heures des timers systemd s'affichent en UTC si le serveur est en UTC.",
+    ],
   },
   {
     id: "docker",
-    title: "Docker : connecter Helm au démon",
+    title: "Docker : relier Helm au démon",
+    topic: "exploitation",
     section: "docker",
     summary: "Conteneurs, statistiques, journaux en direct, shell dans un conteneur, images et nettoyage.",
-    automatic: "Helm détecte tout seul s'il peut parler à Docker directement, sinon il passe par sudo.",
-    requirements: ["Docker ou Podman installé", "l'utilisateur dans le groupe docker, ou un mot de passe sudo enregistré dans le profil"],
+    automatic: "Helm détecte tout seul s'il peut parler à Docker directement, sinon il passe par sudo. Podman est reconnu de la même façon.",
+    how: [
+      "« Shell » ouvre un onglet de terminal dans le conteneur (bash s'il existe, sinon sh).",
+      "« Logs » ouvre un onglet qui suit la sortie en direct.",
+      "« Restreindre les ports » réécrit les ports publiés en 127.0.0.1 : le service n'est plus joignable depuis Internet, on y accède ensuite par un tunnel.",
+    ],
+    requirements: ["Docker ou Podman installé", "l'utilisateur dans le groupe docker, ou un mot de passe sudo dans le profil"],
     steps: [
       { text: "Vérifier que Docker répond", command: "docker version --format '{{.Server.Version}}'" },
       { text: "Installer Docker (script officiel)", command: "curl -fsSL https://get.docker.com | sh", sudo: true },
       { text: "Autoriser l'utilisateur à parler à Docker sans sudo", command: "usermod -aG docker $USER", sudo: true },
-      { text: "Refermer puis rouvrir la session SSH pour que le groupe soit pris en compte, et vérifier", command: "docker ps" },
+      { text: "Refermer puis rouvrir la session SSH pour que le groupe s'applique, et vérifier", command: "docker ps" },
     ],
-    notes: [
-      "Mettre un utilisateur dans le groupe docker revient à lui donner les droits root sur la machine : à réserver à un compte d'administration.",
-      "Sans ce groupe, Helm fonctionne quand même si le profil a un mot de passe sudo.",
+    troubleshooting: [
+      { symptom: "« permission denied » sur /var/run/docker.sock", answer: "L'utilisateur n'est pas dans le groupe docker et aucun mot de passe sudo n'est enregistré. Ajouter l'un ou l'autre." },
+      { symptom: "Le disque se remplit sans raison apparente", answer: "Images, volumes et caches de construction s'accumulent. Docker → Stockage montre ce qui est récupérable ; en ligne de commande :", command: "docker system df" },
     ],
+    notes: ["Mettre un utilisateur dans le groupe docker revient à lui donner les droits root : à réserver à un compte d'administration."],
   },
   {
     id: "compose",
-    title: "Projets Docker Compose et déploiement",
+    title: "Projets Compose et déploiement",
+    topic: "exploitation",
     section: "docker",
-    summary:
-      "Créer un projet compose depuis l'interface, le déployer (pull → up → vérification → retour arrière si l'app ne répond plus), ou le déployer depuis un dépôt GitHub privé.",
-    requirements: ["le plugin Docker Compose v2", "un dossier de projet sur le serveur, par exemple /opt/<projet>", "git, seulement pour le déploiement depuis GitHub"],
-    steps: [
-      { text: "Vérifier que Compose v2 est présent", command: "docker compose version" },
-      { text: "L'installer sur Debian/Ubuntu s'il manque", command: "apt-get install -y docker-compose-plugin", sudo: true },
-      { text: "Préparer un dossier de projet accessible à ton utilisateur", command: "install -d -o $USER -g $USER /opt/mon-projet", sudo: true },
-      { text: "Depuis Helm : Docker → Projets → Nouveau projet compose, choisir ce dossier, écrire le compose.yml, puis Déployer" },
-      { text: "Pour un dépôt GitHub privé : Helm génère une clé de déploiement à coller dans Settings → Deploy keys du dépôt, puis vérifier depuis le serveur", command: "ssh -T git@github.com" },
+    summary: "Créer un projet compose depuis l'interface, le déployer avec retour arrière automatique, ou le déployer depuis un dépôt GitHub privé.",
+    how: [
+      "Un projet, c'est un dossier avec son compose.yml : Helm y lance « docker compose » à ta place.",
+      "Déployer enchaîne pull → up → vérification que les conteneurs tiennent ; si l'un d'eux retombe, l'état précédent est remis.",
+      "Le déploiement GitHub génère une clé de déploiement restreinte à un dépôt : rien d'autre n'est accessible avec elle.",
     ],
-    notes: [
-      "Le déploiement garde l'état précédent : si les conteneurs ne redémarrent pas correctement, Helm remet la version d'avant.",
-      "« Restreindre les ports » réécrit les ports publiés en 127.0.0.1 pour qu'un service ne soit plus joignable depuis Internet ; on y accède ensuite par un tunnel.",
+    requirements: ["le plugin Docker Compose v2", "un dossier de projet accessible à ton utilisateur", "git, seulement pour le déploiement GitHub"],
+    steps: [
+      { text: "Vérifier Compose v2", command: "docker compose version" },
+      { text: "L'installer sur Debian/Ubuntu s'il manque", command: "apt-get install -y docker-compose-plugin", sudo: true },
+      { text: "Préparer un dossier de projet", command: "install -d -o $USER -g $USER /opt/mon-projet", sudo: true },
+      { text: "Coller la clé de déploiement dans le dépôt (Settings → Deploy keys), puis vérifier depuis le serveur", command: "ssh -T git@github.com" },
+    ],
+    troubleshooting: [
+      { symptom: "« docker compose : commande inconnue »", answer: "C'est l'ancienne version « docker-compose » (avec un tiret) qui est installée. Installer le plugin v2." },
+      { symptom: "Le déploiement revient en arrière tout seul", answer: "Un conteneur n'est pas resté debout. Les journaux du projet disent pourquoi :", command: "docker compose logs --tail 200" },
     ],
   },
   {
     id: "databases",
     title: "Bases de données",
+    topic: "exploitation",
     section: "databases",
-    summary: "Parcourir les bases et les tables de MySQL/MariaDB et PostgreSQL, exécuter du SQL (Ctrl+Entrée), exporter en CSV.",
-    requirements: [
-      "une instance en conteneur, ou installée sur l'hôte",
-      "le client en ligne de commande accessible (mysql / mariadb / psql), dans le conteneur ou sur l'hôte",
-      "les identifiants : variables d'environnement du conteneur, ou authentification par socket pour un service local",
+    summary: "Parcourir bases et tables de MySQL/MariaDB et PostgreSQL, exécuter du SQL, exporter en CSV, créer une base.",
+    how: [
+      "Les requêtes passent par le client en ligne de commande du serveur, à travers SSH : aucun port de base n'a besoin d'être ouvert.",
+      "Pour un conteneur, Helm lit le mot de passe root dans ses variables d'environnement ; pour une instance locale, il utilise l'authentification par socket.",
+      "Ctrl+Entrée exécute la requête ; le résultat s'exporte en CSV.",
+      "Une instance injoignable reste listée : l'erreur apparaît à la première requête, avec sa cause.",
     ],
+    requirements: ["une instance en conteneur ou sur l'hôte", "le client mysql/mariadb/psql accessible", "les identifiants (variables du conteneur, ou socket local)"],
     steps: [
-      { text: "Repérer une instance en conteneur", command: "docker ps --filter ancestor=mysql --filter ancestor=mariadb --filter ancestor=postgres" },
+      { text: "Repérer une instance en conteneur", command: "docker ps --format '{{.Names}} {{.Image}}' | grep -Ei 'mysql|mariadb|postgres'" },
       { text: "Vérifier le client dans le conteneur", command: "docker exec <conteneur> sh -c 'command -v mysql || command -v mariadb || command -v psql'" },
-      { text: "Pour une instance installée sur l'hôte, vérifier qu'elle tourne", command: "systemctl status mariadb postgresql --no-pager" },
+      { text: "Vérifier une instance installée sur l'hôte", command: "systemctl status mariadb postgresql --no-pager" },
     ],
-    notes: [
-      "Helm lit le mot de passe root dans les variables d'environnement du conteneur ; s'il n'y est pas, l'instance reste listée et l'erreur apparaît à la première requête.",
-      "Pour joindre la base depuis un outil de ton PC sans l'exposer : Tunnels.",
+    troubleshooting: [
+      { symptom: "« Access denied » à la première requête", answer: "Le conteneur ne porte pas MYSQL_ROOT_PASSWORD (ou POSTGRES_PASSWORD) dans ses variables. Les afficher :", command: "docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' <conteneur>" },
+      { symptom: "Je veux utiliser un outil graphique de mon PC", answer: "Ouvrir un tunnel vers le port de la base plutôt que de l'exposer : voir la fiche Tunnels." },
     ],
   },
   {
     id: "sites",
     title: "Sites, nginx ou Apache, certificats",
+    topic: "exploitation",
     section: "sites",
-    summary: "Relier un sous-domaine à un conteneur ou à un port local, éditer le vhost sans risque, suivre les certificats et restaurer une configuration précédente.",
-    requirements: ["nginx ou Apache installé", "un mot de passe sudo dans le profil (l'écriture et le rechargement en ont besoin)", "certbot pour les certificats Let's Encrypt"],
+    summary: "Relier un sous-domaine à un conteneur ou à un port local, éditer le vhost sans risque, suivre les certificats, restaurer une configuration précédente.",
+    how: [
+      "Chaque écriture suit le même déroulé côté serveur : sauvegarde complète, écriture, test de configuration, rechargement, et restauration exacte si le test ou le rechargement échoue.",
+      "Le serveur web n'est donc jamais rechargé avec une configuration invalide, et les autres sites ne sont pas touchés.",
+      "Les 30 dernières sauvegardes sont conservées et consultables dans l'historique, avec comparaison et restauration.",
+      "Les écritures hors du dossier de configuration sont refusées.",
+    ],
+    requirements: ["nginx ou Apache", "un mot de passe sudo dans le profil", "certbot pour Let's Encrypt"],
     steps: [
       { text: "Vérifier le serveur web", command: "nginx -v || apachectl -v" },
       { text: "Installer nginx", command: "apt-get install -y nginx", sudo: true },
       { text: "Installer certbot", command: "apt-get install -y certbot python3-certbot-nginx", sudo: true },
-      { text: "Vérifier à la main que la configuration est valide (Helm le fait à chaque écriture)", command: "nginx -t", sudo: true },
-      { text: "Voir les sauvegardes prises par Helm avant chaque modification", command: "ls -1 /var/backups/helm/nginx", sudo: true },
+      { text: "Tester la configuration à la main", command: "nginx -t", sudo: true },
+      { text: "Voir les sauvegardes prises par Helm", command: "ls -1 /var/backups/helm/nginx", sudo: true },
     ],
-    notes: [
-      "Chaque écriture suit le même déroulé : sauvegarde complète, écriture, test, rechargement, et restauration exacte si le test ou le rechargement échoue.",
-      "Les 30 dernières sauvegardes sont conservées ; les écritures hors du dossier de configuration sont refusées.",
+    troubleshooting: [
+      { symptom: "Le certificat ne se renouvelle pas", answer: "Le renouvellement passe par le port 80, qui doit rester joignable. Essai à blanc :", command: "certbot renew --dry-run", sudo: true },
+      { symptom: "Le domaine ne pointe pas encore sur le serveur", answer: "Helm affiche l'IP résolue à côté du site ; tant qu'elle ne correspond pas, le certificat échouera." },
+    ],
+  },
+  {
+    id: "logs",
+    title: "Journaux",
+    topic: "exploitation",
+    section: "logs",
+    summary: "Conteneurs, services systemd et fichiers suivis en direct, fusionnés dans une même vue, filtrables et exportables.",
+    how: [
+      "Les sources se cochent dans la colonne de gauche ; tout est fusionné par horodatage.",
+      "Le filtre accepte du texte ou une expression régulière, et un niveau minimum.",
+      "L'export enregistre ce qui est affiché, filtre compris.",
+    ],
+    steps: [
+      { text: "Équivalent en ligne de commande, pour un service", command: "journalctl -u nginx -f", sudo: true },
+      { text: "Pour un conteneur", command: "docker logs -f --tail 200 <conteneur>" },
     ],
   },
   {
     id: "agent",
     title: "Agent helmd : historique et alertes hors ligne",
+    topic: "exploitation",
     section: "monitoring",
-    summary:
-      "Sans agent, Helm affiche l'état en direct quand il est ouvert. Avec l'agent, le serveur garde 30 jours d'historique et envoie les alertes même PC éteint.",
+    summary: "Sans agent, Helm montre l'état en direct quand il est ouvert. Avec l'agent, le serveur garde 30 jours d'historique et envoie les alertes même PC éteint.",
     automatic: "Installation en un clic : Supervision → Agent & alertes → Installer. Helm envoie le binaire par SSH et crée le service.",
+    how: [
+      "L'agent n'ouvre aucun port : il écoute sur un socket unix et Helm l'interroge à travers SSH.",
+      "Il tourne sous un utilisateur dédié, avec un service systemd durci et 64 Mo de mémoire au maximum.",
+      "Les alertes (seuils, site injoignable, sauvegarde en échec) partent vers Discord, ntfy ou un webhook.",
+      "Les seuils et destinations se règlent depuis Helm ; le fichier est rechargé à chaud.",
+    ],
     requirements: ["systemd", "un mot de passe sudo dans le profil", "Linux x86_64 ou arm64"],
     steps: [
-      { text: "Vérifier le service après installation", command: "systemctl status helmd --no-pager" },
+      { text: "Vérifier le service", command: "systemctl status helmd --no-pager" },
       { text: "Voir ses journaux", command: "journalctl -u helmd -n 50 --no-pager", sudo: true },
-      { text: "Configuration (seuils, destinations d'alerte) — modifiable depuis Helm", command: "cat /etc/helmd/config.json", sudo: true },
-      { text: "Redémarrer après une modification à la main", command: "systemctl restart helmd", sudo: true },
+      { text: "Lire sa configuration", command: "cat /etc/helmd/config.json", sudo: true },
+      { text: "Redémarrer après une modification manuelle", command: "systemctl restart helmd", sudo: true },
     ],
-    notes: [
-      "L'agent n'ouvre aucun port : il écoute sur un socket unix (/run/helmd/helmd.sock) et Helm l'interroge à travers SSH.",
-      "Il tourne sous un utilisateur dédié, avec un service durci et 64 Mo de mémoire au maximum.",
-      "Les alertes partent vers Discord, ntfy ou un webhook de ton choix.",
+    troubleshooting: [
+      { symptom: "Le service ne démarre pas", answer: "Regarder la raison exacte dans le journal :", command: "journalctl -u helmd -n 30 --no-pager", sudo: true },
+      { symptom: "Aucune alerte ne part", answer: "Vérifier la destination (webhook, ntfy, Discord) depuis Supervision → Agent & alertes : un bouton envoie un message de test." },
     ],
   },
   {
     id: "backups",
     title: "Sauvegardes (restic)",
+    topic: "exploitation",
     section: "backups",
-    summary: "Sauvegardes chiffrées et dédupliquées : dumps de bases cohérents, volumes Docker, dossiers ; vers le serveur lui-même ou un stockage S3.",
-    automatic: "Helm installe restic et prépare /etc/helm-backup lors de la première configuration.",
-    requirements: ["restic", "un mot de passe sudo dans le profil", "de la place sur le disque, ou un accès S3 (identifiants et bucket)"],
+    summary: "Sauvegardes chiffrées et dédupliquées : dumps de bases cohérents, volumes Docker, dossiers ; vers le serveur ou un stockage S3.",
+    automatic: "Helm installe restic et prépare /etc/helm-backup à la première configuration, puis pose la planification.",
+    how: [
+      "Les bases sont exportées avant la copie, sans arrêter le service, pour obtenir un dump cohérent.",
+      "La déduplication fait qu'une sauvegarde quotidienne ne coûte que ce qui a changé.",
+      "La restauration propose de télécharger, de remettre en place, ou de réimporter une base.",
+      "La vérification relit le dépôt et signale une corruption avant que tu en aies besoin.",
+    ],
+    requirements: ["restic", "un mot de passe sudo dans le profil", "de la place disque, ou un accès S3"],
     steps: [
       { text: "Vérifier restic", command: "restic version" },
       ...install("restic").slice(0, 2),
-      { text: "Lancer une sauvegarde à la main (Helm crée ce script)", command: "/etc/helm-backup/run.sh", sudo: true },
+      { text: "Lancer la sauvegarde à la main (script créé par Helm)", command: "/etc/helm-backup/run.sh", sudo: true },
       { text: "Vérifier la planification", command: "systemctl list-timers 'helm-backup*' --no-pager" },
     ],
+    troubleshooting: [
+      { symptom: "La sauvegarde échoue depuis un changement de mot de passe de base", answer: "Le script utilise les identifiants enregistrés à la configuration : refaire Sauvegardes → Modifier la configuration." },
+    ],
     notes: [
-      "La phrase de passe du dépôt restic est indispensable pour restaurer : Helm la garde dans le coffre-fort de ton système, garde-la aussi ailleurs.",
+      "La phrase de passe du dépôt est indispensable pour restaurer : Helm la garde dans le coffre-fort, garde-la aussi ailleurs.",
       "Une sauvegarde sur le même disque que les données ne protège pas d'une panne de disque : prévoir S3 ou un autre serveur.",
+    ],
+  },
+
+  // ---------------------------------------------------------------- sécurité et accès
+  {
+    id: "security",
+    title: "Audit de sécurité et corrections",
+    topic: "securite",
+    section: "security",
+    summary: "État de SSH, du pare-feu, de fail2ban, des mises à jour, des ports exposés et des comptes privilégiés, avec des corrections guidées.",
+    how: [
+      "L'audit est en lecture seule : rien n'est modifié sans ton accord explicite.",
+      "Avant de toucher à SSH ou au pare-feu, Helm garde une connexion de contrôle ouverte ; si la modification te coupe l'accès, elle est annulée automatiquement.",
+      "Une alerte qui ne te concerne pas peut être ignorée : elle passe dans les archivées, avec la raison.",
+      "Le pare-feu et fail2ban se pilotent depuis la même page : règles, prisons, bannissements en cours.",
+    ],
+    requirements: ["un mot de passe sudo pour appliquer les corrections", "ufw ou firewalld, fail2ban"],
+    steps: [
+      { text: "Installer pare-feu et fail2ban", command: "apt-get install -y ufw fail2ban", sudo: true },
+      { text: "État du pare-feu", command: "ufw status verbose", sudo: true },
+      { text: "Prisons actives", command: "fail2ban-client status", sudo: true },
+      { text: "Ports réellement à l'écoute", command: "ss -lntp", sudo: true },
+    ],
+    troubleshooting: [
+      { symptom: "Je me suis banni moi-même", answer: "Depuis la console du fournisseur (KVM/VNC), lever le bannissement :", command: "fail2ban-client set sshd unbanip <ton-ip>", sudo: true },
     ],
   },
   {
     id: "tunnels",
     title: "Tunnels : joindre un service sans l'exposer",
+    topic: "securite",
     section: "tunnels",
-    summary:
-      "Un port du serveur devient accessible sur ton PC en 127.0.0.1, à travers la connexion SSH. La base ou l'interface d'administration reste invisible depuis Internet.",
-    requirements: ["rien de plus : le tunnel passe par la connexion SSH existante"],
+    summary: "Un port du serveur devient accessible sur ton PC en 127.0.0.1, à travers la connexion SSH. Le service reste invisible depuis Internet.",
+    how: [
+      "Helm n'écoute que sur 127.0.0.1 : le tunnel n'est pas partagé avec ton réseau local.",
+      "La connexion SSH s'ouvre à la première utilisation du port.",
+      "Un tunnel peut démarrer automatiquement au lancement de Helm.",
+    ],
     steps: [
-      { text: "Depuis Helm : Tunnels → Nouveau tunnel, choisir le port distant (3306, 5432, 8080…) et le port local" },
       { text: "Équivalent en ligne de commande, pour comparaison", command: "ssh -N -L 13306:127.0.0.1:3306 utilisateur@serveur" },
-      { text: "Vérifier côté serveur ce qui écoute", command: "ss -lntp" },
+      { text: "Voir ce qui écoute côté serveur", command: "ss -lntp", sudo: true },
     ],
-    notes: ["Helm n'écoute que sur 127.0.0.1 côté PC : le tunnel n'est pas partagé avec le réseau local."],
-  },
-  {
-    id: "security",
-    title: "Audit de sécurité et corrections",
-    section: "security",
-    summary: "État de SSH, du pare-feu, de fail2ban, des mises à jour, des ports exposés et des comptes privilégiés, avec des corrections guidées.",
-    requirements: ["un mot de passe sudo dans le profil pour appliquer les corrections", "ufw ou firewalld pour le pare-feu, fail2ban pour le bannissement"],
-    steps: [
-      { text: "Installer le pare-feu et fail2ban", command: "apt-get install -y ufw fail2ban", sudo: true },
-      { text: "Voir l'état du pare-feu", command: "ufw status verbose", sudo: true },
-      { text: "Voir les prisons fail2ban actives", command: "fail2ban-client status", sudo: true },
-    ],
-    notes: [
-      "Avant de modifier SSH ou le pare-feu, Helm garde une connexion de contrôle ouverte : si la modification coupe l'accès, elle est annulée automatiquement.",
-      "Une alerte qui ne te concerne pas peut être ignorée : elle passe alors dans les alertes archivées.",
-    ],
-  },
-  {
-    id: "share",
-    title: "Partager un terminal ou une configuration",
-    summary:
-      "Montrer un terminal à quelqu'un, en lecture seule ou avec le contrôle, et transmettre un profil de serveur à une autre installation de Helm.",
-    requirements: ["un serveur de relais (sync-server) joignable par les deux personnes"],
-    steps: [
-      { text: "Sur ton VPS : récupérer le dossier sync-server du dépôt, puis le lancer", command: "docker compose up -d" },
-      { text: "Le publier derrière nginx avec HTTPS : le dépôt fournit nginx.conf.example (il gère la montée en WebSocket)" },
-      { text: "Dans Helm : Réglages → Synchronisation, renseigner l'adresse du serveur et la phrase de passe" },
-      { text: "Terminal → Partager : Helm copie une invitation « helm-term:… » à transmettre. Le destinataire la colle dans Terminal → Rejoindre." },
-    ],
-    notes: [
-      "Le relais ne voit rien : tout est chiffré côté client (AES-256-GCM) avec une clé qui n'est que dans l'invitation.",
-      "« Avec le contrôle » donne à la personne tes droits sur le serveur : à réserver à quelqu'un de confiance. Le partage s'arrête quand tu le décides ou à la fermeture de l'onglet.",
-    ],
-  },
-  {
-    id: "sync",
-    title: "Synchroniser plusieurs postes",
-    section: "settings",
-    summary: "Retrouver ses serveurs, identifiants, clés d'hôte, fragments et tunnels sur un autre PC.",
-    requirements: ["soit un dossier déjà synchronisé (OneDrive, Dropbox, Syncthing, partage réseau), soit un sync-server"],
-    steps: [
-      { text: "Le plus simple : Réglages → Synchronisation → Fichier, et choisir un dossier synchronisé par un autre outil" },
-      { text: "Sinon, héberger le relais sur le VPS", command: "docker compose up -d" },
-      { text: "Vérifier qu'il répond", command: "curl -fsS https://sync.mondomaine.fr/health" },
-    ],
-    notes: [
-      "La phrase de passe ne quitte jamais tes PC : si tu la perds, les données synchronisées sont irrécupérables.",
-      "Les secrets ne sont inclus que si tu coches l'option ; sinon seuls les profils sont synchronisés.",
-    ],
-  },
-  {
-    id: "ai",
-    title: "Assistant IA",
-    summary: "Poser une question sur une erreur, un journal ou une configuration, sans copier-coller vers un autre outil.",
-    requirements: ["une clé d'API (Claude ou service compatible OpenAI), ou un modèle local (Ollama, LM Studio)"],
-    steps: [
-      { text: "Réglages → Assistant IA : choisir le fournisseur et coller la clé (elle va dans le coffre-fort du système)" },
-      { text: "Pour un modèle local, vérifier qu'il répond", command: "curl -fsS http://localhost:11434/api/tags" },
-      { text: "Choisir ce que l'assistant peut consulter, serveur par serveur, puis ouvrir le panneau avec Ctrl+I" },
-    ],
-    notes: [
-      "Trois modes : lecture seule, proposition (chaque commande est validée par toi, mode par défaut) et autonome.",
-      "Même en mode autonome, les commandes sensibles demandent ton accord. Chaque appel est inscrit au journal d'actions.",
+    troubleshooting: [
+      { symptom: "« Address already in use » à l'ouverture", answer: "Le port local est déjà pris : en choisir un autre (Helm en propose un libre)." },
     ],
   },
   {
     id: "rdp",
     title: "Bureau à distance (RDP)",
+    topic: "securite",
     section: "servers",
-    summary: "Ouvrir une session graphique sur une machine Windows ou sur un Linux équipé d'un serveur RDP, depuis la fiche du serveur.",
-    requirements: ["un client RDP sur ton PC : mstsc sous Windows, xfreerdp sous Linux", "un serveur RDP sur la machine cible (xrdp pour Linux)"],
+    summary: "Ouvrir une session graphique sur une machine Windows, ou sur un Linux équipé d'un serveur RDP, depuis la fiche du serveur.",
+    requirements: ["un client RDP sur ton PC (mstsc sous Windows, xfreerdp sous Linux)", "un serveur RDP sur la machine cible"],
     steps: [
-      { text: "Installer xrdp sur un serveur Linux", command: "apt-get install -y xrdp && systemctl enable --now xrdp", sudo: true },
-      { text: "Vérifier qu'il écoute", command: "ss -lntp | grep 3389" },
-      { text: "Ne pas exposer 3389 sur Internet : passer par un tunnel Helm, puis se connecter sur 127.0.0.1" },
+      { text: "Installer xrdp sur un Linux", command: "apt-get install -y xrdp && systemctl enable --now xrdp", sudo: true },
+      { text: "Vérifier qu'il écoute", command: "ss -lntp | grep 3389", sudo: true },
+    ],
+    notes: ["Ne pas exposer 3389 sur Internet : passer par un tunnel Helm et se connecter sur 127.0.0.1."],
+  },
+
+  // ---------------------------------------------------------------- partage et réglages
+  {
+    id: "share",
+    title: "Partager un terminal ou une configuration",
+    topic: "partage",
+    summary: "Montrer un terminal à quelqu'un, en lecture seule ou avec le contrôle, et transmettre un profil de serveur à une autre installation de Helm.",
+    how: [
+      "Le contenu est chiffré côté client : le relais ne voit rien, la clé n'est que dans l'invitation.",
+      "« Avec le contrôle » donne à la personne tes droits sur le serveur : à réserver à quelqu'un de confiance.",
+      "Le partage s'arrête quand tu le décides, ou à la fermeture de l'onglet.",
+    ],
+    requirements: ["un serveur de relais (sync-server) joignable par les deux personnes"],
+    steps: [
+      { text: "Sur le VPS : lancer le relais depuis le dossier sync-server du dépôt", command: "docker compose up -d" },
+      { text: "Le publier derrière nginx avec HTTPS (le dépôt fournit nginx.conf.example, qui gère la montée en WebSocket)" },
+      { text: "Dans Helm : Réglages → Synchronisation, renseigner l'adresse et la phrase de passe" },
+      { text: "Terminal → Partager : transmettre l'invitation « helm-term:… ». Le destinataire la colle dans Terminal → Rejoindre." },
+    ],
+  },
+  {
+    id: "sync",
+    title: "Synchroniser plusieurs postes",
+    topic: "partage",
+    section: "settings",
+    summary: "Retrouver ses serveurs, identifiants, clés d'hôte, fragments et tunnels sur un autre PC.",
+    how: [
+      "Deux modes : un fichier chiffré dans un dossier déjà synchronisé, ou le relais sync-server.",
+      "Les secrets ne partent que si tu coches l'option ; sinon seuls les profils sont synchronisés.",
+      "Le contenu est chiffré avec ta phrase de passe, qui ne quitte jamais tes PC.",
+    ],
+    steps: [
+      { text: "Le plus simple : Réglages → Synchronisation → Fichier, dans un dossier OneDrive, Dropbox ou Syncthing" },
+      { text: "Sinon, héberger le relais", command: "docker compose up -d" },
+      { text: "Vérifier qu'il répond", command: "curl -fsS https://sync.mondomaine.fr/health" },
+    ],
+    notes: ["Si tu perds la phrase de passe, les données synchronisées sont irrécupérables."],
+  },
+  {
+    id: "ai",
+    title: "Assistant IA",
+    topic: "partage",
+    summary: "Poser une question sur une erreur, un journal ou une configuration sans copier-coller vers un autre outil.",
+    how: [
+      "Trois modes : lecture seule, proposition (chaque commande est validée par toi, mode par défaut) et autonome.",
+      "Même en mode autonome, les commandes sensibles demandent ton accord.",
+      "Ce que l'assistant peut consulter se coche case par case, serveur par serveur.",
+      "La clé d'API est rangée dans le coffre-fort du système et chaque appel est inscrit au journal d'actions.",
+    ],
+    requirements: ["une clé d'API (Claude ou service compatible OpenAI), ou un modèle local (Ollama, LM Studio)"],
+    steps: [
+      { text: "Réglages → Assistant IA : choisir le fournisseur et coller la clé" },
+      { text: "Pour un modèle local, vérifier qu'il répond", command: "curl -fsS http://localhost:11434/api/tags" },
+      { text: "Ouvrir le panneau avec Ctrl+I" },
+    ],
+  },
+  {
+    id: "settings",
+    title: "Réglages : ce qui se règle où",
+    topic: "partage",
+    section: "settings",
+    summary: "Préférences de l'app, verrouillage, synchronisation, assistant IA, accès en lecture pour les assistants, et journal de toutes les actions.",
+    how: [
+      "Le journal d'actions garde ce que Helm a fait sur chaque serveur, y compris via l'assistant et le MCP.",
+      "Le verrouillage demande un mot de passe après une durée d'inactivité, ou à la demande (Ctrl+Maj+L).",
+      "L'accès IA s'autorise serveur par serveur : un serveur non coché est invisible pour l'assistant et le MCP.",
+      "Les raccourcis clavier sont tous modifiables.",
     ],
   },
 ];

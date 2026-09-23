@@ -46,11 +46,16 @@ export default function TunnelsView() {
         </Button>
       }
     >
-      <div className="p-6">
+      {/* Contenu et note explicative dans la même colonne : la note traînait auparavant tout en bas
+          à gauche, sans rapport visuel avec le tableau ni avec l'état vide, centré, lui. */}
+      <div className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
         {list.length === 0 ? (
-          <EmptyState icon={<Cable size={40} />} title="Aucun tunnel">
-            Exemple : ta base MySQL écoute sur le port 3306 du serveur. Un tunnel la rend accessible sur <span className="font-mono">127.0.0.1:13306</span> de ton PC, chiffrée par SSH, sans ouvrir de port sur Internet.
-          </EmptyState>
+          <div className="min-h-[320px]">
+            <EmptyState icon={<Cable size={40} />} title="Aucun tunnel">
+              Exemple : ta base MySQL écoute sur le port 3306 du serveur. Un tunnel la rend accessible sur{" "}
+              <span className="font-mono">127.0.0.1:13306</span> de ton PC, chiffrée par SSH, sans ouvrir de port sur Internet.
+            </EmptyState>
+          </div>
         ) : (
           <div className="overflow-hidden rounded-lg border border-border">
             <table className="w-full text-sm">
@@ -117,8 +122,10 @@ export default function TunnelsView() {
             </table>
           </div>
         )}
-        <p className="mt-4 text-xs text-muted">
-          Les tunnels n'écoutent que sur 127.0.0.1 : ils ne sont pas accessibles depuis le réseau de ton PC. La connexion SSH s'ouvre à la première utilisation.
+        <p className="text-center text-xs leading-relaxed text-muted">
+          Les tunnels n'écoutent que sur 127.0.0.1 : ils ne sont pas accessibles depuis le réseau de ton PC.
+          <br />
+          La connexion SSH s'ouvre à la première utilisation.
         </p>
       </div>
       {editing && (

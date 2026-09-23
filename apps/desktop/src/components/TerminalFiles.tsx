@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowUp, Crosshair, Download, File, Folder, FolderInput, FolderOpen, RefreshCw, TextCursorInput, Upload } from "lucide-react";
+import { ArrowUp, Crosshair, Download, File, Folder, FolderInput, FolderOpen, FolderSync, RefreshCw, TextCursorInput, Upload } from "lucide-react";
 import { api, errorMessage, formatBytes, shellQuote, type FsEntry } from "../lib/api";
 import { paneCwd, usePanes } from "../lib/panes";
 import { track } from "../lib/transfers";
@@ -43,7 +43,14 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [follow, setFollow] = useState(true);
+  /**
+   * Lien entre le shell et le panneau :
+   * - `terminal` : le panneau suit les « cd » du terminal (par défaut) ;
+   * - `panneau`  : c'est le terminal qui suit la navigation du panneau (il fait le « cd ») ;
+   * - `aucun`    : les deux avancent chacun de leur côté.
+   */
+  const [link, setLink] = useState<"terminal" | "panneau" | "aucun">("terminal");
+  const follow = link === "terminal";
   const [showHidden, setShowHidden] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   /** Dernier dossier vu dans le terminal : on ne suit que ses changements (la navigation manuelle reste). */
@@ -68,6 +75,13 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
+  };
+
+  /** Navigation venue du panneau : elle coupe le suivi du terminal, ou l'y emmène selon le mode. */
+  const goTo = (dir: string) => {
+    if (link === "terminal") setLink("aucun");
+    if (link === "panneau") cdInTerminal(dir);
+    void load(dir);
   };
 
   const load = useCallback(
@@ -163,11 +177,30 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
       />
       <div className="flex items-center gap-0.5 border-b border-border px-2 py-1.5">
         <span className="mr-auto pl-1 text-xs font-semibold tracking-wide text-muted uppercase">Fichiers</span>
-        <IconButton title={follow ? "Suit le dossier du terminal (cliquer pour arrêter)" : "Suivre le dossier du terminal"} className={follow ? "text-accent" : ""} onClick={() => {
-          setFollow((v) => !v);
-          if (!follow) void syncWithTerminal(true);
-        }}>
+        {/* Deux sens possibles, jamais les deux à la fois : sinon chacun tirerait l'autre. */}
+        <IconButton
+          title={follow ? "Le panneau suit le terminal (cliquer pour arrêter)" : "Faire suivre le terminal par le panneau"}
+          aria-pressed={follow}
+          className={follow ? "text-accent" : ""}
+          onClick={() => {
+            const actif = link === "terminal";
+            setLink(actif ? "aucun" : "terminal");
+            if (!actif) void syncWithTerminal(true);
+          }}
+        >
           <Crosshair size={14} />
+        </IconButton>
+        <IconButton
+          title={link === "panneau" ? "Le terminal suit le panneau (cliquer pour arrêter)" : "Faire suivre le panneau par le terminal (cd automatique)"}
+          aria-pressed={link === "panneau"}
+          className={link === "panneau" ? "text-accent" : ""}
+          onClick={() => {
+            const actif = link === "panneau";
+            setLink(actif ? "aucun" : "panneau");
+            if (!actif && path) cdInTerminal(path);
+          }}
+        >
+          <FolderSync size={14} />
         </IconButton>
         <IconButton title="Envoyer des fichiers ici" disabled={!path} onClick={() => void uploadHere()}>
           <Upload size={14} />
@@ -188,14 +221,10 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
         className="flex items-center gap-1 border-b border-border px-2 py-1.5"
         onSubmit={(e) => {
           e.preventDefault();
-          setFollow(false);
-          void load(input.trim() || "/");
+          goTo(input.trim() || "/");
         }}
       >
-        <IconButton title="Dossier parent" type="button" disabled={!path || path === "/"} onClick={() => {
-          setFollow(false);
-          if (path) void load(parent(path));
-        }}>
+        <IconButton title="Dossier parent" type="button" disabled={!path || path === "/"} onClick={() => path && goTo(parent(path))}>
           <ArrowUp size={14} />
         </IconButton>
         <Input className="h-7 font-mono text-xs" value={input} onChange={(e) => setInput(e.target.value)} placeholder="/chemin" />
@@ -210,12 +239,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
           <div
             key={e.path}
             className="group flex cursor-default items-center gap-2 px-2 py-[3px] text-[13px] hover:bg-hover"
-            onDoubleClick={() => {
-              if (isDir(e)) {
-                setFollow(false);
-                void load(e.path);
-              } else setEditing(e.path);
-            }}
+            onDoubleClick={() => (isDir(e) ? goTo(e.path) : setEditing(e.path))}
             title={isDir(e) ? "Double-clic : ouvrir le dossier" : `${formatBytes(e.size)} · double-clic : éditer`}
           >
             {isDir(e) ? <Folder size={14} className="shrink-0 text-accent" /> : <File size={14} className="shrink-0 text-muted" />}

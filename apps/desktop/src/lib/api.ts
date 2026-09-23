@@ -797,6 +797,7 @@ export const api = {
 
   dbInstances: (serverId: string) => invoke<DbInstance[]>("db_instances", { serverId }),
   dbVersion: (serverId: string, instance: DbInstance) => invoke<string>("db_version", { serverId, instance }),
+  dbCreate: (serverId: string, instance: DbInstance, name: string) => invoke<void>("db_create", { serverId, instance, name }),
   dbDatabases: (serverId: string, instance: DbInstance) => invoke<DbNamed[]>("db_databases", { serverId, instance }),
   dbTables: (serverId: string, instance: DbInstance, database: string) => invoke<DbNamed[]>("db_tables", { serverId, instance, database }),
   dbQuery: (serverId: string, instance: DbInstance, database: string | null, sql: string, limit = 500) =>
