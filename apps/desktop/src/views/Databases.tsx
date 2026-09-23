@@ -7,6 +7,7 @@ import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
 import { Badge, Button, EmptyState, IconButton, Input } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 // Monaco reste hors du morceau de code de cet onglet : il ne retarde plus son ouverture.
 const SqlEditor = lazy(() => import("../components/SqlEditor"));
@@ -177,39 +178,45 @@ function Databases({ serverId }: { serverId: string }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-border px-6 py-3">
-        <div>
-          <h1 className="text-lg font-semibold">Bases de données</h1>
-          <p className="text-xs text-muted">
-            Les requêtes passent par le client du serveur (mysql, psql) via SSH. Aucun port de base n'a besoin d'être ouvert.
-          </p>
-        </div>
-        <select
-          className="ml-auto h-8 max-w-72 rounded-md border border-border bg-bg px-2 text-sm"
-          value={instanceId ?? ""}
-          onChange={(e) => setInstanceId(e.target.value)}
-        >
-          {(instances ?? []).map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.label}
-              {i.version && ` — ${i.version}`}
-            </option>
-          ))}
-        </select>
-        <select className="h-8 max-w-56 rounded-md border border-border bg-bg px-2 text-sm" value={database ?? ""} onChange={(e) => setDatabase(e.target.value)}>
-          {databases === null && <option value="">Chargement…</option>}
-          {(databases ?? []).map((d) => (
-            <option key={d.name} value={d.name}>
-              {d.name} {d.size ? `(${formatBytes(d.size)})` : ""}
-            </option>
-          ))}
-        </select>
-        <IconButton title="Actualiser" onClick={() => void loadInstances()}>
-          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-        </IconButton>
-      </header>
-
+    <PageLayout
+      title="Bases de données"
+      guide="databases"
+      scroll={false}
+      subtitle="Les requêtes passent par le client du serveur (mysql, psql) via SSH : aucun port de base n'a besoin d'être ouvert."
+      actions={
+        <>
+          <select
+            className="h-9 max-w-72 rounded-md border border-border bg-bg px-2 text-sm"
+            aria-label="Instance"
+            value={instanceId ?? ""}
+            onChange={(e) => setInstanceId(e.target.value)}
+          >
+            {(instances ?? []).map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.label}
+                {i.version && ` — ${i.version}`}
+              </option>
+            ))}
+          </select>
+          <select
+            className="h-9 max-w-56 rounded-md border border-border bg-bg px-2 text-sm"
+            aria-label="Base de données"
+            value={database ?? ""}
+            onChange={(e) => setDatabase(e.target.value)}
+          >
+            {databases === null && <option value="">Chargement…</option>}
+            {(databases ?? []).map((d) => (
+              <option key={d.name} value={d.name}>
+                {d.name} {d.size ? `(${formatBytes(d.size)})` : ""}
+              </option>
+            ))}
+          </select>
+          <IconButton title="Actualiser" onClick={() => void loadInstances()}>
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </IconButton>
+        </>
+      }
+    >
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-64 shrink-0 flex-col border-r border-border">
           <div className="border-b border-border p-2">
@@ -308,7 +315,7 @@ function Databases({ serverId }: { serverId: string }) {
           </div>
         </div>
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

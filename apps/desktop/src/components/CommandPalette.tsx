@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Box, Cable, FolderOpen, Globe, History, Layers, Monitor, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
+import { Box, Cable, CircleHelp, FolderOpen, Globe, History, Layers, Monitor, Plug, RotateCw, ScrollText, Search, Server, SquareTerminal, Star, Stethoscope, Zap } from "lucide-react";
 import { useDoctor } from "./ConnectionDoctor";
 import { focusedTerminal } from "../lib/focus";
 import { api, errorMessage, shellQuote, type DesktopView, type DockerOverview, type Snippet, type TunnelView } from "../lib/api";
 import { launchDesktop } from "./RemoteDesktops";
 import { SECTIONS } from "../sections";
+import { GUIDES } from "../lib/guides";
 import { ensureConnected, useApp } from "../lib/store";
 
 interface Action {
@@ -70,6 +71,10 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
 
   const actions = useMemo<Action[]>(() => {
     const list: Action[] = SECTIONS.map((s) => ({ id: `go:${s.id}`, label: `Aller à ${s.label}`, icon: <s.icon size={15} />, run: () => setSection(s.id) }));
+    // Les fiches d'aide sont cherchables ici : « tmux », « compose », « restic »… mènent droit au mode d'emploi.
+    for (const g of GUIDES) {
+      list.push({ id: `guide:${g.id}`, label: `Aide : ${g.title}`, hint: g.summary, icon: <CircleHelp size={15} />, run: () => useApp.getState().openGuide(g.id) });
+    }
     for (const s of servers) {
       list.push({ id: `server:${s.id}`, label: `Serveur : ${s.name}`, hint: s.host, icon: <Server size={15} />, run: () => setActiveServer(s.id) });
       list.push({ id: `term:${s.id}`, label: `Terminal sur ${s.name}`, icon: <SquareTerminal size={15} />, run: () => openTab(s.id) });

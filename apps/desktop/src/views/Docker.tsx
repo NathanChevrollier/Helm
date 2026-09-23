@@ -10,6 +10,7 @@ import {
 } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../components/DockerExtras";
 import { usePolling } from "../lib/poll";
 import { useCachedState } from "../lib/cache";
@@ -116,38 +117,32 @@ function Docker({ serverId }: { serverId: string }) {
   const running = data.containers.filter((c) => c.state === "running").length;
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-border px-6 pt-4">
-        <div className="pb-3">
-          <h1 className="text-lg font-semibold">Docker</h1>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
-            <Badge>v{data.version}</Badge>
-            <Badge tone="ok">{running} en cours</Badge>
-            <Badge>{data.containers.length - running} arrêté(s)</Badge>
-            {data.access === "sudo" && <Badge tone="warn">via sudo</Badge>}
-          </div>
-        </div>
-        <nav className="ml-auto flex self-end">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`border-b-2 px-3 pb-2.5 text-sm transition-colors ${tab === t.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"}`}
-            >
-              {t.label}
-            </button>
-          ))}
-          <IconButton title="Actualiser" className="mb-1.5 ml-2" onClick={() => void load()}>
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </IconButton>
-        </nav>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+    <PageLayout
+      title="Docker"
+      guide={tab === "compose" ? "compose" : "docker"}
+      subtitle={
+        <span className="flex items-center gap-2">
+          <Badge>v{data.version}</Badge>
+          <Badge tone="ok">{running} en cours</Badge>
+          <Badge>{data.containers.length - running} arrêté(s)</Badge>
+          {data.access === "sudo" && <Badge tone="warn">via sudo</Badge>}
+        </span>
+      }
+      tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}
+      activeTab={tab}
+      onTab={setTab}
+      actions={
+        <IconButton title="Actualiser" onClick={() => void load()}>
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+        </IconButton>
+      }
+    >
+      <div className="p-6">
         {tab === "containers" && <Containers serverId={serverId} data={data} docker={docker} reload={load} />}
         {tab === "compose" && <Compose serverId={serverId} data={data} docker={docker} reload={load} />}
         {tab === "storage" && <Storage serverId={serverId} notify={notify} />}
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

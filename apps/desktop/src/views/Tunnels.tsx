@@ -4,6 +4,7 @@ import { api, errorMessage, type TunnelDef, type TunnelView } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { usePolling } from "../lib/poll";
 import { useCachedState } from "../lib/cache";
 
@@ -27,12 +28,11 @@ export default function TunnelsView() {
   const serverName = (id: string) => servers.find((s) => s.id === id)?.name ?? "serveur supprimé";
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold">Tunnels SSH</h1>
-          <p className="text-sm text-muted">Accède depuis ton PC à un service du serveur (base de données, interface d'admin…) sans l'exposer sur Internet.</p>
-        </div>
+    <PageLayout
+      title="Tunnels SSH"
+      subtitle="Accède depuis ton PC à un service du serveur sans l'exposer sur Internet."
+      guide="tunnels"
+      actions={
         <Button
           variant="primary"
           icon={<Plus size={14} />}
@@ -44,8 +44,9 @@ export default function TunnelsView() {
         >
           Nouveau tunnel
         </Button>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+      }
+    >
+      <div className="p-6">
         {list.length === 0 ? (
           <EmptyState icon={<Cable size={40} />} title="Aucun tunnel">
             Exemple : ta base MySQL écoute sur le port 3306 du serveur. Un tunnel la rend accessible sur <span className="font-mono">127.0.0.1:13306</span> de ton PC, chiffrée par SSH, sans ouvrir de port sur Internet.
@@ -131,7 +132,7 @@ export default function TunnelsView() {
           }}
         />
       )}
-    </div>
+    </PageLayout>
   );
 }
 

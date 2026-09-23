@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Download, FolderInput, FolderPlus, IdCard, KeyRound, Link2Off, Monitor, Pencil, Plug, PlugZap, Plus, Server, Share2, SquareTerminal, Trash2, Unplug } from "lucide-react";
+import { Download, FolderInput, FolderPlus, IdCard, KeyRound, Link2Off, Pencil, Plug, PlugZap, Plus, Server, Share2, SquareTerminal, Trash2, Unplug } from "lucide-react";
 import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { forgetCached } from "../lib/cache";
 import { AUTH_LABELS, IdentitiesPanel, IdentitySuggestions, useIdentities } from "../components/Identities";
 import { DesktopsPanel } from "../components/RemoteDesktops";
@@ -89,32 +90,19 @@ export default function ServersView() {
   }, [reloadIdentities]);
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-border px-6 pt-4">
-        <div className="pb-3">
-          <h1 className="text-lg font-semibold">Serveurs</h1>
-          <p className="text-sm text-muted">Profils de connexion SSH. Les secrets sont gardés dans le coffre-fort du système.</p>
-        </div>
-        <nav className="ml-auto flex self-end">
-          {(
-            [
-              ["servers", "Serveurs", Server],
-              ["desktops", "Bureaux à distance", Monitor],
-              ["identities", "Identifiants", IdCard],
-            ] as const
-          ).map(([id, label, Icon]) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 border-b-2 px-3 pb-2.5 text-sm ${tab === id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"}`}
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          ))}
-        </nav>
-        {tab === "servers" && (
-          <div className="flex gap-2 self-center pb-3">
+    <PageLayout
+      title="Serveurs"
+      subtitle="Profils de connexion SSH. Les secrets sont gardés dans le coffre-fort du système."
+      tabs={[
+        { id: "servers", label: "Serveurs" },
+        { id: "desktops", label: "Bureaux à distance" },
+        { id: "identities", label: "Identifiants" },
+      ]}
+      activeTab={tab}
+      onTab={setTab}
+      actions={
+        tab === "servers" ? (
+          <>
             <Button
               icon={<FolderPlus size={14} />}
               onClick={async () => {
@@ -139,11 +127,11 @@ export default function ServersView() {
             <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
               Ajouter un serveur
             </Button>
-          </div>
-        )}
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+          </>
+        ) : undefined
+      }
+    >
+      <div className="p-6">
         {tab === "identities" ? (
           <IdentitiesPanel />
         ) : tab === "desktops" ? (
@@ -181,7 +169,7 @@ export default function ServersView() {
       )}
       {sharing === "send" && <ShareDialog onClose={() => setSharing(null)} />}
       {sharing === "receive" && <ReceiveShareDialog onClose={() => setSharing(null)} onDone={() => void refresh()} />}
-    </div>
+    </PageLayout>
   );
 }
 

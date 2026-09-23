@@ -5,6 +5,7 @@ import { api, errorMessage, formatBytes, formatDuration, type AuditEntry, type D
 import { ensureConnected, useAppPick } from "../lib/store";
 import { usePolling } from "../lib/poll";
 import { Button, EmptyState, IconButton } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 
@@ -149,19 +150,19 @@ export default function HomeView({ visible }: { visible: boolean }) {
   }
 
   return (
-    <div className="grid h-full grid-cols-[minmax(0,1fr)_360px]">
+    <PageLayout
+      title="Vue d'ensemble"
+      subtitle={`${servers.length} serveur${servers.length > 1 ? "s" : ""} · actualisation automatique`}
+      scroll={false}
+      actions={
+        <IconButton title="Actualiser" onClick={() => void refresh()}>
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+        </IconButton>
+      }
+    >
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
       <section className="flex min-h-0 flex-col gap-[18px] overflow-auto px-6 py-[22px]">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-xl font-semibold">Vue d'ensemble</h1>
-          <span className="text-[13px] text-muted">
-            {servers.length} serveur{servers.length > 1 ? "s" : ""} · actualisation automatique
-          </span>
-          <IconButton title="Actualiser" className="ml-auto" onClick={() => void refresh()}>
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </IconButton>
-        </div>
-
-        <div className="grid grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2.5">
           <Kpi label="Serveurs en ligne" value={online.length} total={servers.length} />
           <Kpi label="Conteneurs actifs" value={running_} />
           <Kpi label="Conteneurs arrêtés" value={stopped} tone={stopped ? "warn" : undefined} />
@@ -231,7 +232,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
           Tout le journal →
         </button>
       </aside>
-    </div>
+      </div>
+    </PageLayout>
   );
 }
 

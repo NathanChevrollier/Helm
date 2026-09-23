@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Archive, ArchiveRestore, AlertTriangle, BellOff, CheckCircle2, Info, OctagonAlert, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
 import { api, errorMessage, type Finding, type FixPlan, type IgnoredFinding, type SecurityReport, type Severity } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
-import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import Fail2ban from "./security/Fail2ban";
 import Firewall from "./security/Firewall";
 import Access from "./security/Access";
@@ -105,38 +106,31 @@ function Security({ serverId }: { serverId: string }) {
   const ok = report?.findings.filter((f) => f.severity === "ok") ?? [];
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-border px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold">Sécurité de {server?.name}</h1>
-          <p className="text-sm text-muted">{report ? `${report.os} · SSH sur le port ${report.sshPorts.join(", ") || "?"}` : "Audit en lecture seule : rien n'est modifié sans ton accord."}</p>
-        </div>
-        <nav className="ml-auto flex items-center gap-1">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`rounded-md px-3 py-1.5 text-sm ${tab === t.id ? "bg-accent/15 text-fg" : "text-muted hover:text-fg"}`}
-            >
-              {t.label}
-            </button>
-          ))}
-          {tab === "audit" && (
-            <IconButton title="Relancer l'audit" onClick={() => void load()}>
-              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-            </IconButton>
-          )}
-        </nav>
-      </header>
+    <PageLayout
+      context={server?.name}
+      title="Sécurité"
+      subtitle={report ? `${report.os} · SSH sur le port ${report.sshPorts.join(", ") || "?"}` : "Audit en lecture seule : rien n'est modifié sans ton accord."}
+      guide="security"
+      tabs={TABS.map((t) => ({ id: t.id, label: t.label, count: t.id === "audit" ? problems.length : undefined }))}
+      activeTab={tab}
+      onTab={setTab}
+      actions={
+        tab === "audit" ? (
+          <IconButton title="Relancer l'audit" onClick={() => void load()}>
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </IconButton>
+        ) : undefined
+      }
+    >
       {tab !== "audit" && (
-        <div className="min-h-0 flex-1 overflow-auto p-6">
+        <div className="p-6">
           {tab === "f2b" && <Fail2ban serverId={serverId} />}
           {tab === "firewall" && <Firewall serverId={serverId} />}
           {tab === "access" && <Access serverId={serverId} />}
         </div>
       )}
-      <div className={`min-h-0 flex-1 overflow-auto p-6 ${tab === "audit" ? "" : "hidden"}`}>
-        {error && <div className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+      <div className={`p-6 ${tab === "audit" ? "" : "hidden"}`}>
+        {error && <div className="mb-4"><ErrorState message={error} onRetry={() => void load()} retryLabel="Relancer l'audit" /></div>}
         {!report && !error && <EmptyState icon={<ShieldCheck size={36} className="animate-pulse" />} title="Audit en cours…" />}
         {report && (
           <div className="flex flex-col gap-3">
@@ -229,7 +223,7 @@ function Security({ serverId }: { serverId: string }) {
           }}
         />
       )}
-    </div>
+    </PageLayout>
   );
 }
 

@@ -1,6 +1,7 @@
 import {
   Activity,
   Cable,
+  CircleHelp,
   Container,
   Database,
   DatabaseBackup,
@@ -28,6 +29,7 @@ export type SectionId =
   | "tunnels"
   | "backups"
   | "security"
+  | "help"
   | "settings";
 
 export interface Section {
@@ -52,5 +54,6 @@ export const SECTIONS: Section[] = [
   { id: "tunnels", label: "Tunnels", icon: Cable, description: "Accès local à des services du serveur, sans les exposer sur Internet." },
   { id: "backups", label: "Sauvegardes", icon: DatabaseBackup, perServer: true, description: "Sauvegardes planifiées et chiffrées (restic), restauration." },
   { id: "security", label: "Sécurité", icon: ShieldCheck, perServer: true, description: "Audit du serveur et corrections guidées." },
+  { id: "help", label: "Aide", icon: CircleHelp, description: "Comment marche chaque fonctionnalité et ce qu'elle demande sur le serveur." },
   { id: "settings", label: "Réglages", icon: Settings, description: "Journal d'actions, accès IA (MCP) et préférences." },
 ];

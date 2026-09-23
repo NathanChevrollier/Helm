@@ -10,6 +10,7 @@ import {
 } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 
@@ -155,35 +156,35 @@ function Sites({ serverId }: { serverId: string }) {
   const other: WebEngine | null = engine === "nginx" ? (state.others.includes("Apache") ? "apache" : null) : "nginx";
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-border px-6 py-4">
-        <div>
-          <h1 className="flex items-center gap-3 text-lg font-semibold">
-            Sites
-            {other && (
-              <span className="flex gap-1 rounded-md border border-border bg-bg p-0.5 text-xs font-normal">
-                {(["nginx", "apache"] as const).map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => setEngine(e)}
-                    className={`rounded px-2 py-0.5 ${engine === e ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
-                  >
-                    {ENGINE_LABELS[e]}
-                  </button>
-                ))}
-              </span>
-            )}
-          </h1>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
-            <Badge>{state.version}</Badge>
-            {state.running ? <Badge tone="ok">{web} actif</Badge> : <Badge tone="danger">{web} arrêté</Badge>}
-            <Badge>{sites.length} site(s) actif(s)</Badge>
-            {state.others.filter((o) => o !== "Apache" && o !== "nginx").length > 0 && (
-              <Badge tone="warn">aussi détecté : {state.others.filter((o) => o !== "Apache" && o !== "nginx").join(", ")}</Badge>
-            )}
-          </div>
-        </div>
-        <div className="ml-auto flex gap-2">
+    <PageLayout
+      title="Sites"
+      guide="sites"
+      subtitle={
+        <span className="flex flex-wrap items-center gap-2">
+          {other && (
+            <span className="flex gap-1 rounded-md border border-border bg-bg p-0.5">
+              {(["nginx", "apache"] as const).map((e) => (
+                <button
+                  key={e}
+                  onClick={() => setEngine(e)}
+                  aria-pressed={engine === e}
+                  className={`rounded px-2 py-0.5 ${engine === e ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
+                >
+                  {ENGINE_LABELS[e]}
+                </button>
+              ))}
+            </span>
+          )}
+          <Badge>{state.version}</Badge>
+          {state.running ? <Badge tone="ok">{web} actif</Badge> : <Badge tone="danger">{web} arrêté</Badge>}
+          <Badge>{sites.length} site(s) actif(s)</Badge>
+          {state.others.filter((o) => o !== "Apache" && o !== "nginx").length > 0 && (
+            <Badge tone="warn">aussi détecté : {state.others.filter((o) => o !== "Apache" && o !== "nginx").join(", ")}</Badge>
+          )}
+        </span>
+      }
+      actions={
+        <>
           <Button
             size="sm"
             icon={<ShieldCheck size={13} />}
@@ -231,10 +232,10 @@ function Sites({ serverId }: { serverId: string }) {
           <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setWizard(true)}>
             Nouveau site
           </Button>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+        </>
+      }
+    >
+      <div className="p-6">
         <div className="grid grid-cols-[repeat(auto-fill,minmax(440px,1fr))] gap-4">
           {sites.map((site) => {
             const httpsBlock = site.blocks.find((b) => b.ssl);
@@ -434,7 +435,7 @@ function Sites({ serverId }: { serverId: string }) {
           <pre className={`max-h-[60vh] overflow-auto rounded-md bg-bg p-3 font-mono text-xs whitespace-pre-wrap select-text ${output.ok ? "" : "text-danger"}`}>{output.text}</pre>
         </Modal>
       )}
-    </div>
+    </PageLayout>
   );
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, TriangleAlert, X } from "lucide-react";
 import { useApp } from "../lib/store";
 
 type Variant = "primary" | "ghost" | "danger" | "outline";
@@ -10,6 +10,12 @@ const VARIANTS: Record<Variant, string> = {
   danger: "bg-danger/15 text-danger hover:bg-danger/25",
   outline: "border border-border text-fg hover:bg-hover",
 };
+
+/**
+ * Anneau de focus commun à tous les contrôles : l'app se pilote au clavier (palette, raccourcis),
+ * il faut donc toujours voir où l'on est. `focus-visible` n'apparaît pas au clic à la souris.
+ */
+export const FOCUS_RING = "outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg";
 
 export function Button({
   variant = "outline",
@@ -25,12 +31,12 @@ export function Button({
   loading?: boolean;
   icon?: ReactNode;
 }) {
-  const sizing = size === "sm" ? "h-7 px-2 text-xs gap-1.5" : "h-8 px-3 text-sm gap-2";
+  const sizing = size === "sm" ? "h-8 px-2.5 text-xs gap-1.5" : "h-9 px-3.5 text-sm gap-2";
   return (
     <button
       {...rest}
       disabled={rest.disabled || loading}
-      className={`inline-flex shrink-0 items-center justify-center rounded-md font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${sizing} ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${FOCUS_RING} ${sizing} ${VARIANTS[variant]} ${className}`}
     >
       {loading ? <Loader2 size={14} className="animate-spin" /> : icon}
       {children}
@@ -38,13 +44,14 @@ export function Button({
   );
 }
 
+/** Bouton d'icône. 32 px au minimum : en dessous, la cible est trop petite pour un clic sûr. */
 export function IconButton({ title, children, className = "", ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       {...rest}
       title={title}
       aria-label={title}
-      className={`inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover-strong hover:text-fg disabled:opacity-40 ${className}`}
+      className={`inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover-strong hover:text-fg disabled:opacity-40 ${FOCUS_RING} ${className}`}
     >
       {children}
     </button>
@@ -55,7 +62,7 @@ export function Input(props: ComponentProps<"input">) {
   return (
     <input
       {...props}
-      className={`h-8 w-full rounded-md border border-border bg-bg px-2.5 text-sm text-fg outline-none placeholder:text-muted/60 focus:border-accent ${props.className ?? ""}`}
+      className={`h-9 w-full rounded-md border border-border bg-bg px-2.5 text-sm text-fg outline-none placeholder:text-muted focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/50 ${props.className ?? ""}`}
     />
   );
 }
@@ -189,6 +196,50 @@ export function EmptyState({ icon, title, children }: { icon: ReactNode; title: 
       <div className="text-accent">{icon}</div>
       <h2 className="text-base font-semibold">{title}</h2>
       {children && <div className="max-w-md text-sm text-muted">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * Squelette de chargement : il prend la forme de ce qui va s'afficher, pour que la page ne saute
+ * pas quand les données arrivent. À n'afficher que si l'attente dépasse un instant perceptible
+ * (voir `useDelayed`), sinon il ne fait que clignoter.
+ */
+export function Skeleton({ rows = 3, className = "" }: { rows?: number; className?: string }) {
+  return (
+    <div className={`flex flex-col gap-2 ${className}`} aria-hidden>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="h-9 animate-pulse rounded-md bg-hover" style={{ opacity: 1 - i * 0.12 }} />
+      ))}
+    </div>
+  );
+}
+
+/** Vrai seulement si la condition dure : évite de faire clignoter un squelette sur 80 ms. */
+export function useDelayed(active: boolean, delay = 150): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!active) return setShown(false);
+    const t = setTimeout(() => setShown(true), delay);
+    return () => clearTimeout(t);
+  }, [active, delay]);
+  return shown;
+}
+
+/**
+ * Erreur qui empêche la vue de fonctionner : elle reste affichée (contrairement à une notification)
+ * et porte l'action qui répare, parce qu'un message seul laisse l'utilisateur sans issue.
+ */
+export function ErrorState({ message, onRetry, retryLabel = "Réessayer" }: { message: string; onRetry?: () => void; retryLabel?: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2.5 text-sm text-danger">
+      <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+      <p className="min-w-0 flex-1 break-words select-text">{message}</p>
+      {onRetry && (
+        <Button size="sm" variant="outline" className="shrink-0" onClick={onRetry}>
+          {retryLabel}
+        </Button>
+      )}
     </div>
   );
 }

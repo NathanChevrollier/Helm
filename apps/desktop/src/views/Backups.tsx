@@ -5,6 +5,7 @@ import { api, errorMessage, formatBytes, type BackupConfig, type BackupOverview,
 import { track } from "../lib/transfers";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 
@@ -44,13 +45,12 @@ function Backups({ serverId }: { serverId: string }) {
   const last = status.last;
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold">Sauvegardes</h1>
-          <p className="text-sm text-muted">Chiffrées et dédupliquées avec restic, planifiées chaque jour. Bases de données exportées sans arrêt du service.</p>
-        </div>
-        <div className="flex gap-2">
+    <PageLayout
+      title="Sauvegardes"
+      subtitle="Chiffrées et dédupliquées avec restic, planifiées chaque jour. Bases exportées sans arrêt du service."
+      guide="backups"
+      actions={
+        <>
           {configured && (
             <>
               <Button size="sm" icon={<ShieldCheck size={13} />} onClick={async () => setCheckOut(await api.backupCheck(serverId).catch(errorMessage))}>
@@ -68,9 +68,10 @@ function Backups({ serverId }: { serverId: string }) {
           <Button size="sm" variant="primary" onClick={() => setEditing(true)}>
             {configured ? "Modifier la configuration" : "Configurer les sauvegardes"}
           </Button>
-        </div>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+        </>
+      }
+    >
+      <div className="p-6">
         {!configured ? (
           <EmptyState icon={<DatabaseBackup size={40} />} title="Aucune sauvegarde configurée">
             Détecté sur ce serveur : {data.databases.length} base(s) de données et {data.volumes.length} volume(s) Docker. Configure une sauvegarde quotidienne en quelques clics.
@@ -127,7 +128,7 @@ function Backups({ serverId }: { serverId: string }) {
           <pre className="max-h-[60vh] overflow-auto rounded-md bg-bg p-3 font-mono text-xs whitespace-pre-wrap select-text">{checkOut}</pre>
         </Modal>
       )}
-    </div>
+    </PageLayout>
   );
 }
 

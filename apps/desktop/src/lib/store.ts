@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { api, errorMessage, type ServerView } from "./api";
 import type { SectionId } from "../sections";
+import type { GuideId } from "./guides";
 import type { ThemeSetting } from "./theme";
 
 export interface DialogRequest {
@@ -112,6 +113,10 @@ interface State {
   section: SectionId;
   setSection: (s: SectionId) => void;
 
+  /** Fiche d'aide à ouvrir dans la section Aide (« ? » d'une page, palette de commandes). */
+  guide: GuideId | null;
+  openGuide: (id: GuideId | null) => void;
+
   servers: ServerView[];
   refreshServers: () => Promise<void>;
   activeServerId: string | null;
@@ -201,6 +206,10 @@ export const useApp = create<State>((set, get) => ({
 
   section: "home",
   setSection: (section) => set({ section }),
+
+  guide: null,
+  // Ouvrir une fiche amène toujours sur la section Aide : sinon le « ? » d'une page ne ferait rien.
+  openGuide: (guide) => set(guide ? { guide, section: "help" } : { guide: null }),
 
   servers: [],
   refreshServers: async () => {
