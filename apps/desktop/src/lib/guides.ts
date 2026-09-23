@@ -438,13 +438,49 @@ export const GUIDES: Guide[] = [
     title: "Bureau à distance (RDP)",
     topic: "securite",
     section: "servers",
-    summary: "Ouvrir une session graphique sur une machine Windows, ou sur un Linux équipé d'un serveur RDP, depuis la fiche du serveur.",
-    requirements: ["un client RDP sur ton PC (mstsc sous Windows, xfreerdp sous Linux)", "un serveur RDP sur la machine cible"],
-    steps: [
-      { text: "Installer xrdp sur un Linux", command: "apt-get install -y xrdp && systemctl enable --now xrdp", sudo: true },
-      { text: "Vérifier qu'il écoute", command: "ss -lntp | grep 3389", sudo: true },
+    summary: "Ouvrir la session graphique d'une machine Windows — ou d'un Linux équipé d'un serveur RDP — dans un onglet de Helm, sans client externe.",
+    how: [
+      "La session s'affiche dans Helm : le client RDP est intégré à l'app, rien n'est installé sur la machine distante.",
+      "La connexion part toujours de ton PC. Si la machine n'est joignable que depuis un de tes serveurs, Helm monte un tunnel SSH le temps de la session : le port 3389 n'est jamais exposé sur Internet.",
+      "La barre de session donne Ctrl+Alt+Suppr, le collage vers la machine, la taille d'affichage (ajustée ou réelle), le plein écran (Échap pour sortir) et la déconnexion.",
+      "Le presse-papiers suit dans les deux sens, et la machine s'adapte à la taille de la fenêtre.",
+      "Le clavier part en mode « caractères », qui convient à un clavier français face à une machine en disposition différente ; le bouton clavier bascule en touches brutes si un logiciel distant l'exige.",
+      "Le client du système (mstsc, FreeRDP) reste disponible sur la fiche, à côté de « Se connecter ».",
     ],
-    notes: ["Ne pas exposer 3389 sur Internet : passer par un tunnel Helm et se connecter sur 127.0.0.1."],
+    requirements: [
+      "le Bureau à distance activé sur la machine cible",
+      "un compte autorisé à ouvrir une session à distance",
+      "un mot de passe enregistré dans Helm (le client intégré ne peut pas demander à l'écran de connexion distant)",
+    ],
+    steps: [
+      { text: "Activer le Bureau à distance sur Windows (PowerShell, en administrateur)", command: "Set-ItemProperty 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name fDenyTSConnections -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'" },
+      { text: "Autoriser un compte qui n'est pas administrateur", command: "net localgroup \"Utilisateurs du Bureau à distance\" <compte> /add" },
+      { text: "Sur un Linux, installer un serveur RDP", command: "apt-get install -y xrdp && systemctl enable --now xrdp", sudo: true },
+      { text: "Vérifier que le port écoute sur la machine", command: "ss -lntp | grep 3389", sudo: true },
+    ],
+    troubleshooting: [
+      {
+        symptom: "« Connexion impossible » immédiate",
+        answer: "Rien n'écoute sur le port, ou le pare-feu bloque. Depuis le serveur qui sert de relais (ou depuis ton PC en direct) :",
+        command: "nc -vz <machine> 3389",
+      },
+      {
+        symptom: "La connexion s'ouvre puis se referme aussitôt",
+        answer: "Le plus souvent, les identifiants sont refusés (compte, domaine, ou mot de passe périmé). Le domaine se renseigne dans la fiche du bureau à distance ; sans domaine, un compte Microsoft s'écrit « MicrosoftAccount\\adresse ».",
+      },
+      {
+        symptom: "Écran noir après la connexion",
+        answer: "Une session est déjà ouverte sur la machine avec le même compte, ou la stratégie limite les sessions simultanées. Fermer la session locale, ou se connecter avec un autre compte.",
+      },
+      {
+        symptom: "Le clavier tape les mauvais caractères",
+        answer: "Basculer le bouton clavier de la barre : « caractères » suit ta disposition, « touches brutes » suit celle de la machine distante.",
+      },
+    ],
+    notes: [
+      "N'expose jamais le port 3389 sur Internet : passe par un tunnel (choisis un serveur dans la fiche du bureau).",
+      "Le mot de passe reste dans le coffre-fort du système et ne sert qu'à la session en cours.",
+    ],
   },
 
   // ---------------------------------------------------------------- partage et réglages
