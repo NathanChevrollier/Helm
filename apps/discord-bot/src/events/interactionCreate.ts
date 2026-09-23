@@ -75,11 +75,11 @@ async function setupFeedback(interaction: ChatInputCommandInteraction, env: Env)
     await interaction.reply({ content: "Cette commande doit être utilisée dans un serveur Discord.", ephemeral: true });
     return;
   }
-  const suggestionChannel = findTextChannel(guild.channels.cache, env.SUGGESTION_CHANNEL_NAME);
-  const bugChannel = findTextChannel(guild.channels.cache, env.BUG_CHANNEL_NAME);
+  const suggestionChannel = findTextChannel(guild.channels.cache.get(env.SUGGESTION_CHANNEL_ID));
+  const bugChannel = findTextChannel(guild.channels.cache.get(env.BUG_CHANNEL_ID));
   const missing = [
-    suggestionChannel ? undefined : `#${env.SUGGESTION_CHANNEL_NAME}`,
-    bugChannel ? undefined : `#${env.BUG_CHANNEL_NAME}`,
+    suggestionChannel ? undefined : `ID ${env.SUGGESTION_CHANNEL_ID}`,
+    bugChannel ? undefined : `ID ${env.BUG_CHANNEL_ID}`,
   ].filter((name): name is string => name !== undefined);
 
   if (missing.length > 0 || !suggestionChannel || !bugChannel) {
@@ -184,11 +184,8 @@ function buildButtonRow(kind: FeedbackKind): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(button);
 }
 
-function findTextChannel(channels: Iterable<unknown>, name: string): TextChannel | undefined {
-  for (const channel of channels) {
-    if (isTextChannel(channel) && channel.name === name) return channel;
-  }
-  return undefined;
+function findTextChannel(channel: unknown): TextChannel | undefined {
+  return isTextChannel(channel) ? channel : undefined;
 }
 
 function isTextChannel(channel: unknown): channel is TextChannel {

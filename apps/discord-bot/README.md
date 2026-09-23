@@ -4,7 +4,7 @@ Bot Discord autonome pour centraliser les suggestions et signalements de bugs de
 
 ## Fonctionnalités
 
-- `/setup-feedback` publie deux panneaux interactifs dans `💡・suggestions` et `🐛・signalement-bugs`.
+- `/setup-feedback` publie deux panneaux interactifs dans les salons configurés par ID.
 - Les boutons et `/bug` / `/suggestion` ouvrent des modales Discord natives.
 - Chaque retour crée une issue GitHub avec le label `bug` ou `enhancement`, le lien vers l'auteur Discord et son avatar.
 - `/helm status` affiche le ping, l'uptime et la dernière release GitHub de Helm.
@@ -41,8 +41,8 @@ Une fois connecté, exécuter `/setup-feedback` avec un membre qui dispose de `M
 | `GITHUB_TOKEN`            | Fine-grained token GitHub limité aux issues du dépôt.  |
 | `GITHUB_OWNER`            | Propriétaire du dépôt, par défaut `NathanChevrollier`. |
 | `GITHUB_REPO`             | Nom du dépôt, par défaut `Helm`.                       |
-| `SUGGESTION_CHANNEL_NAME` | Nom exact du salon de suggestions.                     |
-| `BUG_CHANNEL_NAME`        | Nom exact du salon de bugs.                            |
+| `SUGGESTION_CHANNEL_ID`   | ID Discord du salon de suggestions.                    |
+| `BUG_CHANNEL_ID`          | ID Discord du salon de bugs.                           |
 | `GITHUB_BUG_LABEL`        | Label appliqué aux bugs.                               |
 | `GITHUB_SUGGESTION_LABEL` | Label appliqué aux suggestions.                        |
 
