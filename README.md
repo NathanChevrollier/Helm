@@ -70,7 +70,7 @@ du système (Windows Credential Manager, Trousseau macOS, Secret Service sous Li
 | Section | Ce qu'elle fait |
 |---|---|
 | **Accueil** | Santé de tous les serveurs d'un coup d'œil : CPU, mémoire, disque, alertes, conteneurs arrêtés, certificats proches de l'expiration. |
-| **Serveurs** | Profils SSH, dossiers de rangement, banque d'identifiants réutilisables, serveurs de rebond, import PuTTY et `ssh_config`, vérification de la clé d'hôte, bureau à distance (RDP). |
+| **Serveurs** | Profils SSH, dossiers de rangement, banque d'identifiants réutilisables, serveurs de rebond, import PuTTY et `ssh_config`, vérification de la clé d'hôte, **bureau à distance (RDP) ouvert dans l'app** : client intégré, sans fenêtre externe, à travers un tunnel SSH quand la machine n'est joignable que depuis un serveur. |
 | **Terminal** | Sessions **tmux persistantes** qui survivent aux coupures et à la fermeture de l'app. Onglets, division horizontale ou verticale réglable, panneau de fichiers qui suit le dossier courant, dépôt de fichiers Windows directement dans le dossier courant, **diffusion de la saisie** à plusieurs serveurs avec confirmation des commandes sensibles, snippets, enregistrement de session (asciicast). |
 | **Fichiers** | Explorateur SFTP, **double panneau** pour copier d'un serveur à l'autre, glisser-déposer, transferts annulables, édition distante dans Monaco, repli sudo. |
 | **Supervision** | CPU, mémoire, disques, réseau, processus, services systemd. Avec l'agent `helmd` : 30 jours d'historique et alertes (seuils, sites injoignables, sauvegardes en échec) vers Discord, ntfy ou webhook, même PC éteint. |

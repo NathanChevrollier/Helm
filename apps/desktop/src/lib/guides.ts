@@ -450,7 +450,7 @@ export const GUIDES: Guide[] = [
     requirements: [
       "le Bureau à distance activé sur la machine cible",
       "un compte autorisé à ouvrir une session à distance",
-      "un mot de passe enregistré dans Helm (le client intégré ne peut pas demander à l'écran de connexion distant)",
+      "un mot de passe enregistré dans la fiche du bureau : le client intégré ouvre la session sans écran de connexion, il ne peut donc rien demander en route. Sans mot de passe, « Se connecter » reste grisé et seul le client du système fonctionne.",
     ],
     steps: [
       { text: "Activer le Bureau à distance sur Windows (PowerShell, en administrateur)", command: "Set-ItemProperty 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name fDenyTSConnections -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'" },
@@ -480,6 +480,8 @@ export const GUIDES: Guide[] = [
     notes: [
       "N'expose jamais le port 3389 sur Internet : passe par un tunnel (choisis un serveur dans la fiche du bureau).",
       "Le mot de passe reste dans le coffre-fort du système et ne sert qu'à la session en cours.",
+      "Le client intégré est récent : en cas de doute sur un comportement, « Client du système » ouvre la même machine avec mstsc ou FreeRDP et permet de comparer. Signale la différence, avec le message d'erreur affiché.",
+      "Une seule session à la fois : ouvrir un autre bureau ferme la précédente, avec son tunnel.",
     ],
   },
 
