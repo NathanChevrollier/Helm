@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Download, Pause, Play, ScrollText, Square, Trash2 } from "lucide-react";
+import { Download, Pause, Play, ScrollText, Search, Square, Trash2, X } from "lucide-react";
 import { api, errorMessage, type LogSource } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 const MAX_LINES = 20_000;
 const SHOWN = 2_000;
@@ -27,6 +28,7 @@ export default function LogsView() {
 
 function Logs({ serverId }: { serverId: string }) {
   const notify = useApp((s) => s.notify);
+  const serverName = useApp((s) => s.servers.find((x) => x.id === serverId)?.name);
   const [available, setAvailable] = useState<{ containers: string[]; units: string[]; files: string[] } | null>(null);
   const [chosen, setChosen] = useState<LogSource[]>([]);
   const [streamId, setStreamId] = useState<number | null>(null);
@@ -34,6 +36,8 @@ function Logs({ serverId }: { serverId: string }) {
   const [ended, setEnded] = useState<Record<number, string | null>>({});
   const [paused, setPaused] = useState(false);
   const [filter, setFilter] = useState("");
+  /** Recherche dans la liste des sources (colonne de gauche). */
+  const [sourceQuery, setSourceQuery] = useState("");
   const [level, setLevel] = useState<"all" | "warn" | "error">("all");
   const [follow, setFollow] = useState(true);
   const buffer = useRef<Line[]>([]);
@@ -120,6 +124,12 @@ function Logs({ serverId }: { serverId: string }) {
 
   const label = (s: LogSource) => (s.kind === "file" ? s.name.replace("/var/log/", "") : s.kind === "unit" ? s.name.replace(/\.service$/, "") : s.name);
 
+  /** Sources correspondant à la recherche ; celles déjà cochées restent visibles. */
+  const filtrer = (names: string[]) => {
+    const q = sourceQuery.trim().toLowerCase();
+    return q ? names.filter((n) => n.toLowerCase().includes(q) || chosen.some((c) => c.name === n)) : names;
+  };
+
   const exportLogs = async () => {
     const path = await save({ title: "Exporter les journaux", defaultPath: `journaux-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.log` });
     if (!path) return;
@@ -149,20 +159,45 @@ function Logs({ serverId }: { serverId: string }) {
     ) : null;
 
   return (
-    <div className="flex h-full">
+    <PageLayout
+      context={serverName}
+      title="Journaux"
+      subtitle="Conteneurs, services et fichiers suivis en direct, fusionnés par horodatage."
+      guide="logs"
+      scroll={false}
+    >
+    <div className="flex min-h-0 w-full">
       <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-panel">
-        <div className="border-b border-border px-3 py-3">
-          <h1 className="font-semibold">Journaux</h1>
-          <p className="text-xs text-muted">Coche les sources à suivre en direct (12 au plus).</p>
+        <div className="border-b border-border px-3 py-2.5">
+          <p className="mb-2 text-xs text-muted">Coche les sources à suivre en direct (12 au plus).</p>
+          {/* Un serveur bien rempli propose des dizaines de services : la recherche évite de
+              parcourir toute la liste pour trouver « nginx » ou « postgres ». */}
+          <div className="flex items-center gap-1.5 rounded-md border border-border bg-bg px-2">
+            <Search size={13} className="shrink-0 text-muted" />
+            <Input
+              className="h-8 border-0 bg-transparent px-0 text-xs focus:border-0 focus-visible:ring-0"
+              placeholder="Chercher une source…"
+              value={sourceQuery}
+              onChange={(e) => setSourceQuery(e.target.value)}
+            />
+            {sourceQuery && (
+              <button className="text-muted hover:text-fg" aria-label="Effacer la recherche" onClick={() => setSourceQuery("")}>
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
           {!available ? (
             <p className="text-xs text-muted">Recherche des sources…</p>
           ) : (
             <>
-              <Group title="Conteneurs" kind="docker" names={available.containers} />
-              <Group title="Services" kind="unit" names={available.units} />
-              <Group title="Fichiers" kind="file" names={available.files} />
+              <Group title="Conteneurs" kind="docker" names={filtrer(available.containers)} />
+              <Group title="Services" kind="unit" names={filtrer(available.units)} />
+              <Group title="Fichiers" kind="file" names={filtrer(available.files)} />
+              {[available.containers, available.units, available.files].every((l) => filtrer(l).length === 0) && (
+                <p className="text-xs text-muted">Aucune source ne correspond à « {sourceQuery} ».</p>
+              )}
             </>
           )}
         </div>
@@ -233,5 +268,6 @@ function Logs({ serverId }: { serverId: string }) {
         </div>
       </div>
     </div>
+    </PageLayout>
   );
 }

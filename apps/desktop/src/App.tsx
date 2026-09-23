@@ -131,8 +131,10 @@ export default function App() {
   return (
     <div className="flex h-full">
       {/* Colonne de navigation : dépliée, les libellés sont écrits ; repliée, ils passent en infobulle. */}
+      {/* « group/rail » : le bouton de repli ne se montre qu'au survol de la colonne, pour ne pas
+          encombrer un réglage qu'on utilise une fois. */}
       <nav
-        className={`flex shrink-0 flex-col gap-1 border-r border-border bg-rail py-3 transition-[width] ${railOpen ? "w-52 px-2" : "w-[60px] items-center"}`}
+        className={`group/rail flex shrink-0 flex-col gap-1 border-r border-border bg-rail py-3 transition-[width] ${railOpen ? "w-52 px-2" : "w-[60px] items-center"}`}
         aria-label="Navigation principale"
       >
         <div className={`mb-3 flex items-center ${railOpen ? "gap-2 px-1" : ""}`}>
@@ -150,7 +152,7 @@ export default function App() {
             title={railOpen ? "Replier la colonne" : "Déplier la colonne"}
             aria-label={railOpen ? "Replier la colonne" : "Déplier la colonne"}
             aria-expanded={railOpen}
-            className={`flex size-8 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-fg ${FOCUS_RING} ${railOpen ? "ml-auto" : "hidden"}`}
+            className={`flex size-8 items-center justify-center rounded-md text-muted opacity-0 transition-opacity group-hover/rail:opacity-100 focus-visible:opacity-100 hover:bg-hover hover:text-fg ${FOCUS_RING} ${railOpen ? "ml-auto" : "hidden"}`}
           >
             <PanelLeftClose size={16} />
           </button>
@@ -160,7 +162,9 @@ export default function App() {
         ))}
         <div className="flex-1" />
         {!railOpen && (
-          <RailButton label="Déplier la colonne" icon={PanelLeftOpen} expanded={false} active={false} onClick={() => setRailOpen(true)} />
+          <div className="opacity-0 transition-opacity group-hover/rail:opacity-100 focus-within:opacity-100">
+            <RailButton label="Déplier la colonne" icon={PanelLeftOpen} expanded={false} active={false} onClick={() => setRailOpen(true)} />
+          </div>
         )}
         {lockConfigured && (
           <RailButton

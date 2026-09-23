@@ -6,7 +6,7 @@ import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
-import { Badge, Button, EmptyState, IconButton, Input } from "../components/ui";
+import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
 import PageLayout from "../components/PageLayout";
 
 // Monaco reste hors du morceau de code de cet onglet : il ne retarde plus son ouverture.
@@ -49,6 +49,8 @@ function Databases({ serverId }: { serverId: string }) {
   // l'objet, ce qui relançait cet effet en boucle et faisait clignoter la page.
   const [versions, setVersions] = useState<Record<string, string>>({});
   const instanceKey = instance?.id ?? null;
+  /** Ligne ouverte en lecture complète. */
+  const [rowDetail, setRowDetail] = useState<{ columns: string[]; values: (string | null)[] } | null>(null);
   /** Incrémenté pour relire bases et tables après une création. */
   const [refreshKey, setRefreshKey] = useState(0);
   useEffect(() => {
@@ -287,6 +289,7 @@ function Databases({ serverId }: { serverId: string }) {
                 value={sql}
                 onChange={setSql}
                 theme={monacoTheme}
+                tables={(tables ?? []).map((t) => t.name)}
                 onMount={(editor, monaco) => {
                   // Ctrl+Entrée exécute, comme dans les clients SQL habituels.
                   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void run(editor.getValue()));
@@ -305,7 +308,7 @@ function Databases({ serverId }: { serverId: string }) {
                 </option>
               ))}
             </select>
-            {!isReadOnly(sql) && (
+            {sql.trim().length > 0 && !isReadOnly(sql) && (
               <Badge tone="warn">
                 <TriangleAlert size={11} className="mr-1" /> requête qui modifie
               </Badge>
@@ -321,10 +324,12 @@ function Databases({ serverId }: { serverId: string }) {
               </Button>
             )}
           </div>
+          {/* Le tableau garde ses colonnes à leur largeur naturelle et défile horizontalement ;
+              un clic ouvre la ligne entière, seule façon de lire une valeur longue. */}
           <div className="min-h-0 flex-1 overflow-auto">
             {error && <pre className="m-3 rounded-md border border-danger/40 bg-danger/10 p-3 font-mono text-xs whitespace-pre-wrap text-danger select-text">{error}</pre>}
             {result && result.columns.length > 0 && (
-              <table className="w-full text-xs">
+              <table className="min-w-full text-xs">
                 <thead className="sticky top-0 bg-panel text-left text-muted">
                   <tr>
                     {result.columns.map((c, i) => (
@@ -336,9 +341,14 @@ function Databases({ serverId }: { serverId: string }) {
                 </thead>
                 <tbody>
                   {result.rows.map((row, i) => (
-                    <tr key={i} className="border-b border-border/40 hover:bg-hover-soft">
+                    <tr
+                      key={i}
+                      className="cursor-pointer border-b border-border/40 hover:bg-hover-soft"
+                      onClick={() => setRowDetail({ columns: result.columns, values: row })}
+                      title="Cliquer pour lire la ligne entière"
+                    >
                       {row.map((v, j) => (
-                        <td key={j} className="max-w-96 truncate px-3 py-1 font-mono select-text" title={v ?? "NULL"}>
+                        <td key={j} className="max-w-80 truncate px-3 py-1 font-mono select-text">
                           {v === null ? <span className="text-muted italic">NULL</span> : v}
                         </td>
                       ))}
@@ -351,6 +361,21 @@ function Databases({ serverId }: { serverId: string }) {
           </div>
         </div>
       </div>
+
+      {rowDetail && (
+        <Modal title="Ligne complète" width="max-w-4xl" onClose={() => setRowDetail(null)}>
+          <dl className="flex flex-col divide-y divide-border">
+            {rowDetail.columns.map((c, i) => (
+              <div key={i} className="grid grid-cols-[minmax(120px,200px)_minmax(0,1fr)] gap-4 py-2">
+                <dt className="font-mono text-xs text-muted">{c}</dt>
+                <dd className="font-mono text-xs break-all whitespace-pre-wrap select-text">
+                  {rowDetail.values[i] === null ? <span className="text-muted italic">NULL</span> : rowDetail.values[i]}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Modal>
+      )}
     </PageLayout>
   );
 }

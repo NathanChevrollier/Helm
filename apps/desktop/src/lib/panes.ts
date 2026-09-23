@@ -39,6 +39,11 @@ export const usePanes = create<PanesState>((set) => ({
   setActive: (active) => set({ active }),
 }));
 
+// Accès au magasin depuis la console de développement, pour diagnostiquer le suivi de dossier.
+if (import.meta.env.DEV) {
+  (window as unknown as { __helmPanes?: typeof usePanes }).__helmPanes = usePanes;
+}
+
 /**
  * Dossier courant d'un panneau, demandé au serveur (tmux ou /proc du shell) pour qu'il suive les
  * `cd`. Le dossier annoncé par le shell (OSC 7) ne sert que si la question échoue, car il date du

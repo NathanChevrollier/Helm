@@ -12,6 +12,7 @@ import TransfersBar from "../components/TransfersBar";
 import { useAutoRefresh } from "../lib/refresh";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 
@@ -85,24 +86,32 @@ export default function FilesView() {
   const right = rightServer && servers.some((s) => s.id === rightServer) ? rightServer : activeServerId;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
-          <Explorer key={`l-${activeServerId}`} serverId={activeServerId} pane="left" dual={dual} onToggleDual={() => setDual((v) => !v)} />
+    <PageLayout
+      context={servers.find((s) => s.id === activeServerId)?.name}
+      title="Fichiers"
+      subtitle="Explorateur SFTP. Le second panneau sert à copier d'un serveur à l'autre."
+      guide="files"
+      scroll={false}
+    >
+      <div className="flex min-h-0 w-full flex-col">
+        <div className="flex min-h-0 flex-1">
+          <div className="min-w-0 flex-1">
+            <Explorer key={`l-${activeServerId}`} serverId={activeServerId} pane="left" dual={dual} onToggleDual={() => setDual((v) => !v)} />
+          </div>
+          {dual && (
+            <div className="min-w-0 flex-1 border-l border-border">
+              <Explorer key={`r-${right}`} serverId={right} pane="right" dual onToggleDual={() => setDual(false)} onServerChange={setRightServer} />
+            </div>
+          )}
         </div>
-        {dual && (
-          <div className="min-w-0 flex-1 border-l border-border">
-            <Explorer key={`r-${right}`} serverId={right} pane="right" dual onToggleDual={() => setDual(false)} onServerChange={setRightServer} />
+        <TransfersBar />
+        {drag && (
+          <div className="pointer-events-none fixed z-50 rounded-md border border-accent bg-panel px-2 py-1 text-xs shadow-xl" style={{ left: drag.x + 12, top: drag.y + 12 }}>
+            {drag.label}
           </div>
         )}
       </div>
-      <TransfersBar />
-      {drag && (
-        <div className="pointer-events-none fixed z-50 rounded-md border border-accent bg-panel px-2 py-1 text-xs shadow-xl" style={{ left: drag.x + 12, top: drag.y + 12 }}>
-          {drag.label}
-        </div>
-      )}
-    </div>
+    </PageLayout>
   );
 }
 

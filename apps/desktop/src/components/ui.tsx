@@ -82,7 +82,7 @@ export function Modal({
   onClose,
   children,
   footer,
-  width = "max-w-lg",
+  width = "max-w-2xl",
 }: {
   title: ReactNode;
   onClose: () => void;
@@ -96,10 +96,12 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Les fenêtres suivent la taille de l'app : sur un grand écran, une modale minuscule perdue au
+  // centre ne sert personne ; sur une petite fenêtre, elle ne doit pas déborder.
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6 md:p-10" onMouseDown={onClose}>
       <div
-        className={`flex max-h-full w-full ${width} flex-col rounded-lg border border-border bg-panel shadow-2xl`}
+        className={`flex max-h-[88vh] w-full ${width} min-w-0 flex-col rounded-lg border border-border bg-panel shadow-2xl`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

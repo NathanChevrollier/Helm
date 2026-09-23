@@ -36,13 +36,29 @@ interface Site {
   domain: string;
   aliases: string[];
   blocks: ServerBlock[];
+  /** Entrée de configuration qui n'est pas un site : masquée sauf demande explicite. */
+  technique: boolean;
 }
 
 function sitesOf(files: SiteFile[]): Site[] {
   return files.map((file) => {
     const names = [...new Set(file.servers.flatMap((s) => s.serverNames))].filter((n) => n !== "_" && n !== "localhost");
-    return { file, domain: names[0] ?? file.path.split("/").pop()!, aliases: names.slice(1), blocks: file.servers };
+    const domain = names[0] ?? file.path.split("/").pop()!;
+    return { file, domain, aliases: names.slice(1), blocks: file.servers, technique: !names.length || technicalName(file, domain) };
   });
+}
+
+/**
+ * Entrée technique : elle apparaît dans la configuration sans être un site à administrer — bloc
+ * attrape-tout du serveur (`default`), fragment inclus depuis `conf.d` sans nom de domaine,
+ * redirections internes. On la masque par défaut, sans la supprimer de la liste.
+ */
+function technicalName(file: SiteFile, domain: string): boolean {
+  const nom = domain.toLowerCase();
+  if (/^(00-)?default(\.conf)?$/.test(nom) || nom === "default_server") return true;
+  // Un nom de fichier en guise de domaine : aucun server_name exploitable n'a été trouvé.
+  if (/\.(conf|inc)$/.test(nom)) return true;
+  return !nom.includes(".") && !file.path.includes("/sites-enabled/");
 }
 
 /**
@@ -113,7 +129,10 @@ function Sites({ serverId }: { serverId: string }) {
     [state],
   );
   const containerOnPort = (port: number) => containers.find((c) => c.ports.some((p) => p.hostPort === port));
-  const sites = useMemo(() => sitesOf(state?.files ?? []), [state]);
+  const tousLesSites = useMemo(() => sitesOf(state?.files ?? []), [state]);
+  const [showTechnical, setShowTechnical] = useState(false);
+  const masques = tousLesSites.filter((s) => s.technique).length;
+  const sites = showTechnical ? tousLesSites : tousLesSites.filter((s) => !s.technique);
   const disabled = useMemo(() => sitesOf(state?.disabled ?? []), [state]);
 
   // DNS et expiration des domaines, vérifiés depuis le PC après l'affichage (sans le ralentir).
@@ -178,6 +197,12 @@ function Sites({ serverId }: { serverId: string }) {
           <Badge>{state.version}</Badge>
           {state.running ? <Badge tone="ok">{web} actif</Badge> : <Badge tone="danger">{web} arrêté</Badge>}
           <Badge>{sites.length} site(s) actif(s)</Badge>
+          {masques > 0 && (
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted" title="Blocs attrape-tout, fragments inclus, redirections internes">
+              <input type="checkbox" checked={showTechnical} onChange={(e) => setShowTechnical(e.target.checked)} />
+              Afficher les {masques} entrée(s) technique(s)
+            </label>
+          )}
           {state.others.filter((o) => o !== "Apache" && o !== "nginx").length > 0 && (
             <Badge tone="warn">aussi détecté : {state.others.filter((o) => o !== "Apache" && o !== "nginx").join(", ")}</Badge>
           )}

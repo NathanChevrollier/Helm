@@ -160,7 +160,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
       for (const sn of snippets) {
         list.push({
           id: `snippet:${sn.id}`,
-          label: `Snippet : ${sn.name}`,
+          label: `Fragment : ${sn.name}`,
           hint: sn.command,
           icon: <ScrollText size={15} />,
           run: () => openTab(sid, { title: sn.name, command: `${sn.command}; echo; exec "$SHELL" -l` }),

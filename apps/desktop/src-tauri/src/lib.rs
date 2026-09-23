@@ -110,6 +110,7 @@ pub fn run() {
             databases::db_preview_query,
             terminal::term_open,
             terminal::term_write,
+            terminal::tmux_scroll,
             terminal::term_resize,
             terminal::term_close,
             terminal::shell_history,

@@ -9,11 +9,6 @@ import PageLayout from "../components/PageLayout";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 
-/**
- * Colonnes du tableau des serveurs. Chacune garde une largeur minimale : sans elle, les colonnes
- * souples s'écrasaient et les titres se chevauchaient dès que la fenêtre se resserrait.
- */
-const ROW_GRID = "grid min-w-[700px] grid-cols-[minmax(130px,1.2fr)_repeat(3,minmax(86px,1fr))_minmax(104px,0.9fr)_auto] gap-3 px-4";
 
 const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
@@ -175,17 +170,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
           <Kpi label="Alertes actives" value={alerts} tone={alerts ? "danger" : undefined} />
         </div>
 
-        {/* Le tableau défile horizontalement plutôt que d'écraser ses colonnes : les titres restaient
-            lisibles en large, mais se chevauchaient dès que la fenêtre se resserrait. */}
-        <div className="overflow-x-auto rounded-[10px] border border-border bg-panel">
-          <div className={`${ROW_GRID} border-b border-border py-2.5 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase`}>
-            <span>Serveur</span>
-            <span>CPU</span>
-            <span>Mémoire</span>
-            <span>Disque</span>
-            <span>Conteneurs</span>
-            <span />
-          </div>
+        <div className="overflow-hidden rounded-[10px] border border-border bg-panel">
           {servers.map((s) => (
             <ServerRow key={s.id} server={s} result={results[s.id]} onOpen={(section) => go(s, section)} onTerminal={() => openTab(s.id)} />
           ))}
@@ -279,10 +264,11 @@ function Kpi({ label, value, total, tone }: { label: string; value: number; tota
   );
 }
 
-function Bar({ label, sub, value }: { label: string; sub?: string; value: number | null }) {
+function Bar({ name, label, sub, value }: { name: string; label: string; sub?: string; value: number | null }) {
   const tone = value == null ? "bg-border" : value >= 90 ? "bg-danger" : value >= 80 ? "bg-warn" : "bg-accent";
   return (
-    <div className="min-w-0">
+    <div className="min-w-[92px] flex-1">
+      <div className="text-[11px] tracking-[0.06em] text-muted uppercase">{name}</div>
       <div className="font-mono text-[13px]">{label}</div>
       <div className="mt-1.5 h-1 rounded-sm bg-hover-strong">
         <div className={`h-1 rounded-sm ${tone}`} style={{ width: `${Math.max(1, value ?? 0)}%` }} />
@@ -312,20 +298,26 @@ function ServerRow({
       <div className="mt-0.5 truncate font-mono text-xs text-muted">{server.host}</div>
     </div>
   );
-  const grid = `${ROW_GRID} items-center border-b border-border/60 py-3.5 text-[13px] last:border-b-0`;
+  // Ligne souple : les mesures passent à la ligne quand la place manque, plutôt que de forcer un
+  // défilement horizontal ou d'écraser les colonnes.
+  const ligne = "flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-border/60 px-4 py-3.5 text-[13px] last:border-b-0";
+  const bouton = (
+    <button
+      onClick={onTerminal}
+      className="flex h-8 shrink-0 items-center gap-1.5 rounded-[7px] border border-border-strong px-2.5 text-xs hover:bg-hover"
+    >
+      <SquareTerminal size={12} /> Terminal
+    </button>
+  );
 
   if (!result || result === "loading" || !result.connected) {
     return (
-      <div className={grid}>
-        {name}
-        <span className="col-span-4 text-muted">
-          {!result || result === "loading" ? "Interrogation…" : `Non connecté${result.error ? ` · ${result.error.replace(/^.*?: /, "").slice(0, 90)}` : ""}`}
+      <div className={ligne}>
+        <div className="min-w-[160px] flex-[2_1_180px]">{name}</div>
+        <span className="min-w-[200px] flex-[3_1_280px] text-muted">
+          {!result || result === "loading" ? "Interrogation\u2026" : `Non connect\u00e9${result.error ? ` \u00b7 ${result.error.replace(/^.*?: /, "").slice(0, 90)}` : ""}`}
         </span>
-        <div className="flex justify-end">
-          <button onClick={onTerminal} className="h-7 rounded-[7px] border border-border-strong px-2.5 text-xs hover:bg-hover">
-            Terminal
-          </button>
-        </div>
+        <div className="ml-auto">{bouton}</div>
       </div>
     );
   }
@@ -335,28 +327,29 @@ function ServerRow({
   const root = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
   const disk = root && root.total ? (root.used / root.total) * 100 : null;
   return (
-    <div className={grid}>
-      <button className="text-left" onClick={() => onOpen("monitoring")} title={m ? `En ligne depuis ${formatDuration(m.uptimeSecs)}` : undefined}>
+    <div className={ligne}>
+      <button className="min-w-[160px] flex-[2_1_180px] text-left" onClick={() => onOpen("monitoring")} title={m ? `En ligne depuis ${formatDuration(m.uptimeSecs)}` : undefined}>
         {name}
       </button>
-      <Bar label={m ? `${m.cpuPercent.toFixed(0)} %` : "…"} sub={m ? `charge ${m.load[0].toFixed(2)}` : undefined} value={m ? m.cpuPercent : null} />
-      <Bar label={m && mem != null ? `${mem.toFixed(0)} %` : "…"} sub={m ? formatBytes(m.memUsed) : undefined} value={mem} />
-      <Bar label={root && disk != null ? `${disk.toFixed(0)} %` : "…"} sub={root ? `${formatBytes(root.total - root.used)} libres` : undefined} value={disk} />
-      <button className="text-left font-mono" onClick={() => onOpen("docker")} disabled={!result.docker}>
-        {result.docker ? (
-          <>
-            {result.containersRunning}
-            {result.containersStopped > 0 && <span className="text-warn"> · {result.containersStopped} arrêté(s)</span>}
-          </>
-        ) : (
-          <span className="text-muted">—</span>
-        )}
-      </button>
-      <div className="flex justify-end">
-        <button onClick={onTerminal} className="flex h-7 items-center gap-1.5 rounded-[7px] border border-border-strong px-2.5 text-xs hover:bg-hover">
-          <SquareTerminal size={12} /> Terminal
-        </button>
+      <div className="flex min-w-[240px] flex-[4_1_380px] flex-wrap gap-x-5 gap-y-3">
+        <Bar name="CPU" label={m ? `${m.cpuPercent.toFixed(0)} %` : "\u2026"} sub={m ? `charge ${m.load[0].toFixed(2)}` : undefined} value={m ? m.cpuPercent : null} />
+        <Bar name="M\u00e9moire" label={m && mem != null ? `${mem.toFixed(0)} %` : "\u2026"} sub={m ? formatBytes(m.memUsed) : undefined} value={mem} />
+        <Bar name="Disque" label={root && disk != null ? `${disk.toFixed(0)} %` : "\u2026"} sub={root ? `${formatBytes(root.total - root.used)} libres` : undefined} value={disk} />
       </div>
+      <button className="min-w-[120px] flex-[1_1_130px] text-left" onClick={() => onOpen("docker")} disabled={!result.docker}>
+        <div className="text-[11px] tracking-[0.06em] text-muted uppercase">Conteneurs</div>
+        <div className="mt-0.5 font-mono">
+          {result.docker ? (
+            <>
+              {result.containersRunning}
+              {result.containersStopped > 0 && <span className="text-warn"> \u00b7 {result.containersStopped} arr\u00eat\u00e9(s)</span>}
+            </>
+          ) : (
+            <span className="text-muted">\u2014</span>
+          )}
+        </div>
+      </button>
+      <div className="ml-auto">{bouton}</div>
     </div>
   );
 }

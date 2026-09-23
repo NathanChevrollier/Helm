@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, Search, Share2, Sparkles, Square, TextSelect, Upload, Users, X } from "lucide-react";
+import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, ScrollText, Search, Share2, Sparkles, Square, TextSelect, Upload, Users, X } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
@@ -438,6 +438,29 @@ export default function TerminalPane({
     };
     hostEl.addEventListener("wheel", onWheel, { passive: false });
 
+    // Molette dans une session tmux : l'écran alterné prive ce terminal de son propre historique,
+    // et xterm traduit alors la molette en flèches — ce qui rappelait les dernières commandes au
+    // lieu de remonter le texte. On demande donc à tmux de faire défiler son historique à lui.
+    if (tmux) {
+      let cumul = 0;
+      let envoiPrevu: ReturnType<typeof setTimeout> | null = null;
+      term.attachCustomWheelEventHandler((e: WheelEvent) => {
+        // Le tampon normal (hors programme plein écran) défile normalement dans xterm.
+        if (term.buffer.active.type !== "alternate") return true;
+        cumul += e.deltaY;
+        if (!envoiPrevu) {
+          envoiPrevu = setTimeout(() => {
+            envoiPrevu = null;
+            const lignes = Math.min(200, Math.max(1, Math.round(Math.abs(cumul) / 40) * 3));
+            const up = cumul < 0;
+            cumul = 0;
+            void api.tmuxScroll(serverId, tmux, up, lignes).catch(() => {});
+          }, 40);
+        }
+        return false;
+      });
+    }
+
     // Ctrl+Shift+C / Ctrl+Shift+V, comme dans les terminaux Linux ; Ctrl+C reste SIGINT.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
@@ -660,6 +683,33 @@ export default function TerminalPane({
     }
   };
 
+  /**
+   * Enregistre la sélection comme fragment réutilisable. La commande est nettoyée de l'invite
+   * (« $ », « # ») et des retours à la ligne inutiles : on sélectionne souvent la ligne entière.
+   */
+  const saveSnippet = async (selection: string) => {
+    const commande = selection
+      .split("\n")
+      .map((l) => l.replace(/^\s*[^\s@]*@[^\s:]*:[^$#]*[$#]\s?/, "").trimEnd())
+      .filter((l) => l.trim().length > 0)
+      .join("\n")
+      .trim();
+    if (!commande) return;
+    const nom = await useApp.getState().ask({
+      title: "Nouveau fragment",
+      body: commande.length > 300 ? `${commande.slice(0, 300)}…` : commande,
+      input: { label: "Nom du fragment", initial: commande.split("\n")[0].slice(0, 40) },
+      confirmLabel: "Enregistrer",
+    });
+    if (typeof nom !== "string" || !nom.trim()) return;
+    try {
+      await api.saveSnippet({ id: "", name: nom.trim(), command: commande });
+      useApp.getState().notify(`Fragment « ${nom.trim()} » enregistré.`, "success");
+    } catch (e) {
+      useApp.getState().notify(errorMessage(e), "error");
+    }
+  };
+
   const menuItems = (selection: string): MenuItem[] => {
     const term = termRef.current;
     const connected = idRef.current != null;
@@ -673,6 +723,12 @@ export default function TerminalPane({
         label: selection ? "Expliquer la sélection" : "Expliquer ce qui s'affiche",
         icon: <Sparkles size={14} />,
         onClick: () => explain(selection ? "cette sortie de terminal" : "ce qui s'affiche dans mon terminal", selection || screenText()),
+      },
+      {
+        label: "Enregistrer comme fragment…",
+        icon: <ScrollText size={14} />,
+        disabled: !selection.trim(),
+        onClick: () => void saveSnippet(selection),
       },
       "separator",
       {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Columns2,
+import { Columns2, MoreHorizontal,
   Rows2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, Share2, SquareTerminal, Users, X } from "lucide-react";
 import TerminalPane from "../components/TerminalPane";
 import SnippetsPanel from "../components/SnippetsPanel";
@@ -38,6 +38,20 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   const [showSnippets, setShowSnippets] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [splitMenu, setSplitMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Menu « … » : diffusion, partage, multi-serveurs, sessions persistantes. */
+  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // Le panneau actif suit l'onglet affiché, sans attendre un clic dans le terminal : sinon le
+  // panneau Fichiers restait branché sur l'onglet précédent et semblait ne plus suivre les « cd ».
+  const knownPanes = usePanes((s) => s.panes);
+  useEffect(() => {
+    if (!activeTab) return;
+    const { active, setActive } = usePanes.getState();
+    // Un panneau déjà actif dans cet onglet (division, grille) garde la main.
+    if (active && active.startsWith(`${activeTab}:`)) return;
+    const first = Object.keys(knownPanes).find((id) => id.startsWith(`${activeTab}:`));
+    if (first) setActive(first);
+  }, [activeTab, knownPanes]);
   /** Part de l'espace prise par le premier panneau d'un onglet divisé (poignée centrale). */
   const [splitRatios, setSplitRatios] = useState<Record<string, number>>({});
   const [multiPicker, setMultiPicker] = useState(false);
@@ -212,17 +226,14 @@ export default function TerminalView({ visible }: { visible: boolean }) {
             <Plus size={15} />
           </IconButton>
         </div>
+        {/* Trois groupes séparés par un filet : disposition, panneaux, puis le partage — rare — rangé
+            derrière « … ». Auparavant, huit boutons de même poids se disputaient la barre. */}
         <div className="flex items-center gap-1.5 px-3">
-          {broadcast.active ? (
+          {broadcast.active && (
             <Button size="sm" variant="danger" icon={<Radio size={13} />} onClick={() => broadcast.setActive(false)}>
               Arrêter la diffusion
             </Button>
-          ) : (
-            <ToolButton label="Diffuser" title="Diffuser la saisie à plusieurs terminaux" icon={<Radio size={13} />} disabled={Object.keys(broadcast.panes).length < 2} onClick={() => setBroadcastPicker(true)} />
           )}
-          <ToolButton label="Rejoindre" title="Rejoindre le terminal partagé par quelqu'un (invitation helm-term:…)" icon={<Users size={13} />} onClick={() => setJoinPicker(true)} />
-          <ToolButton label="Multi-serveurs" title="Un terminal par serveur, côte à côte, avec la saisie diffusée à tous" icon={<LayoutGrid size={13} />} disabled={servers.length < 2} onClick={() => setMultiPicker(true)} />
-          <ToolButton label="Sessions" title="Sessions persistantes (tmux)" icon={<History size={13} />} disabled={!(current?.serverId ?? activeServerId)} onClick={() => setSessionsOf(current?.serverId ?? activeServerId)} />
           <ToolButton label="Diviser" title="Diviser l'écran (même serveur ou un autre)" icon={<Columns2 size={13} />} disabled={!current || !!current.grid || !!current.join} active={current?.split != null} onClick={toggleSplit} />
           {current?.split != null && (
             <ToolButton
@@ -236,8 +247,19 @@ export default function TerminalView({ visible }: { visible: boolean }) {
               }}
             />
           )}
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
           <ToolButton label="Fichiers" title="Fichiers du serveur, au dossier courant du terminal" icon={<FolderTree size={13} />} active={showFiles} disabled={!current || !!current.join} onClick={() => setShowFiles((v) => !v)} />
-          <ToolButton label="Snippets" title="Snippets" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
+          <ToolButton label="Fragments" title="Fragments enregistrés : un clic les envoie au terminal actif" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+          <IconButton
+            title="Partage, diffusion et sessions"
+            onClick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setMoreMenu({ x: Math.max(8, r.right - 280), y: r.bottom + 6 });
+            }}
+          >
+            <MoreHorizontal size={16} />
+          </IconButton>
         </div>
       </div>
 
@@ -311,6 +333,36 @@ export default function TerminalView({ visible }: { visible: boolean }) {
       </div>
       <TransfersBar />
       {settings.terminalStatusBar && activePaneServer && <TerminalStatusBar serverId={activePaneServer} visible={visible} />}
+
+      {moreMenu && (
+        <ContextMenu
+          x={moreMenu.x}
+          y={moreMenu.y}
+          onClose={() => setMoreMenu(null)}
+          items={[
+            {
+              label: "Diffuser la saisie à plusieurs terminaux…",
+              icon: <Radio size={14} />,
+              disabled: Object.keys(broadcast.panes).length < 2,
+              onClick: () => setBroadcastPicker(true),
+            },
+            {
+              label: "Un terminal par serveur (multi-serveurs)…",
+              icon: <LayoutGrid size={14} />,
+              disabled: servers.length < 2,
+              onClick: () => setMultiPicker(true),
+            },
+            "separator",
+            { label: "Rejoindre un terminal partagé…", icon: <Users size={14} />, onClick: () => setJoinPicker(true) },
+            {
+              label: "Sessions persistantes (tmux)…",
+              icon: <History size={14} />,
+              disabled: !(current?.serverId ?? activeServerId),
+              onClick: () => setSessionsOf(current?.serverId ?? activeServerId),
+            },
+          ]}
+        />
+      )}
 
       {splitMenu && current && (
         <ContextMenu

@@ -89,6 +89,22 @@ pub fn pane_path_command(name: &str) -> Result<String> {
     ))
 }
 
+/// Fait défiler l'historique d'une session dans le mode copie de tmux.
+///
+/// Sous tmux, l'écran alterné prive le terminal de l'app de son propre historique : la molette y
+/// est traduite en flèches, qui rappellent les dernières commandes au lieu de remonter le texte.
+/// On passe donc par tmux lui-même. Descendre jusqu'en bas sort du mode copie (`-e`).
+pub fn scroll_command(name: &str, up: bool, lines: u32) -> Result<String> {
+    if !valid_session(name) {
+        return Err(Error::Other(format!("nom de session invalide : {name}")));
+    }
+    let lines = lines.clamp(1, 200);
+    let direction = if up { "scroll-up" } else { "scroll-down" };
+    Ok(format!(
+        "tmux copy-mode -e -t {name} 2>/dev/null; tmux send-keys -t {name} -X -N {lines} {direction} 2>/dev/null; true"
+    ))
+}
+
 /// Préfixe des erreurs « pas de gestionnaire de paquets utilisable » : l'UI cesse alors de
 /// proposer l'installation sur ce serveur au lieu d'afficher une erreur à chaque terminal.
 pub const UNSUPPORTED: &str = "UNSUPPORTED:";

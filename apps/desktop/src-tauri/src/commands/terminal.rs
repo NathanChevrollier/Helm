@@ -97,6 +97,25 @@ pub async fn term_cwd(
     Ok(path.starts_with('/').then_some(path))
 }
 
+/// Fait défiler l'historique d'une session tmux (molette de la souris dans le terminal).
+#[tauri::command]
+pub async fn tmux_scroll(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    session: String,
+    up: bool,
+    lines: u32,
+) -> Result<(), String> {
+    if !sessions.is_connected(&server_id).await {
+        return Ok(());
+    }
+    let conn = sessions.get(&store, &server_id).await?;
+    let cmd = helm_core::tmux::scroll_command(&session, up, lines).map_err(|e| e.to_string())?;
+    conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn term_write(sessions: State<'_, Sessions>, id: u64, data: String) -> Result<(), String> {
     sessions.write_terminal(id, data.as_bytes()).await

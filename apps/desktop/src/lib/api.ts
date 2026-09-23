@@ -837,6 +837,9 @@ export const api = {
     return invoke<number>("term_open", { serverId, cols, rows, command: opts.command, tmuxSession: opts.tmuxSession, onEvent: channel });
   },
   termWrite: (id: number, data: string) => invoke<void>("term_write", { id, data }),
+  /** Défilement de l'historique d'une session tmux (molette dans le terminal). */
+  tmuxScroll: (serverId: string, session: string, up: boolean, lines: number) =>
+    invoke<void>("tmux_scroll", { serverId, session, up, lines }),
   termResize: (id: number, cols: number, rows: number) => invoke<void>("term_resize", { id, cols, rows }),
   termClose: (id: number) => invoke<void>("term_close", { id }),
   termShareStart: (termId: number, label: string, mode: ShareMode, onEvent: (e: ShareEvent) => void) => {

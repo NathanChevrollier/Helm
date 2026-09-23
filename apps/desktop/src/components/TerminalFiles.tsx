@@ -162,7 +162,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
   const shown = entries.filter((e) => showHidden || !e.name.startsWith("."));
 
   return (
-    <aside className="relative flex shrink-0 flex-col border-l border-border bg-panel" style={{ width }}>
+    <aside data-link={link} className="relative flex shrink-0 flex-col border-l border-border bg-panel" style={{ width }}>
       <div
         role="separator"
         aria-orientation="vertical"
@@ -179,7 +179,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
         <span className="mr-auto pl-1 text-xs font-semibold tracking-wide text-muted uppercase">Fichiers</span>
         {/* Deux sens possibles, jamais les deux à la fois : sinon chacun tirerait l'autre. */}
         <IconButton
-          title={follow ? "Le panneau suit le terminal (cliquer pour arrêter)" : "Faire suivre le terminal par le panneau"}
+          title={follow ? "Le panneau suit le dossier du terminal (cliquer pour arrêter)" : "Suivre le dossier du terminal"}
           aria-pressed={follow}
           className={follow ? "text-accent" : ""}
           onClick={() => {
@@ -191,7 +191,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
           <Crosshair size={14} />
         </IconButton>
         <IconButton
-          title={link === "panneau" ? "Le terminal suit le panneau (cliquer pour arrêter)" : "Faire suivre le panneau par le terminal (cd automatique)"}
+          title={link === "panneau" ? "Le terminal suit le panneau : chaque dossier ouvert fait un « cd » (cliquer pour arrêter)" : "Faire suivre le panneau par le terminal (« cd » automatique)"}
           aria-pressed={link === "panneau"}
           className={link === "panneau" ? "text-accent" : ""}
           onClick={() => {

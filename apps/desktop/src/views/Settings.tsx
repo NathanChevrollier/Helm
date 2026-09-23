@@ -35,6 +35,52 @@ export function Group({ title, description, children, wide }: { title: string; d
   );
 }
 
+/**
+ * Réglage à valeur (liste, bouton…) : ce que l'on règle à gauche, la valeur en cours à droite.
+ * Même disposition partout, pour qu'on sache d'un coup d'œil ce que l'on modifie.
+ */
+export function Setting({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-4 rounded-lg border border-border bg-panel p-4">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{title}</div>
+        {description && <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{description}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+/** Réglage à deux états : l'état courant est écrit à côté de la case. */
+export function Toggle({
+  title,
+  description,
+  checked,
+  onChange,
+  onLabel = "Activé",
+  offLabel = "Désactivé",
+}: {
+  title: string;
+  description?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  onLabel?: string;
+  offLabel?: string;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-4 rounded-lg border border-border bg-panel p-4">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">{title}</div>
+        {description && <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{description}</p>}
+      </div>
+      <span className="flex shrink-0 items-center gap-2">
+        <span className={`text-xs ${checked ? "text-accent" : "text-muted"}`}>{checked ? onLabel : offLabel}</span>
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      </span>
+    </label>
+  );
+}
+
 export default function SettingsView() {
   const [tab, setTab] = useState<TabId>("prefs");
   return (
@@ -207,20 +253,13 @@ function Preferences() {
   return (
     <div className="flex flex-col gap-8">
       <Group title="Terminal" description="Comportement des onglets de terminal et de leur barre.">
-      <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
-        <input type="checkbox" className="mt-1" checked={settings.persistentSessions} onChange={(e) => setSettings({ persistentSessions: e.target.checked })} />
-        <span>
-          <span className="font-medium">Sessions persistantes (tmux)</span>
-          <span className="block text-sm text-muted">
-            Les nouveaux terminaux tournent dans une session tmux : ils survivent aux coupures réseau et à la fermeture de Helm, et se rattachent automatiquement.
-          </span>
-        </span>
-      </label>
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
-        <span className="flex-1">
-          <span className="font-medium">Clic droit dans le terminal</span>
-          <span className="block text-sm text-muted">Menu (copier, coller, envoyer des fichiers, ouvrir le dossier…) ou copier/coller immédiat, comme PuTTY.</span>
-        </span>
+      <Toggle
+        title="Sessions persistantes (tmux)"
+        description="Les nouveaux terminaux tournent dans une session tmux : ils survivent aux coupures réseau et à la fermeture de Helm, et se rattachent automatiquement."
+        checked={settings.persistentSessions}
+        onChange={(persistentSessions) => setSettings({ persistentSessions })}
+      />
+      <Setting title="Clic droit dans le terminal" description="Menu (copier, coller, envoyer des fichiers, ouvrir le dossier…) ou copier/coller immédiat, comme PuTTY.">
         <select
           className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
           value={settings.terminalRightClick}
@@ -229,14 +268,13 @@ function Preferences() {
           <option value="menu">Menu contextuel</option>
           <option value="paste">Copier / coller (PuTTY)</option>
         </select>
-      </div>
-      <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
-        <input type="checkbox" className="mt-1" checked={settings.terminalStatusBar} onChange={(e) => setSettings({ terminalStatusBar: e.target.checked })} />
-        <span>
-          <span className="font-medium">Monitoring sous le terminal</span>
-          <span className="block text-sm text-muted">CPU, mémoire, disque, charge et réseau du serveur du terminal actif, rafraîchis toutes les 3 secondes.</span>
-        </span>
-      </label>
+      </Setting>
+      <Toggle
+        title="Monitoring sous le terminal"
+        description="CPU, mémoire, disque, charge et réseau du serveur du terminal actif, rafraîchis toutes les 3 secondes."
+        checked={settings.terminalStatusBar}
+        onChange={(terminalStatusBar) => setSettings({ terminalStatusBar })}
+      />
       {declined.length > 0 && (
         <div className="rounded-lg border border-border bg-panel p-4 text-sm">
           <p className="text-muted">
@@ -250,24 +288,14 @@ function Preferences() {
       </Group>
 
       <Group title="Affichage et rafraîchissement" description="Thème de l'app, fréquence des relevés et notifications.">
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
-        <span className="flex-1">
-          <span className="font-medium">Thème</span>
-          <span className="block text-sm text-muted">« Système » suit le thème de Windows.</span>
-        </span>
+      <Setting title="Thème" description="« Système » suit le thème de Windows.">
         <select className="h-8 rounded-md border border-border bg-bg px-2 text-sm" value={settings.theme} onChange={(e) => setSettings({ theme: e.target.value as ThemeSetting })}>
           <option value="dark">Sombre</option>
           <option value="light">Clair</option>
           <option value="system">Système</option>
         </select>
-      </div>
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
-        <span className="flex-1">
-          <span className="font-medium">Actualisation automatique</span>
-          <span className="block text-sm text-muted">
-            État des conteneurs, sites, services, fichiers… relu régulièrement sur les serveurs déjà connectés. F5 ou le bouton ⟳ de l'en-tête actualisent à tout moment.
-          </span>
-        </span>
+      </Setting>
+      <Setting title="Actualisation automatique" description="État des conteneurs, sites, services, fichiers… relu régulièrement sur les serveurs déjà connectés. F5 ou le bouton ⟳ de l'en-tête actualisent à tout moment.">
         <select
           className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
           value={settings.autoRefreshSecs}
@@ -279,16 +307,13 @@ function Preferences() {
           <option value={30}>Toutes les 30 s</option>
           <option value={60}>Toutes les minutes</option>
         </select>
-      </div>
-      <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
-        <input type="checkbox" className="mt-1" checked={settings.alertNotifications} onChange={(e) => setSettings({ alertNotifications: e.target.checked })} />
-        <span>
-          <span className="font-medium">Notifications Windows pour les alertes</span>
-          <span className="block text-sm text-muted">
-            Tant que Helm est ouvert, une notification apparaît dès qu'une alerte se déclenche sur un serveur connecté (CPU, mémoire, disque, site injoignable…). Helm fermé, c'est l'agent qui prévient (Discord, ntfy, webhook).
-          </span>
-        </span>
-      </label>
+      </Setting>
+      <Toggle
+        title="Notifications Windows pour les alertes"
+        description="Tant que Helm est ouvert, une notification apparaît dès qu'une alerte se déclenche sur un serveur connecté (CPU, mémoire, disque, site injoignable…). Helm fermé, c'est l'agent qui prévient (Discord, ntfy, webhook)."
+        checked={settings.alertNotifications}
+        onChange={(alertNotifications) => setSettings({ alertNotifications })}
+      />
       </Group>
 
       <Group title="Raccourcis clavier" description="Tous modifiables : clique sur un raccourci puis tape la combinaison voulue." wide>
@@ -310,24 +335,16 @@ function Preferences() {
       </Group>
 
       <Group title="Maintenance de l'app">
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
-        <span className="flex-1">
-          <span className="font-medium">Mises à jour</span>
-          <span className="block text-sm text-muted">Helm vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.</span>
-        </span>
+      <Setting title="Mises à jour" description="Helm vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.">
         <Button size="sm" loading={checking} onClick={() => { setChecking(true); void checkForUpdate(true).finally(() => setChecking(false)); }}>
           Rechercher
         </Button>
-      </div>
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
-        <span className="flex-1">
-          <span className="font-medium">Journaux de Helm</span>
-          <span className="block text-sm text-muted">Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.</span>
-        </span>
+      </Setting>
+      <Setting title="Journaux de Helm" description="Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.">
         <Button size="sm" onClick={() => void api.logsOpenDir().catch((e) => notify(errorMessage(e), "error"))}>
           Ouvrir le dossier
         </Button>
-      </div>
+      </Setting>
       </Group>
     </div>
   );

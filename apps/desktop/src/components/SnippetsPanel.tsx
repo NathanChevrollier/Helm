@@ -23,8 +23,8 @@ export default function SnippetsPanel() {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-l border-border bg-panel">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-xs font-semibold tracking-wide text-muted uppercase">Snippets</span>
-        <IconButton title="Nouveau snippet" onClick={() => setEditing({ id: "", name: "", command: "" })}>
+        <span className="text-xs font-semibold tracking-wide text-muted uppercase">Fragments</span>
+        <IconButton title="Nouveau fragment" onClick={() => setEditing({ id: "", name: "", command: "" })}>
           <Plus size={14} />
         </IconButton>
       </div>
@@ -57,7 +57,7 @@ export default function SnippetsPanel() {
       </div>
       {editing && (
         <Modal
-          title={editing.id ? "Modifier le snippet" : "Nouveau snippet"}
+          title={editing.id ? "Modifier le fragment" : "Nouveau fragment"}
           onClose={() => setEditing(null)}
           footer={
             <Button
