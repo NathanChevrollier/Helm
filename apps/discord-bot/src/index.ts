@@ -1,0 +1,34 @@
+import { Client, Events, GatewayIntentBits } from "discord.js";
+import { loadEnv } from "./config/env.js";
+import { registerCommands } from "./events/ready.js";
+import { createInteractionHandler } from "./events/interactionCreate.js";
+import { GitHubService } from "./services/githubService.js";
+
+const env = loadEnv();
+const github = new GitHubService(env.GITHUB_OWNER, env.GITHUB_REPO, env.GITHUB_TOKEN, {
+  bug: env.GITHUB_BUG_LABEL,
+  suggestion: env.GITHUB_SUGGESTION_LABEL,
+});
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.once(Events.ClientReady, (readyClient) => {
+  void registerCommands(readyClient, env).catch((error: unknown) => {
+    console.error("[discord] impossible d'enregistrer les commandes:", error);
+    void readyClient.destroy();
+    process.exitCode = 1;
+  });
+});
+client.on(Events.InteractionCreate, createInteractionHandler(client, env, github));
+
+async function shutdown(signal: string): Promise<void> {
+  console.info(`[process] arrêt demandé (${signal})`);
+  client.destroy();
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+
+client.login(env.DISCORD_TOKEN).catch((error: unknown) => {
+  console.error("[discord] échec de connexion:", error);
+  process.exitCode = 1;
+});
