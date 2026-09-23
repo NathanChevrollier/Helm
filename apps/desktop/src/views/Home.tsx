@@ -13,7 +13,7 @@ import { useAutoRefresh } from "../lib/refresh";
  * Colonnes du tableau des serveurs. Chacune garde une largeur minimale : sans elle, les colonnes
  * souples s'écrasaient et les titres se chevauchaient dès que la fenêtre se resserrait.
  */
-const ROW_GRID = "grid grid-cols-[minmax(150px,1.3fr)_repeat(3,minmax(104px,1fr))_minmax(130px,1fr)_auto] gap-4 px-4 min-w-[860px]";
+const ROW_GRID = "grid min-w-[700px] grid-cols-[minmax(130px,1.2fr)_repeat(3,minmax(86px,1fr))_minmax(104px,0.9fr)_auto] gap-3 px-4";
 
 const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
