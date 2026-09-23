@@ -8,6 +8,7 @@ import CommandPalette from "./components/CommandPalette";
 import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
 import GuideDialog from "./components/GuideDialog";
+import { useRdp } from "./lib/rdp";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
 import { watchSync } from "./lib/sync";
@@ -21,6 +22,8 @@ import HomeView from "./views/Home";
 
 // Chargé à part : xterm pèse un tiers de l'app et n'est pas nécessaire pour afficher l'accueil.
 const TerminalView = lazy(() => import("./views/Terminal"));
+// Client RDP : plusieurs méga-octets de WebAssembly, chargés seulement à la première session.
+const RemoteDesktopSession = lazy(() => import("./components/RemoteDesktopSession"));
 
 const VIEWS: Partial<Record<SectionId, ComponentType>> = {
   servers: lazy(() => import("./views/Servers")),
@@ -52,6 +55,7 @@ export default function App() {
   }, [railOpen]);
   const active = servers.find((s) => s.id === activeServerId);
   const View = VIEWS[section];
+  const rdpOuvert = useRdp((s) => s.desktop !== null);
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(undefined));
@@ -247,6 +251,11 @@ export default function App() {
           )}
           </div>
           {assistantOpen && <AssistantPanel />}
+          {rdpOuvert && (
+            <Suspense fallback={null}>
+              <RemoteDesktopSession />
+            </Suspense>
+          )}
         </main>
 
         {/* Barre d'état. */}

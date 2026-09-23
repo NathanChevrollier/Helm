@@ -38,6 +38,10 @@ futures-util = { version = "0.3", default-features = false, features = ["sink"] 
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-clipboard-manager = "2.3.3"
+# Pont RDP : protocole de passerelle du client web IronRDP, et TLS vers la machine distante.
+ironrdp-rdcleanpath = "0.2"
+tokio-rustls = "0.26"
+rustls = "0.23"
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

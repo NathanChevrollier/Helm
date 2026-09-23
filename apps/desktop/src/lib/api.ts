@@ -56,6 +56,19 @@ export interface RemoteDesktop {
   group?: string | null;
 }
 
+/** Session RDP ouverte dans Helm : pont local, identifiants et taille d'écran. */
+export interface RdpSessionInfo {
+  proxyUrl: string;
+  token: string;
+  destination: string;
+  username: string;
+  domain?: string | null;
+  password: string;
+  width: number;
+  height: number;
+  viaTunnel: boolean;
+}
+
 export interface DesktopView extends RemoteDesktop {
   hasPassword: boolean;
 }
@@ -790,6 +803,9 @@ export const api = {
   identityDelete: (id: string) => invoke<void>("identity_delete", { id }),
 
   desktops: () => invoke<DesktopView[]>("desktops_list"),
+  /** Ouvre une session pour le client RDP intégré (pont local, tunnel si nécessaire). */
+  desktopSessionOpen: (id: string) => invoke<RdpSessionInfo>("desktop_session_open", { id }),
+  desktopSessionClose: (id: string) => invoke<void>("desktop_session_close", { id }),
   /** `password` : `undefined` = inchangé, `""` = supprimé. */
   desktopSave: (desktop: RemoteDesktop, password?: string) => invoke<string>("desktop_save", { desktop, password }),
   desktopDelete: (id: string) => invoke<void>("desktop_delete", { id }),

@@ -160,6 +160,87 @@ pub async fn desktop_launch(app: AppHandle, store: State<'_, Store>, tunnels: St
     launch(&app, &file, &host, port, &user, password.as_deref(), d.via_server_id.as_ref().map(|_| tid))
 }
 
+/// Tout ce qu'il faut au client RDP intégré pour ouvrir la session.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RdpSession {
+    /// Adresse du pont local (WebSocket), jeton compris.
+    pub proxy_url: String,
+    pub token: String,
+    /// Machine vue depuis le pont : l'hôte réel, ou l'entrée locale du tunnel SSH.
+    pub destination: String,
+    pub username: String,
+    pub domain: Option<String>,
+    pub password: String,
+    pub width: u32,
+    pub height: u32,
+    /// Vrai quand la connexion passe par un tunnel SSH (affiché dans l'onglet).
+    pub via_tunnel: bool,
+}
+
+/// Ouvre une session pour le client RDP intégré : tunnel si la machine passe par un serveur, puis
+/// pont local. Le mot de passe ne quitte pas l'app (il va du coffre-fort au client, en mémoire).
+#[tauri::command]
+pub async fn desktop_session_open(
+    app: AppHandle,
+    store: State<'_, Store>,
+    tunnels: State<'_, Tunnels>,
+    bridges: State<'_, crate::rdp_bridge::Bridges>,
+    id: String,
+) -> Result<RdpSession, String> {
+    let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    let (user, password) = credentials(&store, &d)?;
+    let password = password.ok_or("aucun mot de passe enregistré pour ce bureau à distance")?;
+    // L'utilisateur est renvoyé sans le domaine : le client RDP les transmet séparément.
+    let (username, domain) = match user.split_once('\\') {
+        Some((dom, u)) => (u.to_string(), Some(dom.to_string())),
+        None => (user, d.domain.clone()),
+    };
+
+    let tid = tunnel_id(&d.id);
+    let (host, port) = match &d.via_server_id {
+        Some(server) => {
+            tunnels.stop(&tid);
+            let local_port = free_port()?;
+            let def = TunnelDef {
+                id: tid.clone(),
+                server_id: server.clone(),
+                name: format!("RDP {}", d.name),
+                local_port,
+                remote_host: d.host.clone(),
+                remote_port: d.port,
+                auto_start: false,
+            };
+            tunnels.start(&app, def).await?;
+            ("127.0.0.1".to_string(), local_port)
+        }
+        None => (d.host.clone(), d.port),
+    };
+
+    let bridge = crate::rdp_bridge::start(host.clone(), port).await?;
+    let session = RdpSession {
+        proxy_url: bridge.url.clone(),
+        token: bridge.token.clone(),
+        destination: format!("{host}:{port}"),
+        username,
+        domain,
+        password,
+        width: d.width.unwrap_or(1600),
+        height: d.height.unwrap_or(900),
+        via_tunnel: d.via_server_id.is_some(),
+    };
+    bridges.keep(&id, bridge);
+    log::info!("bureau à distance « {} » ouvert dans Helm ({host}:{port})", d.name);
+    Ok(session)
+}
+
+/// Ferme la session : pont local et tunnel éventuel.
+#[tauri::command]
+pub fn desktop_session_close(tunnels: State<'_, Tunnels>, bridges: State<'_, crate::rdp_bridge::Bridges>, id: String) {
+    bridges.stop(&id);
+    tunnels.stop(&tunnel_id(&id));
+}
+
 #[cfg(windows)]
 fn launch(
     app: &AppHandle,

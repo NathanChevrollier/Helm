@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod commands;
+mod rdp_bridge;
 mod sessions;
 mod store;
 
@@ -69,6 +70,7 @@ pub fn run() {
             app.manage(logs::LogStreams::default());
             app.manage(share::Shares::default());
             app.manage(assistant::Assistant::default());
+            app.manage(rdp_bridge::Bridges::default());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<tunnels::Tunnels>().autostart(&handle).await;
@@ -101,6 +103,8 @@ pub fn run() {
             rdp::desktop_save,
             rdp::desktop_delete,
             rdp::desktop_launch,
+            rdp::desktop_session_open,
+            rdp::desktop_session_close,
             databases::db_instances,
             databases::db_version,
             databases::db_create,

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Cable, IdCard, Link2Off, Monitor, MonitorPlay, Pencil, Plus, Trash2 } from "lucide-react";
+import { Cable, ExternalLink, IdCard, Link2Off, Monitor, MonitorPlay, Pencil, Plus, Trash2 } from "lucide-react";
 import { create } from "zustand";
 import { api, errorMessage, type DesktopView, type RemoteDesktop } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
 import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "./ui";
 import { IdentitySuggestions, useIdentities } from "./Identities";
+import { useRdp } from "../lib/rdp";
 
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6"];
 
@@ -91,19 +92,32 @@ export function DesktopsPanel() {
                   {d.fullscreen ? <Badge>plein écran</Badge> : <Badge>{d.width ?? 1600}×{d.height ?? 900}</Badge>}
                   {d.redirectDrives && <Badge>disques partagés</Badge>}
                 </div>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  loading={busy === d.id}
-                  icon={<MonitorPlay size={13} />}
-                  onClick={async () => {
-                    setBusy(d.id);
-                    await launchDesktop(d);
-                    setBusy(null);
-                  }}
-                >
-                  Se connecter
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {/* Dans Helm par défaut : le client externe reste accessible juste à côté. */}
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!d.hasPassword}
+                    title={d.hasPassword ? undefined : "Enregistre un mot de passe pour ouvrir la session dans Helm"}
+                    icon={<MonitorPlay size={13} />}
+                    onClick={() => void useRdp.getState().open(d)}
+                  >
+                    Se connecter
+                  </Button>
+                  <Button
+                    size="sm"
+                    loading={busy === d.id}
+                    icon={<ExternalLink size={13} />}
+                    title="Ouvrir avec le client du système (mstsc, FreeRDP…)"
+                    onClick={async () => {
+                      setBusy(d.id);
+                      await launchDesktop(d);
+                      setBusy(null);
+                    }}
+                  >
+                    Client du système
+                  </Button>
+                </div>
               </div>
             );
           })}
