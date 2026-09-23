@@ -1,9 +1,9 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
-import { Lock, Plus, RefreshCw, Search, ShipWheel, Sparkles, type LucideIcon } from "lucide-react";
+import { Lock, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShipWheel, Sparkles, type LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { useApp, useAppPick } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
-import { DialogHost, EmptyState, Toasts } from "./components/ui";
+import { DialogHost, EmptyState, FOCUS_RING, Toasts } from "./components/ui";
 import CommandPalette from "./components/CommandPalette";
 import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
@@ -40,6 +40,15 @@ export default function App() {
   const { section, setSection, servers, activeServerId, setActiveServer, refreshServers, hydrated, hydrate } = useAppPick("section", "setSection", "servers", "activeServerId", "setActiveServer", "refreshServers", "hydrated", "hydrate");
   const [version, setVersion] = useState<string>();
   const [palette, setPalette] = useState(false);
+  // Colonne dépliée ou non : choix retenu d'une session à l'autre.
+  const [railOpen, setRailOpen] = useState(() => localStorage.getItem("helm.rail") !== "closed");
+  useEffect(() => {
+    try {
+      localStorage.setItem("helm.rail", railOpen ? "open" : "closed");
+    } catch {
+      /* stockage indisponible : la préférence ne sera pas retenue, sans conséquence */
+    }
+  }, [railOpen]);
   const active = servers.find((s) => s.id === activeServerId);
   const View = VIEWS[section];
 
@@ -118,24 +127,48 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      {/* Colonne d'icônes : toutes les sections, libellé au survol. */}
-      <nav className="flex w-[60px] shrink-0 flex-col items-center gap-1 border-r border-border bg-rail py-3" aria-label="Navigation principale">
-        <button
-          onClick={() => setSection("home")}
-          className="mb-3 flex size-9 items-center justify-center rounded-lg text-accent hover:bg-hover"
-          title="Helm"
-          aria-label="Helm, accueil"
-        >
-          <ShipWheel size={22} />
-        </button>
+      {/* Colonne de navigation : dépliée, les libellés sont écrits ; repliée, ils passent en infobulle. */}
+      <nav
+        className={`flex shrink-0 flex-col gap-1 border-r border-border bg-rail py-3 transition-[width] ${railOpen ? "w-52 px-2" : "w-[60px] items-center"}`}
+        aria-label="Navigation principale"
+      >
+        <div className={`mb-3 flex items-center ${railOpen ? "gap-2 px-1" : ""}`}>
+          <button
+            onClick={() => setSection("home")}
+            className={`flex size-9 items-center justify-center rounded-lg text-accent hover:bg-hover ${FOCUS_RING}`}
+            title="Helm"
+            aria-label="Helm, accueil"
+          >
+            <ShipWheel size={22} />
+          </button>
+          {railOpen && <span className="text-sm font-semibold">Helm</span>}
+          <button
+            onClick={() => setRailOpen(!railOpen)}
+            title={railOpen ? "Replier la colonne" : "Déplier la colonne"}
+            aria-label={railOpen ? "Replier la colonne" : "Déplier la colonne"}
+            aria-expanded={railOpen}
+            className={`flex size-8 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-fg ${FOCUS_RING} ${railOpen ? "ml-auto" : "hidden"}`}
+          >
+            <PanelLeftClose size={16} />
+          </button>
+        </div>
         {railSections.map((s) => (
-          <RailButton key={s.id} label={s.label} icon={s.icon} active={section === s.id} onClick={() => setSection(s.id)} />
+          <RailButton key={s.id} label={s.label} icon={s.icon} expanded={railOpen} active={section === s.id} onClick={() => setSection(s.id)} />
         ))}
         <div className="flex-1" />
-        {lockConfigured && (
-          <RailButton label={`Verrouiller (${display(shortcutOf("lock"))})`} icon={Lock} active={false} onClick={() => useLock.getState().lock()} />
+        {!railOpen && (
+          <RailButton label="Déplier la colonne" icon={PanelLeftOpen} expanded={false} active={false} onClick={() => setRailOpen(true)} />
         )}
-        <RailButton label={settingsSection.label} icon={settingsSection.icon} active={section === "settings"} onClick={() => setSection("settings")} />
+        {lockConfigured && (
+          <RailButton
+            label={railOpen ? "Verrouiller" : `Verrouiller (${display(shortcutOf("lock"))})`}
+            icon={Lock}
+            expanded={railOpen}
+            active={false}
+            onClick={() => useLock.getState().lock()}
+          />
+        )}
+        <RailButton label={settingsSection.label} icon={settingsSection.icon} expanded={railOpen} active={section === "settings"} onClick={() => setSection("settings")} />
       </nav>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -275,21 +308,38 @@ function RefreshButton() {
   );
 }
 
-/** Bouton de la colonne d'icônes, avec son libellé en infobulle. */
-function RailButton({ label, icon: Icon, active, onClick }: { label: string; icon: LucideIcon; active: boolean; onClick: () => void }) {
+/** Bouton de la colonne : libellé écrit quand elle est dépliée, en infobulle quand elle est repliée. */
+function RailButton({
+  label,
+  icon: Icon,
+  active,
+  expanded,
+  onClick,
+}: {
+  label: string;
+  icon: LucideIcon;
+  active: boolean;
+  expanded: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
       aria-label={label}
       aria-current={active ? "page" : undefined}
-      className={`group relative flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors ${
-        active ? "bg-panel text-fg ring-1 ring-border-strong" : "text-muted hover:bg-hover hover:text-fg"
-      }`}
+      title={expanded ? undefined : label}
+      className={`group relative flex h-10 shrink-0 items-center rounded-[10px] transition-colors ${FOCUS_RING} ${
+        expanded ? "w-full gap-2.5 px-2.5" : "w-10 justify-center"
+      } ${active ? "bg-panel text-fg ring-1 ring-border-strong" : "text-muted hover:bg-hover hover:text-fg"}`}
     >
-      <Icon size={18} />
-      <span className="pointer-events-none absolute left-full z-50 ml-2.5 rounded-md border border-border-strong bg-panel px-2 py-1 text-xs whitespace-nowrap text-fg opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-        {label}
-      </span>
+      <Icon size={18} className="shrink-0" />
+      {expanded ? (
+        <span className="min-w-0 truncate text-[13px]">{label}</span>
+      ) : (
+        <span className="pointer-events-none absolute left-full z-50 ml-2.5 rounded-md border border-border-strong bg-panel px-2 py-1 text-xs whitespace-nowrap text-fg opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+          {label}
+        </span>
+      )}
     </button>
   );
 }

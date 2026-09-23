@@ -46,7 +46,7 @@ export const SECTIONS: Section[] = [
   { id: "servers", label: "Serveurs", icon: Server, description: "Profils de connexion, clés SSH et secrets stockés dans le keyring de l'OS." },
   { id: "terminal", label: "Terminal", icon: SquareTerminal, description: "Sessions SSH persistantes en onglets et panneaux, snippets, diffusion." },
   { id: "files", label: "Fichiers", icon: FolderTree, perServer: true, description: "Explorateur SFTP, transferts entre serveurs, édition distante." },
-  { id: "monitoring", label: "Monitoring", icon: Activity, perServer: true, description: "CPU, RAM, disque, réseau, processus, services systemd et alertes." },
+  { id: "monitoring", label: "Supervision", icon: Activity, perServer: true, description: "CPU, RAM, disque, réseau, processus, services systemd et alertes." },
   { id: "docker", label: "Docker", icon: Container, perServer: true, description: "Conteneurs, logs en direct, exec, stats, compose et déploiement." },
   { id: "databases", label: "Bases de données", icon: Database, perServer: true, description: "Bases MySQL/MariaDB et PostgreSQL : tables, requêtes SQL, export CSV." },
   { id: "sites", label: "Sites", icon: Globe, perServer: true, description: "Sous-domaines nginx, certificats SSL, sauvegardes de configuration." },
