@@ -48,7 +48,7 @@ export default function Access({ serverId }: { serverId: string }) {
   if (!users) return <EmptyState icon={<UserRound size={36} className="animate-pulse" />} title="Lecture des comptes…" />;
 
   return (
-    <div className="flex max-w-5xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2 text-sm text-muted">
         Comptes pouvant se connecter (root et utilisateurs avec un shell) et clés SSH autorisées.
         <IconButton title="Actualiser" className="ml-auto" onClick={() => void load()}>

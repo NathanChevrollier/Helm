@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Bot, CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } from "lucide-react";
 import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useAppPick } from "../lib/store";
@@ -8,42 +8,49 @@ import type { ThemeSetting } from "../lib/theme";
 import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Badge, Button, Input } from "../components/ui";
+import PageLayout from "../components/PageLayout";
 import { checkForUpdate } from "../lib/updater";
 import SyncSettings from "../components/SyncSettings";
 import AiSettingsPanel from "../components/AiSettings";
 
 const TABS = [
+  { id: "prefs", label: "Réglages", icon: SlidersHorizontal },
   { id: "journal", label: "Journal d'actions", icon: History },
-  { id: "ai", label: "Accès IA (MCP)", icon: Bot },
-  { id: "prefs", label: "Préférences", icon: SlidersHorizontal },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-export default function SettingsView() {
-  const [tab, setTab] = useState<TabId>("journal");
+/**
+ * Un groupe de réglages. Les cartes s'y rangent en colonnes selon la place disponible : une seule
+ * colonne étroite laissait les trois quarts de l'écran vides.
+ */
+export function Group({ title, description, children, wide }: { title: string; description?: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-border px-6 pt-4">
-        <h1 className="pb-3 text-lg font-semibold">Réglages</h1>
-        <nav className="ml-auto flex self-end">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 border-b-2 px-3 pb-2.5 text-sm ${tab === t.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"}`}
-            >
-              <t.icon size={14} />
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto p-6">
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {description && <p className="text-[13px] text-muted">{description}</p>}
+      </div>
+      <div className={wide ? "flex flex-col gap-3" : "grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] items-start gap-3"}>{children}</div>
+    </section>
+  );
+}
+
+export default function SettingsView() {
+  const [tab, setTab] = useState<TabId>("prefs");
+  return (
+    <PageLayout
+      title="Réglages"
+      subtitle="Préférences de l'app, verrouillage, assistant, synchronisation et journal des actions."
+      guide="settings"
+      tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}
+      activeTab={tab}
+      onTab={setTab}
+    >
+      <div className="p-6">
         {tab === "journal" && <Journal />}
-        {tab === "ai" && <AiAccess />}
         {tab === "prefs" && <Preferences />}
       </div>
-    </div>
+    </PageLayout>
   );
 }
 
@@ -128,7 +135,7 @@ function AiAccess() {
   };
 
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
         <h2 className="font-medium">Ce que l'IA peut faire</h2>
         <ul className="flex flex-col gap-1 text-sm text-muted">
@@ -198,7 +205,8 @@ function Preferences() {
   const declined = Object.keys(settings.tmuxDeclined).filter((id) => settings.tmuxDeclined[id]);
   const [checking, setChecking] = useState(false);
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
+    <div className="flex flex-col gap-8">
+      <Group title="Terminal" description="Comportement des onglets de terminal et de leur barre.">
       <label className="flex items-start gap-3 rounded-lg border border-border bg-panel p-4">
         <input type="checkbox" className="mt-1" checked={settings.persistentSessions} onChange={(e) => setSettings({ persistentSessions: e.target.checked })} />
         <span>
@@ -214,7 +222,7 @@ function Preferences() {
           <span className="block text-sm text-muted">Menu (copier, coller, envoyer des fichiers, ouvrir le dossier…) ou copier/coller immédiat, comme PuTTY.</span>
         </span>
         <select
-          className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
+          className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
           value={settings.terminalRightClick}
           onChange={(e) => setSettings({ terminalRightClick: e.target.value as "menu" | "paste" })}
         >
@@ -229,6 +237,19 @@ function Preferences() {
           <span className="block text-sm text-muted">CPU, mémoire, disque, charge et réseau du serveur du terminal actif, rafraîchis toutes les 3 secondes.</span>
         </span>
       </label>
+      {declined.length > 0 && (
+        <div className="rounded-lg border border-border bg-panel p-4 text-sm">
+          <p className="text-muted">
+            Installation de tmux refusée pour : {declined.map((id) => servers.find((s) => s.id === id)?.name ?? "serveur supprimé").join(", ")}.
+          </p>
+          <Button size="sm" className="mt-2" onClick={() => setSettings({ tmuxDeclined: {} })}>
+            Reproposer l'installation
+          </Button>
+        </div>
+      )}
+      </Group>
+
+      <Group title="Affichage et rafraîchissement" description="Thème de l'app, fréquence des relevés et notifications.">
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
         <span className="flex-1">
           <span className="font-medium">Thème</span>
@@ -268,11 +289,27 @@ function Preferences() {
           </span>
         </span>
       </label>
-      <Shortcuts />
-      <AppLock />
-      <AiSettingsPanel />
-      <SyncSettings />
-      <ExportImport />
+      </Group>
+
+      <Group title="Raccourcis clavier" description="Tous modifiables : clique sur un raccourci puis tape la combinaison voulue." wide>
+        <Shortcuts />
+      </Group>
+
+      <Group title="Sécurité de l'app" description="Verrouillage de Helm sur ce PC.">
+        <AppLock />
+      </Group>
+
+      <Group title="Assistant IA" description="Fournisseur, clé, et ce que l'assistant comme le serveur MCP ont le droit de lire." wide>
+        <AiSettingsPanel />
+        <AiAccess />
+      </Group>
+
+      <Group title="Synchronisation et sauvegarde des réglages" description="Retrouver sa configuration sur un autre PC, ou l'exporter dans un fichier chiffré." wide>
+        <SyncSettings />
+        <ExportImport />
+      </Group>
+
+      <Group title="Maintenance de l'app">
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel p-4">
         <span className="flex-1">
           <span className="font-medium">Mises à jour</span>
@@ -291,16 +328,7 @@ function Preferences() {
           Ouvrir le dossier
         </Button>
       </div>
-      {declined.length > 0 && (
-        <div className="rounded-lg border border-border bg-panel p-4 text-sm">
-          <p className="text-muted">
-            Installation de tmux refusée pour : {declined.map((id) => servers.find((s) => s.id === id)?.name ?? "serveur supprimé").join(", ")}.
-          </p>
-          <Button size="sm" className="mt-2" onClick={() => setSettings({ tmuxDeclined: {} })}>
-            Reproposer l'installation
-          </Button>
-        </div>
-      )}
+      </Group>
     </div>
   );
 }

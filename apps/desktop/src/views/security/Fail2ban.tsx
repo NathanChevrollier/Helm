@@ -84,7 +84,7 @@ export default function Fail2ban({ serverId }: { serverId: string }) {
   const myIpBanned = !!myIp && state.jails.some((j) => j.banned.includes(myIp));
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <div className="flex items-center gap-2 text-sm text-muted">
         fail2ban {state.version} · {state.jails.length} jail(s) actif(s)
         <IconButton title="Actualiser" className="ml-auto" onClick={() => void load()}>

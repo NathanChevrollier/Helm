@@ -26,17 +26,8 @@ export default function SecurityView() {
   return <Security key={serverId} serverId={serverId} />;
 }
 
-const TABS = [
-  { id: "audit", label: "Audit" },
-  { id: "f2b", label: "fail2ban" },
-  { id: "firewall", label: "Pare-feu" },
-  { id: "access", label: "Accès" },
-] as const;
-type TabId = (typeof TABS)[number]["id"];
-
 function Security({ serverId }: { serverId: string }) {
   const { openTab } = useAppPick("openTab");
-  const [tab, setTab] = useState<TabId>("audit");
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
   const [report, setReport] = useCachedState<SecurityReport | null>(`security:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
@@ -111,29 +102,26 @@ function Security({ serverId }: { serverId: string }) {
       title="Sécurité"
       subtitle={report ? `${report.os} · SSH sur le port ${report.sshPorts.join(", ") || "?"}` : "Audit en lecture seule : rien n'est modifié sans ton accord."}
       guide="security"
-      tabs={TABS.map((t) => ({ id: t.id, label: t.label, count: t.id === "audit" ? problems.length : undefined }))}
-      activeTab={tab}
-      onTab={setTab}
       actions={
-        tab === "audit" ? (
-          <IconButton title="Relancer l'audit" onClick={() => void load()}>
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </IconButton>
-        ) : undefined
+        <IconButton title="Relancer l'audit" onClick={() => void load()}>
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+        </IconButton>
       }
     >
-      {tab !== "audit" && (
-        <div className="p-6">
-          {tab === "f2b" && <Fail2ban serverId={serverId} />}
-          {tab === "firewall" && <Firewall serverId={serverId} />}
-          {tab === "access" && <Access serverId={serverId} />}
-        </div>
-      )}
-      <div className={`p-6 ${tab === "audit" ? "" : "hidden"}`}>
-        {error && <div className="mb-4"><ErrorState message={error} onRetry={() => void load()} retryLabel="Relancer l'audit" /></div>}
-        {!report && !error && <EmptyState icon={<ShieldCheck size={36} className="animate-pulse" />} title="Audit en cours…" />}
-        {report && (
-          <div className="flex flex-col gap-3">
+      {/* Une seule page : l'audit dit quoi corriger, les outils sont juste en dessous, dans l'ordre
+          où l'on s'en sert. Les anciens sous-onglets obligeaient à faire des allers-retours. */}
+      <div className="flex flex-col gap-8 p-6">
+        <section className="flex flex-col gap-3">
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-sm font-semibold">Audit</h2>
+            <span className="text-xs text-muted">
+              {problems.length > 0 ? `${problems.length} point(s) à traiter` : "lecture seule : rien n'est modifié sans ton accord"}
+            </span>
+          </div>
+          {error && <ErrorState message={error} onRetry={() => void load()} retryLabel="Relancer l'audit" />}
+          {!report && !error && <EmptyState icon={<ShieldCheck size={36} className="animate-pulse" />} title="Audit en cours…" />}
+          {report && (
+            <div className="flex flex-col gap-3">
             {problems.length === 0 && (
               <div className="flex items-center gap-2 rounded-lg border border-ok/40 bg-ok/10 px-4 py-3 text-sm">
                 <CheckCircle2 size={16} className="text-ok" /> Aucun problème détecté.
@@ -197,8 +185,8 @@ function Security({ serverId }: { serverId: string }) {
               </div>
             )}
             {ok.length > 0 && (
-              <div className="mt-4">
-                <h2 className="mb-2 text-sm font-medium text-muted">Points conformes</h2>
+              <div className="mt-2">
+                <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">Points conformes</h3>
                 <div className="flex flex-wrap gap-2">
                   {ok.map((f) => (
                     <span key={f.id} className="flex items-center gap-1.5 rounded-full border border-ok/30 px-3 py-1 text-xs">
@@ -208,8 +196,24 @@ function Security({ serverId }: { serverId: string }) {
                 </div>
               </div>
             )}
-          </div>
-        )}
+            </div>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold">Pare-feu</h2>
+          <Firewall serverId={serverId} />
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold">fail2ban</h2>
+          <Fail2ban serverId={serverId} />
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold">Accès SSH</h2>
+          <Access serverId={serverId} />
+        </section>
       </div>
       {fixing && (
         <FixDialog

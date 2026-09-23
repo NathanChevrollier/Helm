@@ -51,7 +51,7 @@ export default function Firewall({ serverId }: { serverId: string }) {
   const exposed = state.exposures.filter((e) => e.status === "open");
 
   return (
-    <div className="flex max-w-5xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <div className="flex items-center gap-2 text-sm">
         <BrickWall size={15} className="text-muted" />
         {state.kind === "none" ? (

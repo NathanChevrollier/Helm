@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box, ChevronDown, ChevronRight, Container as ContainerIcon, FileCode2, FileSearch, Folder, FolderInput, FolderOpen, FolderPlus, Plus,
-  Layers, Pause, Play, RefreshCw, RotateCw, ScrollText,
+  Layers, MoreHorizontal, Pause, Play, RefreshCw, RotateCw, ScrollText,
   Cable, GitBranch, Lock, Rocket, Square, SquareTerminal, Trash2, UploadCloud,
 } from "lucide-react";
 import {
@@ -409,6 +409,7 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
   const [editing, setEditing] = useState<string | null>(null);
   const [github, setGithub] = useState<ComposeProject | null>(null);
   const [creating, setCreating] = useState(false);
+  const [projectMenu, setProjectMenu] = useState<{ project: ComposeProject; file: string; x: number; y: number } | null>(null);
 
   const newProjectButton = (
     <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating(true)}>
@@ -462,39 +463,75 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
       {data.projects.map((p) => {
         const file = p.configFiles.split(",")[0];
         const b = (a: string) => busy === `${p.name}:${a}`;
+        const services = containersOf(p.name);
+        const enMarche = services.filter((c) => c.state === "running").length;
+        const arrete = services.length > 0 && enMarche === 0;
         return (
-          <div key={p.name} className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 font-medium">
-                  <Layers size={15} className="text-accent" />
-                  {p.name}
+          <div key={p.name} className="flex flex-col overflow-hidden rounded-lg border border-border bg-panel">
+            <div className="flex items-start gap-2 border-b border-border px-4 py-3">
+              <Layers size={15} className="mt-0.5 shrink-0 text-accent" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{p.name}</div>
+                <div className="truncate font-mono text-xs text-muted" title={p.configFiles}>
+                  {file}
                 </div>
-                <div className="mt-0.5 truncate font-mono text-xs text-muted" title={p.configFiles}>{file}</div>
               </div>
-              <Badge tone={p.status.startsWith("running") ? "ok" : "muted"}>{p.status}</Badge>
+              <Badge tone={arrete ? "muted" : enMarche === services.length ? "ok" : "warn"}>
+                {services.length > 0 ? `${enMarche}/${services.length} en cours` : p.status}
+              </Badge>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {containersOf(p.name).map((c) => (
-                <span key={c.id} className="flex items-center gap-1.5 rounded border border-border px-2 py-0.5 text-xs">
-                  <span className={`size-1.5 rounded-full ${c.state === "running" ? "bg-ok" : "bg-muted"}`} />
-                  {c.composeService ?? c.name}
-                </span>
+
+            {/* Les services en liste plutôt qu'en pastilles : on y lit l'état, l'image et les ports. */}
+            <ul className="flex flex-col divide-y divide-border/60">
+              {services.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 px-4 py-2 text-[13px]">
+                  <span className={`size-1.5 shrink-0 rounded-full ${c.state === "running" ? "bg-ok" : "bg-muted"}`} />
+                  <span className="min-w-0 flex-1 truncate">{c.composeService ?? c.name}</span>
+                  <span className="hidden truncate font-mono text-[11px] text-muted sm:block">{c.image.split("@")[0]}</span>
+                  {c.ports.length > 0 && (
+                    <span className="shrink-0 font-mono text-[11px] text-muted">{c.ports.map((x) => `${x.hostPort}→${x.containerPort}`).join(" ")}</span>
+                  )}
+                </li>
               ))}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" variant="primary" icon={<Play size={12} />} loading={b("up")} onClick={() => void act(p, "up", "Démarrer (up -d)")}>Up</Button>
-              <Button size="sm" variant="primary" icon={<Rocket size={12} />} onClick={() => void deployProject(serverId, p)}>Déployer</Button>
-              <Button size="sm" icon={<UploadCloud size={12} />} loading={b("update")} onClick={() => void act(p, "update", "Mettre à jour (pull + up)")}>Mettre à jour</Button>
-              <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>Redémarrer</Button>
-              <Button size="sm" icon={<ScrollText size={12} />} onClick={async () => openTab(serverId, { title: `${p.name} (logs)`, command: (await api.composeCommand(p, "logs -f --tail 200")).replace(/^docker /, `${docker} `) })}>
+              {services.length === 0 && <li className="px-4 py-2 text-[13px] text-muted">Aucun conteneur en cours pour ce projet.</li>}
+            </ul>
+
+            {/* Deux actions courantes en clair, le reste rangé derrière « … ». */}
+            <div className="mt-auto flex items-center gap-1.5 border-t border-border px-4 py-2.5">
+              <Button size="sm" variant="primary" icon={<Rocket size={12} />} onClick={() => void deployProject(serverId, p)}>
+                Déployer
+              </Button>
+              {arrete ? (
+                <Button size="sm" icon={<Play size={12} />} loading={b("up")} onClick={() => void act(p, "up", "Démarrer (up -d)")}>
+                  Démarrer
+                </Button>
+              ) : (
+                <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>
+                  Redémarrer
+                </Button>
+              )}
+              <Button
+                size="sm"
+                icon={<ScrollText size={12} />}
+                onClick={async () =>
+                  openTab(serverId, {
+                    title: `${p.name} (logs)`,
+                    command: (await api.composeCommand(p, "logs -f --tail 200")).replace(/^docker /, `${docker} `),
+                  })
+                }
+              >
                 Logs
               </Button>
-              <Button size="sm" icon={<FileCode2 size={12} />} onClick={() => setEditing(file)}>Éditer</Button>
-              <Button size="sm" icon={<GitBranch size={12} />} onClick={() => setGithub(p)}>GitHub</Button>
-              <Button size="sm" variant="danger" icon={<Square size={12} />} loading={b("down")} onClick={() => void act(p, "down", "Arrêter et supprimer (down)", "Les conteneurs du projet seront arrêtés et supprimés (les volumes nommés sont conservés). Le site sera indisponible.")}>
-                Down
-              </Button>
+              <IconButton
+                title="Autres actions"
+                className="ml-auto"
+                onClick={(e) => {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setProjectMenu({ project: p, file, x: Math.max(8, r.right - 240), y: r.bottom + 4 });
+                }}
+              >
+                <MoreHorizontal size={16} />
+              </IconButton>
             </div>
           </div>
         );
@@ -510,6 +547,37 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
         </Suspense>
       )}
       {github && <GithubDeployDialog serverId={serverId} project={github} onClose={() => setGithub(null)} />}
+      {projectMenu && (
+        <ContextMenu
+          x={projectMenu.x}
+          y={projectMenu.y}
+          onClose={() => setProjectMenu(null)}
+          items={[
+            {
+              label: "Mettre à jour (pull + up)",
+              icon: <UploadCloud size={14} />,
+              onClick: () => void act(projectMenu.project, "update", "Mettre à jour (pull + up)"),
+            },
+            { label: "Redémarrer", icon: <RotateCw size={14} />, onClick: () => void act(projectMenu.project, "restart", "Redémarrer") },
+            "separator",
+            { label: "Éditer le compose.yml", icon: <FileCode2 size={14} />, onClick: () => setEditing(projectMenu.file) },
+            { label: "Déploiement depuis GitHub…", icon: <GitBranch size={14} />, onClick: () => setGithub(projectMenu.project) },
+            "separator",
+            {
+              label: "Arrêter et supprimer (down)",
+              icon: <Square size={14} />,
+              danger: true,
+              onClick: () =>
+                void act(
+                  projectMenu.project,
+                  "down",
+                  "Arrêter et supprimer (down)",
+                  "Les conteneurs du projet seront arrêtés et supprimés (les volumes nommés sont conservés). Le site sera indisponible.",
+                ),
+            },
+          ]}
+        />
+      )}
     </div>
     {creator}
     </>
