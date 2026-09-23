@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
-import { Lock, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShipWheel, Sparkles, type LucideIcon } from "lucide-react";
+import { GitBranch, Lock, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShipWheel, Sparkles, type LucideIcon } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./lib/api";
 import { useApp, useAppPick } from "./lib/store";
 import { SECTIONS, type SectionId } from "./sections";
@@ -179,6 +180,7 @@ export default function App() {
             onClick={() => useLock.getState().lock()}
           />
         )}
+        <RailButton label="Contact" icon={GitBranch} expanded={railOpen} active={false} onClick={() => void openUrl("https://github.com/NathanChevrollier/Helm/invitations?invite_token=ctEWWqCj9B")} />
         <RailButton label={helpSection.label} icon={helpSection.icon} expanded={railOpen} active={section === "help"} onClick={() => setSection("help")} />
         <RailButton label={settingsSection.label} icon={settingsSection.icon} expanded={railOpen} active={section === "settings"} onClick={() => setSection("settings")} />
       </nav>

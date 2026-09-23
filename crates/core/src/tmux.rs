@@ -100,9 +100,7 @@ pub fn scroll_command(name: &str, up: bool, lines: u32) -> Result<String> {
     }
     let lines = lines.clamp(1, 200);
     let direction = if up { "scroll-up" } else { "scroll-down" };
-    Ok(format!(
-        "tmux copy-mode -e -t {name} 2>/dev/null; tmux send-keys -t {name} -X -N {lines} {direction} 2>/dev/null; true"
-    ))
+    Ok(format!("tmux copy-mode -e -t {name} 2>/dev/null; tmux send-keys -t {name} -X -N {lines} {direction} 2>/dev/null; true"))
 }
 
 /// Préfixe des erreurs « pas de gestionnaire de paquets utilisable » : l'UI cesse alors de

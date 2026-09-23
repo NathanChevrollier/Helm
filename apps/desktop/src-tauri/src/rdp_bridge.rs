@@ -87,10 +87,14 @@ pub async fn start(host: String, port: u16) -> Result<Bridge, String> {
 async fn serve(stream: TcpStream, token: &str, host: &str, port: u16) -> Result<(), String> {
     let chemin_attendu = format!("/{token}");
     let mut autorise = false;
-    let ws = tokio_tungstenite::accept_hdr_async(stream, |req: &tokio_tungstenite::tungstenite::handshake::server::Request, res: tokio_tungstenite::tungstenite::handshake::server::Response| {
-        autorise = req.uri().path() == chemin_attendu;
-        Ok(res)
-    })
+    let ws = tokio_tungstenite::accept_hdr_async(
+        stream,
+        |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
+         res: tokio_tungstenite::tungstenite::handshake::server::Response| {
+            autorise = req.uri().path() == chemin_attendu;
+            Ok(res)
+        },
+    )
     .await
     .map_err(|e| format!("WebSocket refusée : {e}"))?;
     if !autorise {
@@ -130,12 +134,11 @@ async fn serve(stream: TcpStream, token: &str, host: &str, port: u16) -> Result<
         .with_custom_certificate_verifier(Arc::new(SansVerification(Arc::new(rustls::crypto::ring::default_provider()))))
         .with_no_client_auth();
     let nom = ServerName::try_from(host.to_string()).map_err(|_| format!("nom de machine invalide : {host}"))?;
-    let tls = tokio_rustls::TlsConnector::from(Arc::new(config))
-        .connect(nom, tcp)
-        .await
-        .map_err(|e| format!("TLS refusé par {host} : {e}"))?;
+    let tls =
+        tokio_rustls::TlsConnector::from(Arc::new(config)).connect(nom, tcp).await.map_err(|e| format!("TLS refusé par {host} : {e}"))?;
     // Le client vérifie lui-même la chaîne : on la lui transmet telle quelle.
-    let chaine: Vec<Vec<u8>> = tls.get_ref().1.peer_certificates().map(|c| c.iter().map(|c| c.as_ref().to_vec()).collect()).unwrap_or_default();
+    let chaine: Vec<Vec<u8>> =
+        tls.get_ref().1.peer_certificates().map(|c| c.iter().map(|c| c.as_ref().to_vec()).collect()).unwrap_or_default();
 
     let reponse = RDCleanPathPdu::new_response(format!("{host}:{port}"), reponse_x224, chaine)
         .map_err(|e| format!("réponse impossible à construire : {e}"))?
@@ -206,11 +209,21 @@ impl ServerCertVerifier for SansVerification {
         Ok(ServerCertVerified::assertion())
     }
 
-    fn verify_tls12_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> {
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
         rustls::crypto::verify_tls12_signature(message, cert, dss, &self.0.signature_verification_algorithms)
     }
 
-    fn verify_tls13_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> {
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
         rustls::crypto::verify_tls13_signature(message, cert, dss, &self.0.signature_verification_algorithms)
     }
 
