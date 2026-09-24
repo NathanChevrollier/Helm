@@ -84,16 +84,18 @@ export default function RemoteDesktopSession() {
         el.setAttribute("flexcenter", "true");
         el.style.width = "100%";
         el.style.height = "100%";
+        el.style.display = "block";
         el.module = Backend;
 
         el.addEventListener("ready", (event) => {
-          const ui = (event as CustomEvent<UserInteraction>).detail;
+          const detail = (event as CustomEvent).detail as (UserInteraction & { irgUserInteraction?: UserInteraction }) | undefined;
+          const ui = (detail?.irgUserInteraction ?? detail) as UserInteraction;
           uiRef.current = ui;
-          ui.onWarningCallback((m) => console.warn("[RDP]", m));
-          ui.setEnableClipboard(true);
+          ui.onWarningCallback?.((m) => console.warn("[RDP]", m));
+          ui.setEnableClipboard?.(true);
           // Le presse-papiers suit dans les deux sens, comme dans un client RDP courant.
-          ui.setEnableAutoClipboard(true);
-          ui.setKeyboardUnicodeMode(true);
+          ui.setEnableAutoClipboard?.(true);
+          ui.setKeyboardUnicodeMode?.(true);
 
           const config = ui
             .configBuilder()
@@ -110,6 +112,7 @@ export default function RemoteDesktopSession() {
           ui.connect(config.build()).then(
             async (info) => {
               if (annule) return;
+              ui.setVisibility?.(true);
               setState({ kind: "connecte" });
               // `run()` ne rend la main qu'à la fin de la session (fermeture, déconnexion, erreur).
               try {
@@ -131,7 +134,7 @@ export default function RemoteDesktopSession() {
 
     return () => {
       annule = true;
-      uiRef.current?.shutdown();
+      uiRef.current?.shutdown?.();
       uiRef.current = null;
       conteneur.replaceChildren();
     };
@@ -146,7 +149,11 @@ export default function RemoteDesktopSession() {
       if (minuteur) clearTimeout(minuteur);
       minuteur = setTimeout(() => {
         const { width, height } = cible.getBoundingClientRect();
-        if (width > 100 && height > 100) uiRef.current?.resize(Math.round(width), Math.round(height));
+        if (width > 100 && height > 100) {
+          const w = Math.floor(width / 16) * 16;
+          const h = Math.floor(height / 16) * 16;
+          uiRef.current?.resize?.(w, h);
+        }
       }, 300);
     });
     observer.observe(cible);
@@ -187,10 +194,10 @@ export default function RemoteDesktopSession() {
         </span>
 
         <div className="ml-auto flex items-center gap-1">
-          <IconButton title="Envoyer Ctrl+Alt+Suppr" disabled={!connecte} onClick={() => uiRef.current?.ctrlAltDel()}>
+          <IconButton title="Envoyer Ctrl+Alt+Suppr" disabled={!connecte} onClick={() => uiRef.current?.ctrlAltDel?.()}>
             <Keyboard size={15} />
           </IconButton>
-          <IconButton title="Coller dans la machine (Ctrl+V)" disabled={!connecte} onClick={() => uiRef.current?.ctrlV()}>
+          <IconButton title="Coller dans la machine (Ctrl+V)" disabled={!connecte} onClick={() => uiRef.current?.ctrlV?.()}>
             <ClipboardPaste size={15} />
           </IconButton>
           <IconButton
@@ -200,7 +207,7 @@ export default function RemoteDesktopSession() {
             onClick={() => {
               const suivant = !unicode;
               setUnicode(suivant);
-              uiRef.current?.setKeyboardUnicodeMode(suivant);
+              uiRef.current?.setKeyboardUnicodeMode?.(suivant);
             }}
           >
             <Type size={15} />
@@ -211,7 +218,7 @@ export default function RemoteDesktopSession() {
             onClick={() => {
               const suivant = !ajuste;
               setAjuste(suivant);
-              uiRef.current?.setScale(suivant ? ECHELLE_AJUSTEE : ECHELLE_REELLE);
+              uiRef.current?.setScale?.(suivant ? ECHELLE_AJUSTEE : ECHELLE_REELLE);
             }}
           >
             <ScanLine size={15} />

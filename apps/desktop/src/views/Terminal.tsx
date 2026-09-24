@@ -111,7 +111,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
     const onKey = (e: KeyboardEvent) => {
       if (matches(e, "newTab") && activeServerId) {
         e.preventDefault();
-        openTab(current?.serverId ?? activeServerId);
+        openTab(activeServerId);
       } else if (matches(e, "closeTab") && current) {
         e.preventDefault();
         void close(current);
@@ -221,7 +221,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
             title="Nouveau terminal (Ctrl+Shift+T)"
             className="m-2"
             disabled={!activeServerId}
-            onClick={() => activeServerId && openTab(current?.serverId ?? activeServerId)}
+            onClick={() => activeServerId && openTab(activeServerId)}
           >
             <Plus size={15} />
           </IconButton>

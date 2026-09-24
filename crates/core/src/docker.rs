@@ -316,6 +316,7 @@ pub async fn compose_action(
             "up" => "up -d --remove-orphans",
             "pull" => "pull",
             "update" => "pull",
+            "rebuild" => "down",
             "restart" => "restart",
             "stop" => "stop",
             "down" => "down",
@@ -324,6 +325,11 @@ pub async fn compose_action(
         let base = compose_args(project)?;
         let mut out = run(conn, access, sudo, &format!("{base} {sub} 2>&1")).await?.into_result()?.stdout;
         if action == "update" {
+            out.push_str(&run(conn, access, sudo, &format!("{base} up -d --remove-orphans 2>&1")).await?.into_result()?.stdout);
+        }
+        if action == "rebuild" {
+            out.push_str(&run(conn, access, sudo, &format!("{base} pull 2>&1")).await?.into_result()?.stdout);
+            out.push_str(&run(conn, access, sudo, &format!("{base} build --pull 2>&1")).await?.into_result()?.stdout);
             out.push_str(&run(conn, access, sudo, &format!("{base} up -d --remove-orphans 2>&1")).await?.into_result()?.stdout);
         }
         Ok(out)

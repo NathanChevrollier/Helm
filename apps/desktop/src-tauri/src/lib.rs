@@ -133,6 +133,7 @@ pub fn run() {
             assistant::ai_reset,
             files::fs_home,
             files::fs_list,
+            files::fs_exec,
             files::fs_read,
             files::fs_read_range,
             files::fs_write,

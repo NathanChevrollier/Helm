@@ -43,6 +43,25 @@ pub async fn fs_list(store: State<'_, Store>, sessions: State<'_, Sessions>, ser
     Ok(listing)
 }
 
+/// Exécute une commande ponctuelle dans le dossier affiché par l'explorateur.
+/// La commande est volontairement saisie par l'utilisateur, comme dans un terminal ouvert.
+#[tauri::command]
+pub async fn fs_exec(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    cwd: String,
+    command: String,
+) -> Result<helm_core::ExecOutput, String> {
+    let cwd = if cwd.trim().is_empty() { "/" } else { cwd.trim() };
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("Commande vide".to_string());
+    }
+    let shell_command = format!("cd -- {} && {}", shell_quote(cwd), command);
+    sessions.get(&store, &server_id).await?.exec(&shell_command, None).await.map_err(err)
+}
+
 /// Lit en root : taille du fichier sur la première ligne, puis `len` octets à partir de `offset`
 /// en base64 (les octets arrivent intacts, quel que soit l'encodage du fichier).
 async fn sudo_read(conn: &helm_core::Connection, pw: Option<&str>, path: &str, offset: u64, len: u64) -> Result<(u64, Vec<u8>), String> {

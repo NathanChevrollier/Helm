@@ -34,7 +34,7 @@ function parent(path: string): string {
  * (cd), permet d'ouvrir, envoyer, télécharger, ou d'insérer un chemin dans la ligne de commande.
  */
 export default function TerminalFiles({ paneId, visible }: { paneId: string; visible: boolean }) {
-  const { notify, setFilesPath, setSection, setActiveServer } = useAppPick("notify", "setFilesPath", "setSection", "setActiveServer");
+  const { notify, setFilesPath, setSection, setActiveServer, settings, setSettings } = useAppPick("notify", "setFilesPath", "setSection", "setActiveServer", "settings", "setSettings");
   const pane = usePanes((s) => s.panes[paneId]);
   const serverId = pane?.serverId;
   const connected = useApp((s) => s.servers.find((x) => x.id === serverId)?.connected ?? false);
@@ -51,7 +51,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
    */
   const [link, setLink] = useState<"terminal" | "panneau" | "aucun">("terminal");
   const follow = link === "terminal";
-  const [showHidden, setShowHidden] = useState(false);
+  const showHidden = settings.showHiddenFiles;
   const [editing, setEditing] = useState<string | null>(null);
   /** Dernier dossier vu dans le terminal : on ne suit que ses changements (la navigation manuelle reste). */
   const lastCwd = useRef<string | null>(null);
@@ -262,7 +262,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
         ))}
       </div>
       <label className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-xs text-muted">
-        <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+        <input type="checkbox" checked={showHidden} onChange={(e) => setSettings({ showHiddenFiles: e.target.checked })} />
         Fichiers cachés
         <span className="ml-auto truncate" title="Glisse des fichiers de Windows sur le terminal : ils sont envoyés dans son dossier courant.">
           Glisser sur le terminal : envoi

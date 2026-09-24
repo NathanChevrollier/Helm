@@ -128,7 +128,7 @@ function Explorer({
   onToggleDual: () => void;
   onServerChange?: (id: string) => void;
 }) {
-  const { notify, ask, openTab, servers, filesPaths, setFilesPath, addBookmark, removeBookmark, renameBookmark } = useAppPick("notify", "ask", "openTab", "servers", "filesPaths", "setFilesPath", "addBookmark", "removeBookmark", "renameBookmark");
+  const { notify, ask, openTab, servers, filesPaths, setFilesPath, addBookmark, removeBookmark, renameBookmark, settings, setSettings } = useAppPick("notify", "ask", "openTab", "servers", "filesPaths", "setFilesPath", "addBookmark", "removeBookmark", "renameBookmark", "settings", "setSettings");
   const bookmarks = useApp((s) => s.bookmarks[serverId]) ?? [];
   const root = useRef<HTMLDivElement>(null);
   const version = usePanes((s) => s.version[pane]);
@@ -138,11 +138,18 @@ function Explorer({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
+  const showHidden = settings.showHiddenFiles;
   const [filter, setFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [chmodOf, setChmodOf] = useState<FsEntry | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [miniTerminalOpen, setMiniTerminalOpen] = useState(false);
+  const [miniCommand, setMiniCommand] = useState("");
+  const [miniOutput, setMiniOutput] = useState<string[]>([]);
+  const [miniHistory, setMiniHistory] = useState<string[]>([]);
+  const [miniHistoryIndex, setMiniHistoryIndex] = useState(-1);
+  const [miniRunning, setMiniRunning] = useState(false);
+  const miniInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
     async (path: string) => {
@@ -182,6 +189,25 @@ function Explorer({
   const cwd = listing?.path ?? "";
   cwdRef.current = cwd;
   const refresh = () => void load(cwd);
+  const runMiniCommand = async () => {
+    const command = miniCommand.trim();
+    if (!command || !cwd || miniRunning) return;
+    setMiniRunning(true);
+    setMiniHistory((history) => [command, ...history.filter((item) => item !== command)].slice(0, 50));
+    setMiniHistoryIndex(-1);
+    setMiniOutput((output) => [...output, `$ ${command}`]);
+    setMiniCommand("");
+    try {
+      const result = await api.fsExec(serverId, cwd, command);
+      const output = [result.stdout.trimEnd(), result.stderr.trimEnd()].filter(Boolean).join("\n");
+      setMiniOutput((lines) => [...lines, output || `(code ${result.exitCode})`].slice(-100));
+    } catch (e) {
+      setMiniOutput((lines) => [...lines, errorMessage(e)].slice(-100));
+    } finally {
+      setMiniRunning(false);
+      miniInputRef.current?.focus();
+    }
+  };
   useEffect(() => {
     if (version > 0) void load(cwdRef.current);
   }, [version, load]);
@@ -392,13 +418,62 @@ function Explorer({
           <Input className="font-mono text-xs" value={pathInput} onChange={(e) => setPathInput(e.target.value)} aria-label="Chemin" />
         </form>
         <Input className="!w-44" placeholder="Filtrer…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <IconButton title={showHidden ? "Masquer les fichiers cachés" : "Afficher les fichiers cachés"} onClick={() => setShowHidden((v) => !v)}>
+        <IconButton
+          title={miniTerminalOpen ? "Fermer le mini terminal" : "Ouvrir le mini terminal dans ce dossier"}
+          className={miniTerminalOpen ? "text-accent" : ""}
+          aria-pressed={miniTerminalOpen}
+          onClick={() => {
+            setMiniTerminalOpen((open) => !open);
+            setTimeout(() => miniInputRef.current?.focus(), 0);
+          }}
+        >
+          <SquareTerminal size={15} />
+        </IconButton>
+        <IconButton title={showHidden ? "Masquer les fichiers cachés" : "Afficher les fichiers cachés"} onClick={() => setSettings({ showHiddenFiles: !showHidden })}>
           {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
         </IconButton>
         <IconButton title={dual ? "Fermer le double panneau" : "Double panneau (copie entre serveurs)"} className={dual ? "text-accent" : ""} onClick={onToggleDual}>
           <Columns2 size={15} />
         </IconButton>
       </div>
+
+      {miniTerminalOpen && (
+        <div className="shrink-0 border-b border-border bg-panel px-3 py-2">
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void runMiniCommand();
+            }}
+          >
+            <span className="shrink-0 font-mono text-xs text-accent" title={cwd}>
+              {cwd || "…"} $
+            </span>
+            <Input
+              ref={miniInputRef}
+              className="h-8 flex-1 font-mono text-xs"
+              value={miniCommand}
+              disabled={!cwd || miniRunning}
+              placeholder={cwd ? "Entrer une commande…" : "Chargement du dossier…"}
+              onChange={(event) => setMiniCommand(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                event.preventDefault();
+                const next = event.key === "ArrowUp" ? Math.min(miniHistoryIndex + 1, miniHistory.length - 1) : Math.max(miniHistoryIndex - 1, -1);
+                setMiniHistoryIndex(next);
+                setMiniCommand(next < 0 ? "" : (miniHistory[next] ?? ""));
+              }}
+              aria-label={`Commande dans ${cwd}`}
+            />
+            <Button size="sm" type="submit" variant="primary" loading={miniRunning} disabled={!cwd || !miniCommand.trim()}>
+              Exécuter
+            </Button>
+          </form>
+          {miniOutput.length > 0 && (
+            <pre className="mt-2 max-h-32 overflow-auto rounded border border-border bg-bg p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{miniOutput.join("\n")}</pre>
+          )}
+        </div>
+      )}
 
       {bookmarks.length > 0 && (
         <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-3 py-1.5" aria-label="Raccourcis">

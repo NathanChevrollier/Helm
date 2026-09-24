@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { CloudCog, FileSymlink, RefreshCw } from "lucide-react";
+import { CloudCog, Copy, FileSymlink, RefreshCw } from "lucide-react";
 import { api, errorMessage, type SyncMode, type SyncView } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
 import { runSync, useSync } from "../lib/sync";
 import { useApp } from "../lib/store";
 import { Button, Field, Input } from "./ui";
@@ -11,6 +12,21 @@ const MODES: { id: SyncMode; label: string }[] = [
   { id: "file", label: "Fichier partagé" },
   { id: "server", label: "Serveur (Docker)" },
 ];
+
+const SERVER_COMPOSE = `services:
+  helm-sync:
+    build: .
+    container_name: helm-sync
+    restart: unless-stopped
+    environment:
+      HELM_SYNC_TOKENS: \${HELM_SYNC_TOKENS}
+    volumes:
+      - helm-sync-data:/data
+    ports:
+      - "127.0.0.1:8091:8080"
+
+volumes:
+  helm-sync-data:`;
 
 /** Réglage de la synchronisation entre PC (Réglages → Préférences). */
 export default function SyncSettings() {
@@ -104,14 +120,29 @@ export default function SyncSettings() {
         </Field>
       )}
       {mode === "server" && (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Adresse du serveur" hint="Serveur helm-sync (dossier sync-server du dépôt : Dockerfile, compose, bloc nginx).">
-            <Input value={url} placeholder="https://sync.exemple.fr" onChange={(e) => setUrl(e.target.value)} />
-          </Field>
-          <Field label="Jeton" hint={kept(view?.hasToken) ?? "Valeur de HELM_SYNC_TOKENS sur le serveur."}>
-            <Input type="password" value={token} autoComplete="off" onChange={(e) => setToken(e.target.value)} />
-          </Field>
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Adresse du serveur" hint="Serveur helm-sync (dossier sync-server du dépôt : Dockerfile, compose, bloc nginx).">
+              <Input value={url} placeholder="https://sync.exemple.fr" onChange={(e) => setUrl(e.target.value)} />
+            </Field>
+            <Field label="Jeton" hint={kept(view?.hasToken) ?? "Valeur de HELM_SYNC_TOKENS sur le serveur."}>
+              <Input type="password" value={token} autoComplete="off" onChange={(e) => setToken(e.target.value)} />
+            </Field>
+          </div>
+          <details className="rounded-md border border-border bg-bg p-3 text-xs">
+            <summary className="cursor-pointer font-medium text-fg">Déployer le serveur Docker</summary>
+            <div className="mt-3 flex flex-col gap-3 text-muted">
+              <p>Sur le VPS, lance <code>docker compose up -d --build</code> depuis <code>sync-server</code>. Le volume <code>helm-sync-data</code> conserve les données chiffrées; le port 8091 reste local et doit être exposé uniquement par nginx en HTTPS.</p>
+              <div className="relative">
+                <pre className="overflow-x-auto rounded border border-border p-3 font-mono text-[11px] text-fg">{SERVER_COMPOSE}</pre>
+                <Button type="button" size="sm" className="absolute top-2 right-2" icon={<Copy size={13} />} onClick={() => void writeClipboard(SERVER_COMPOSE).then(() => notify("Compose copié", "success"))}>
+                  Copier
+                </Button>
+              </div>
+              <p>Configure <code>HELM_SYNC_TOKENS</code> dans <code>.env</code> avec <code>openssl rand -hex 32</code>, garde le fichier en <code>chmod 600</code>, puis utilise l’URL HTTPS du sous-domaine dans Helm.</p>
+            </div>
+          </details>
+        </>
       )}
       {mode !== "off" && (
         <>

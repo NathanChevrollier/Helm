@@ -77,6 +77,8 @@ export interface Settings {
   terminalStatusBar: boolean;
   /** Actualisation automatique des pages (Docker, sites, fichiers…), en secondes (0 : manuelle). */
   autoRefreshSecs: number;
+  /** Afficher les fichiers et dossiers dont le nom commence par un point. */
+  showHiddenFiles: boolean;
 }
 
 /** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
@@ -260,7 +262,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15 },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15, showHiddenFiles: false },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],

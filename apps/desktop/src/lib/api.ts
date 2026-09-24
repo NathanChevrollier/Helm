@@ -880,6 +880,7 @@ export const api = {
 
   fsHome: (serverId: string) => invoke<string>("fs_home", { serverId }),
   fsList: (serverId: string, path: string) => invoke<Listing>("fs_list", { serverId, path }),
+  fsExec: (serverId: string, cwd: string, command: string) => invoke<{ stdout: string; stderr: string; exitCode: number }>("fs_exec", { serverId, cwd, command }),
   /** Fichier entier (≤ 50 Mo), reçu en octets bruts. Erreurs `TOO_BIG:<taille>` et `NOT_UTF8` : utiliser `fsReadRange`. */
   fsRead: async (serverId: string, path: string, sudo = false) =>
     new TextDecoder().decode(await invoke<ArrayBuffer>("fs_read", { serverId, path, sudo })),

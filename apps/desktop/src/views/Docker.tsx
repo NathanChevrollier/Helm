@@ -558,6 +558,18 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
               icon: <UploadCloud size={14} />,
               onClick: () => void act(projectMenu.project, "update", "Mettre à jour (pull + up)"),
             },
+            {
+              label: "Reconstruire complètement (down + pull + build + up)",
+              icon: <RotateCw size={14} />,
+              danger: true,
+              onClick: () =>
+                void act(
+                  projectMenu.project,
+                  "rebuild",
+                  "Reconstruire complètement",
+                  "Le projet sera arrêté, les images seront récupérées, les services seront reconstruits puis redémarrés. Les volumes nommés sont conservés, mais le service sera indisponible pendant l'opération.",
+                ),
+            },
             { label: "Redémarrer", icon: <RotateCw size={14} />, onClick: () => void act(projectMenu.project, "restart", "Redémarrer") },
             "separator",
             { label: "Éditer le compose.yml", icon: <FileCode2 size={14} />, onClick: () => setEditing(projectMenu.file) },

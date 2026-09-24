@@ -129,9 +129,12 @@ async fn serve(stream: TcpStream, token: &str, host: &str, port: u16) -> Result<
     tcp.write_all(&x224).await.map_err(|e| e.to_string())?;
     let reponse_x224 = lire_tpkt(&mut tcp).await?;
 
-    let config = rustls::ClientConfig::builder()
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| e.to_string())?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(SansVerification(Arc::new(rustls::crypto::ring::default_provider()))))
+        .with_custom_certificate_verifier(Arc::new(SansVerification(provider)))
         .with_no_client_auth();
     let nom = ServerName::try_from(host.to_string()).map_err(|_| format!("nom de machine invalide : {host}"))?;
     let tls =
