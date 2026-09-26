@@ -23,6 +23,15 @@ export interface Toast {
   message: string;
 }
 
+export interface NotificationEntry extends Toast {
+  /** Horodatage (ms). */
+  at: number;
+  /** Serveur actif au moment de la notification, pour le contexte. */
+  serverId: string | null;
+}
+
+const MAX_NOTIFICATIONS = 60;
+
 export interface TermTab {
   /** Identifiant stable (survit au redémarrage de l'app). */
   key: string;
@@ -134,6 +143,12 @@ interface State {
 
   toasts: Toast[];
   notify: (message: string, kind?: Toast["kind"]) => void;
+  dismissToast: (id: number) => void;
+  /** Historique des notifications de la session (centre de notifications), les plus récentes d'abord. */
+  notifications: NotificationEntry[];
+  unreadNotifications: number;
+  markNotificationsRead: () => void;
+  clearNotifications: () => void;
 
   settings: Settings;
   setSettings: (patch: Partial<Settings>) => void;
@@ -256,9 +271,19 @@ export const useApp = create<State>((set, get) => ({
   },
 
   toasts: [],
+  notifications: [],
+  unreadNotifications: 0,
+  markNotificationsRead: () => set({ unreadNotifications: 0 }),
+  clearNotifications: () => set({ notifications: [], unreadNotifications: 0 }),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   notify: (message, kind = "info") => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, kind, message }] }));
+    set((s) => ({
+      // Au plus 4 notifications à l'écran : une rafale d'erreurs ne doit pas couvrir la fenêtre.
+      toasts: [...s.toasts, { id, kind, message }].slice(-4),
+      notifications: [{ id, kind, message, at: Date.now(), serverId: s.activeServerId }, ...s.notifications].slice(0, MAX_NOTIFICATIONS),
+      unreadNotifications: s.unreadNotifications + 1,
+    }));
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
