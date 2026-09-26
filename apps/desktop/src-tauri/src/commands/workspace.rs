@@ -207,7 +207,9 @@ pub fn mcp_config() -> Result<McpConfig, String> {
 }
 
 /// Lit un fichier texte du PC choisi par l'utilisateur (partage reçu, au plus 8 Mo).
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn read_text_file(path: String) -> Result<String, String> {
     let meta = std::fs::metadata(&path).map_err(err)?;
     if meta.len() > 8_000_000 {
@@ -217,7 +219,9 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 }
 
 /// Écrit un fichier texte sur le PC (chemin choisi par l'utilisateur dans la boîte de dialogue native).
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn save_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(err)
 }
@@ -248,7 +252,9 @@ fn percent_decode(s: &str) -> Result<String, String> {
 /// corps de la requête, dossier et nom dans les en-têtes). Le nom vient de la machine distante :
 /// il est donc tenu pour hostile — ramené à un simple nom de fichier valide sous Windows, sans
 /// séparateur ni « .. » — et un fichier existant n'est jamais écrasé. Renvoie le chemin écrit.
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn save_binary_file(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("contenu du fichier attendu en octets bruts".into());
@@ -269,7 +275,9 @@ pub fn save_binary_file(request: tauri::ipc::Request<'_>) -> Result<String, Stri
 
 /// Lit un fichier du PC (déposé sur une session de bureau à distance) et le renvoie en octets
 /// bruts, sans passer par du JSON.
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn read_local_file(path: String) -> Result<tauri::ipc::Response, String> {
     let meta = std::fs::metadata(&path).map_err(err)?;
     if !meta.is_file() {
@@ -282,7 +290,9 @@ pub fn read_local_file(path: String) -> Result<tauri::ipc::Response, String> {
 }
 
 /// Exporte les réglages dans un fichier (chiffré si un mot de passe est donné).
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn settings_export(store: State<'_, Store>, path: String, password: String, include_secrets: bool) -> Result<(), String> {
     let text = helm_profiles::export::export(&store, &password, include_secrets)?;
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
@@ -291,7 +301,9 @@ pub fn settings_export(store: State<'_, Store>, path: String, password: String, 
 }
 
 /// Partage d'une sélection de serveurs : texte chiffré, à enregistrer ou à envoyer.
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn settings_share(store: State<'_, Store>, ids: Vec<String>, password: String, include_secrets: bool) -> Result<String, String> {
     let text = helm_profiles::export::share(&store, &ids, &password, include_secrets)?;
     log::info!("partage de {} serveur(s) (secrets : {include_secrets})", ids.len());
@@ -299,13 +311,17 @@ pub fn settings_share(store: State<'_, Store>, ids: Vec<String>, password: Strin
 }
 
 /// Même partage, sous forme de code d'une seule ligne à coller dans une conversation.
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn settings_share_code(store: State<'_, Store>, ids: Vec<String>, password: String, include_secrets: bool) -> Result<String, String> {
     Ok(helm_profiles::export::to_code(&settings_share(store, ids, password, include_secrets)?))
 }
 
 /// Importe un partage reçu (contenu de fichier ou code collé).
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn settings_import_text(
     store: State<'_, Store>,
     text: String,
@@ -324,12 +340,16 @@ pub fn settings_text_encrypted(text: String) -> Result<bool, String> {
 }
 
 /// Le fichier à importer est-il chiffré ?
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn settings_import_encrypted(path: String) -> Result<bool, String> {
     helm_profiles::export::is_encrypted(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
 }
 
-#[tauri::command]
+// Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
+// figeraient toute l'interface le temps de l'opération.
+#[tauri::command(async)]
 pub fn settings_import(store: State<'_, Store>, path: String, password: String) -> Result<helm_profiles::export::ImportSummary, String> {
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let summary = helm_profiles::export::import(&store, &text, &password)?;

@@ -352,8 +352,14 @@ export const useApp = create<State>((set, get) => ({
 // Sauvegarde de l'espace de travail, regroupée pour ne pas écrire à chaque frappe.
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let lastSaved = "";
+let lastRefs: unknown[] = [];
 useApp.subscribe((s) => {
   if (!s.hydrated) return;
+  // Le store change sans cesse (notifications, état des serveurs, transferts…) : on ne sérialise
+  // que si l'une des parties sauvegardées a changé de référence.
+  const refs = [s.section, s.tabs, s.activeTab, s.filesPaths, s.settings, s.recent, s.bookmarks, s.folders];
+  if (refs.length === lastRefs.length && refs.every((r, i) => r === lastRefs[i])) return;
+  lastRefs = refs;
   const snapshot: Persisted = {
     v: 1,
     section: s.section,
