@@ -105,7 +105,7 @@ pub fn readable(path: &str) -> bool {
 
 /// Chemin réel (liens symboliques résolus) : un lien placé dans un dossier autorisé ne doit pas
 /// ouvrir l'accès à un fichier qui ne l'est pas (`/opt/x -> /etc/shadow`).
-async fn real_path(c: &Connection, sudo: Option<&str>, path: &str) -> Result<String, String> {
+pub async fn real_path(c: &Connection, sudo: Option<&str>, path: &str) -> Result<String, String> {
     let out = c.exec_sudo(&format!("readlink -f -- {}", helm_core::ssh::shell_quote(path)), sudo, None).await.map_err(e)?;
     let real = out.stdout.trim();
     if !out.success() || !real.starts_with('/') {

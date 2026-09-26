@@ -56,6 +56,33 @@ pub const DEFAULT_CLAUDE_MODEL: &str = "claude-opus-5";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
+/// Adresse d'API acceptable : HTTPS, ou HTTP vers la machine locale ou le réseau privé (Ollama,
+/// LM Studio sur un autre poste de la maison). Une clé d'API et le contenu des serveurs ne doivent
+/// jamais circuler en clair sur Internet.
+pub fn check_base_url(url: &str) -> Result<(), String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Ok(());
+    }
+    let lower = url.to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("https://") {
+        return if rest.is_empty() { Err("adresse d'API incomplète".into()) } else { Ok(()) };
+    }
+    let Some(rest) = lower.strip_prefix("http://") else {
+        return Err("l'adresse de l'API doit commencer par https:// (ou http:// pour un modèle local)".into());
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // Retire un éventuel identifiant (`user@`) puis le port.
+    let host_port = authority.rsplit('@').next().unwrap_or_default();
+    let host = if let Some(v6) = host_port.strip_prefix('[') { v6.split(']').next().unwrap_or_default() } else { host_port.split(':').next().unwrap_or_default() };
+    let local = host == "localhost" || host == "::1" || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback() || ip.is_private());
+    if local {
+        Ok(())
+    } else {
+        Err("http:// n'est accepté que pour un modèle local (localhost ou réseau privé) : utilise https:// pour un fournisseur distant".into())
+    }
+}
+
 impl Config {
     fn base(&self) -> &str {
         let trimmed = self.base_url.trim().trim_end_matches('/');
@@ -345,6 +372,7 @@ pub fn error_message(status: u16, body: &str) -> String {
 
 /// Envoie la requête et lit la réponse (appel bloquant : à lancer hors du fil de l'interface).
 pub fn send(config: &Config, api_key: &str, body: &Value, timeout: Duration) -> Result<Reply, String> {
+    check_base_url(&config.base_url)?;
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).build().into();
     let mut request = agent.post(config.endpoint());
     for (name, value) in config.headers(api_key) {
@@ -518,5 +546,15 @@ mod tests {
         assert!(error_message(401, r#"{"error":{"message":"invalid x-api-key"}}"#).contains("clé d'API refusée"));
         assert!(error_message(429, "{}").starts_with("trop de requêtes"));
         assert!(error_message(503, "indisponible").contains("fournisseur est en erreur"));
+    }
+
+    #[test]
+    fn base_url_must_be_encrypted_unless_local() {
+        for ok in ["", "https://api.openai.com/v1", "http://localhost:11434/v1", "http://127.0.0.1:1234/v1", "http://[::1]:8080/v1", "http://192.168.1.10:11434/v1"] {
+            assert!(check_base_url(ok).is_ok(), "{ok}");
+        }
+        for bad in ["http://api.example.com/v1", "http://8.8.8.8/v1", "http://localhost.evil.com/v1", "http://127.0.0.1@evil.com/v1", "ftp://x", "api.openai.com"] {
+            assert!(check_base_url(bad).is_err(), "{bad}");
+        }
     }
 }

@@ -52,7 +52,7 @@ export default function AiSettingsPanel({ onOpenAccess }: { onOpenAccess?: () =>
   if (!settings) return null;
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings({ ...settings, [k]: v });
   // Une clé d'API ne doit jamais partir en clair : http:// n'est admis que vers la machine locale.
-  const insecure = settings.provider === "openai" && /^http:\/\//i.test(settings.baseUrl) && !/^http:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(settings.baseUrl);
+  const insecure = settings.provider === "openai" && /^http:\/\//i.test(settings.baseUrl) && !/^http:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(settings.baseUrl);
 
   const save = async () => {
     setSaving(true);
@@ -111,7 +111,7 @@ export default function AiSettingsPanel({ onOpenAccess }: { onOpenAccess?: () =>
             <Field
               label="Adresse de l'API"
               hint="Doit se terminer par /v1 pour la plupart des fournisseurs."
-              error={insecure ? "http:// n'est accepté que pour un modèle local (localhost) : la clé et tes données circuleraient en clair." : null}
+              error={insecure ? "http:// n'est accepté que pour un modèle local (localhost ou réseau privé) : la clé et tes données circuleraient en clair sur Internet." : null}
             >
               <Input value={settings.baseUrl} placeholder="https://api.openai.com/v1" onChange={(e) => set("baseUrl", e.target.value)} />
             </Field>
