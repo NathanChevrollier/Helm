@@ -376,17 +376,52 @@ pub async fn expire(conn: &Connection, sudo: Option<&str>, server: &Server, data
 /// Commandes refusées par la console : elles bloquent le serveur ou détruisent tout, et rien dans
 /// l'interface de Helm n'en a besoin. La liste est volontairement courte et explicite.
 pub const BLOCKED: &[&str] = &[
-    "FLUSHALL", "FLUSHDB", "SHUTDOWN", "DEBUG", "MONITOR", "SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "BLPOP", "BRPOP", "BLMOVE", "BZPOPMIN",
-    "BZPOPMAX", "WAIT", "WAITAOF",
+    "FLUSHALL",
+    "FLUSHDB",
+    "SHUTDOWN",
+    "DEBUG",
+    "MONITOR",
+    "SUBSCRIBE",
+    "PSUBSCRIBE",
+    "SSUBSCRIBE",
+    "BLPOP",
+    "BRPOP",
+    "BLMOVE",
+    "BZPOPMIN",
+    "BZPOPMAX",
+    "WAIT",
+    "WAITAOF",
     // Écriture de fichiers et exécution sur le serveur (`CONFIG SET dir` + `SAVE` est le chemin
     // classique vers l'exécution de code), réplication vers une machine tierce, code Lua.
-    "MODULE", "SCRIPT", "EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO", "FCALL", "FCALL_RO", "FUNCTION", "REPLICAOF", "SLAVEOF", "MIGRATE",
-    "SYNC", "PSYNC", "FAILOVER", "CLUSTER", "SAVE", "BGSAVE", "BGREWRITEAOF", "RESTORE", "RESTORE-ASKING",
+    "MODULE",
+    "SCRIPT",
+    "EVAL",
+    "EVALSHA",
+    "EVAL_RO",
+    "EVALSHA_RO",
+    "FCALL",
+    "FCALL_RO",
+    "FUNCTION",
+    "REPLICAOF",
+    "SLAVEOF",
+    "MIGRATE",
+    "SYNC",
+    "PSYNC",
+    "FAILOVER",
+    "CLUSTER",
+    "SAVE",
+    "BGSAVE",
+    "BGREWRITEAOF",
+    "RESTORE",
+    "RESTORE-ASKING",
 ];
 
 /// Sous-commandes refusées d'une commande par ailleurs utile (`CONFIG GET` reste permis).
-pub const BLOCKED_SUBCOMMANDS: &[(&str, &[&str])] =
-    &[("CONFIG", &["SET", "REWRITE", "RESETSTAT"]), ("ACL", &["SETUSER", "DELUSER", "LOAD", "SAVE", "DRYRUN"]), ("CLIENT", &["KILL", "PAUSE", "NO-EVICT"])];
+pub const BLOCKED_SUBCOMMANDS: &[(&str, &[&str])] = &[
+    ("CONFIG", &["SET", "REWRITE", "RESETSTAT"]),
+    ("ACL", &["SETUSER", "DELUSER", "LOAD", "SAVE", "DRYRUN"]),
+    ("CLIENT", &["KILL", "PAUSE", "NO-EVICT"]),
+];
 
 /// Raison du refus d'une commande de la console, ou `None` si elle est permise.
 pub fn refusal(line: &str) -> Option<String> {
@@ -523,7 +558,16 @@ mod tests {
 
     #[test]
     fn console_refuses_dangerous_commands() {
-        for line in ["config set dir /var/www", "CONFIG REWRITE", "module load /tmp/x.so", "eval \"return 1\" 0", "replicaof 1.2.3.4 6379", "acl setuser x on", "flushall", "save"] {
+        for line in [
+            "config set dir /var/www",
+            "CONFIG REWRITE",
+            "module load /tmp/x.so",
+            "eval \"return 1\" 0",
+            "replicaof 1.2.3.4 6379",
+            "acl setuser x on",
+            "flushall",
+            "save",
+        ] {
             assert!(refusal(line).is_some(), "{line}");
         }
         for line in ["GET clé", "config get maxmemory", "INFO memory", "acl whoami", "client list", "scan 0 match user:*"] {

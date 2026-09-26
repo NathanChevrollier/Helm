@@ -205,7 +205,8 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
             "processeur {arch} non pris en charge par l'agent (x86_64 et ARM 64 bits seulement). Le monitoring direct reste disponible."
         ))
     })?;
-    let bytes = binary_for(target).filter(|b| !b.is_empty()).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
+    let bytes =
+        binary_for(target).filter(|b| !b.is_empty()).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
     let sha256: String = ring::digest::digest(&ring::digest::SHA256, bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect();
     let remote = upload_binary(conn, bytes).await?;
     // Le script lit l'unité systemd sur stdin.

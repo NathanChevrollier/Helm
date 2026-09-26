@@ -80,7 +80,11 @@ fn check_lock_hash(stored: &str) -> Result<(), String> {
         && iter.parse::<u32>().is_ok_and(|n| n >= MIN_LOCK_ITERATIONS)
         && b64.decode(salt).is_ok_and(|s| s.len() >= 16)
         && b64.decode(hash).is_ok_and(|h| h.len() == 32);
-    if ok { Ok(()) } else { Err("Empreinte de mot de passe refusée : format ou paramètres trop faibles".into()) }
+    if ok {
+        Ok(())
+    } else {
+        Err("Empreinte de mot de passe refusée : format ou paramètres trop faibles".into())
+    }
 }
 
 /// État du verrouillage (relu au démarrage de l'interface).
@@ -372,7 +376,10 @@ mod tests {
         assert!(super::verify_lock_password("secret", &stored));
         assert!(!super::verify_lock_password("Secret", &stored));
         assert!(!super::verify_lock_password("secret", "n'importe quoi"));
-        assert!(super::check_lock_hash(&stored).is_ok());
+        assert!(super::check_lock_hash(&stored).is_err(), "1 000 tours : empreinte trop faible, refusée");
+        let strong = format!("pbkdf2$200000${}${}", b64.encode(salt), b64.encode(hash));
+        assert!(super::check_lock_hash(&strong).is_ok());
+        assert!(super::check_lock_hash(&format!("pbkdf2$200000${}${}", b64.encode([1u8; 8]), b64.encode(hash))).is_err(), "sel trop court");
     }
 
     #[test]

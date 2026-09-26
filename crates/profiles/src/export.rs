@@ -315,7 +315,8 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
 /// une autre adresse (hôte, port ou utilisateur), et reporte ce changement partout où l'identifiant
 /// sert de référence dans le contenu reçu. Renvoie le nombre de serveurs concernés.
 fn rekey_conflicting_servers(p: &mut Payload, existing: &[ServerProfile]) -> usize {
-    let same_target = |a: &ServerProfile, b: &ServerProfile| a.host.eq_ignore_ascii_case(&b.host) && a.port == b.port && a.username == b.username;
+    let same_target =
+        |a: &ServerProfile, b: &ServerProfile| a.host.eq_ignore_ascii_case(&b.host) && a.port == b.port && a.username == b.username;
     let mut renamed: Vec<(String, String)> = Vec::new();
     for s in &mut p.servers {
         if existing.iter().any(|e| e.id == s.id && !same_target(e, s)) {
@@ -472,7 +473,8 @@ mod tests {
         let target = store_with_server(b.path());
         let summary = import(&target, &text, "").unwrap();
         assert_eq!(summary.duplicated, 1);
-        let (hosts, tunnel_owner) = target.read(|d| (d.servers.iter().map(|s| (s.id.clone(), s.host.clone())).collect::<Vec<_>>(), d.tunnels[0].server_id.clone()));
+        let (hosts, tunnel_owner) =
+            target.read(|d| (d.servers.iter().map(|s| (s.id.clone(), s.host.clone())).collect::<Vec<_>>(), d.tunnels[0].server_id.clone()));
         assert_eq!(hosts.len(), 2, "importé à côté, pas à la place");
         assert!(hosts.contains(&("a".into(), "h".into())), "le serveur existant garde son adresse");
         let copy = hosts.iter().find(|(_, h)| h == "attaquant.example").unwrap();

@@ -169,9 +169,30 @@ fn dangerous(command: &str) -> bool {
     let c = command.to_ascii_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
     // Motifs recherchés dans toute la commande (y compris à travers les tubes).
     const ANYWHERE: &[&str] = &[
-        ":(){", "> /dev/sd", "> /dev/nvme", "> /dev/vd", "of=/dev/", "| sh", "| bash", "| zsh", "|sh", "|bash", "base64 -d", "drop database",
-        "drop table", "drop schema", "truncate table", "delete from", "flushall", "flushdb", "--no-preserve-root", "/etc/shadow", "/etc/sudoers",
-        "authorized_keys", "iptables -f", "nft flush",
+        ":(){",
+        "> /dev/sd",
+        "> /dev/nvme",
+        "> /dev/vd",
+        "of=/dev/",
+        "| sh",
+        "| bash",
+        "| zsh",
+        "|sh",
+        "|bash",
+        "base64 -d",
+        "drop database",
+        "drop table",
+        "drop schema",
+        "truncate table",
+        "delete from",
+        "flushall",
+        "flushdb",
+        "--no-preserve-root",
+        "/etc/shadow",
+        "/etc/sudoers",
+        "authorized_keys",
+        "iptables -f",
+        "nft flush",
     ];
     if ANYWHERE.iter().any(|p| c.contains(p)) {
         return true;
@@ -195,18 +216,19 @@ fn dangerous_part(part: &str) -> bool {
     }
     let Some(program) = words.first().map(|w| w.rsplit('/').next().unwrap_or(w)) else { return false };
     let args = &words[1..];
-    let has = |needle: &str| args.iter().any(|a| *a == needle);
+    let has = |needle: &str| args.contains(&needle);
     let joined = args.join(" ");
     match program {
         "rm" => {
-            let short: String = args.iter().filter(|a| a.starts_with('-') && !a.starts_with("--")).flat_map(|a| a.chars().skip(1)).collect();
+            let short: String =
+                args.iter().filter(|a| a.starts_with('-') && !a.starts_with("--")).flat_map(|a| a.chars().skip(1)).collect();
             let recursive = short.contains('r') || has("--recursive");
             let force = short.contains('f') || has("--force");
             // `rm -r` seul reste dangereux sur une cible large ; `rm fichier` simple passe.
             recursive || (force && args.iter().any(|a| a.contains('*')))
         }
-        "mkfs" | "wipefs" | "shred" | "fdisk" | "parted" | "sfdisk" | "dd" | "shutdown" | "reboot" | "poweroff" | "halt" | "userdel" | "deluser"
-        | "groupdel" | "passwd" | "chpasswd" | "visudo" | "killall" | "pkill" => true,
+        "mkfs" | "wipefs" | "shred" | "fdisk" | "parted" | "sfdisk" | "dd" | "shutdown" | "reboot" | "poweroff" | "halt" | "userdel"
+        | "deluser" | "groupdel" | "passwd" | "chpasswd" | "visudo" | "killall" | "pkill" => true,
         p if p.starts_with("mkfs.") => true,
         "init" | "telinit" => has("0") || has("6"),
         "kill" => has("-9") && has("1"),
@@ -214,18 +236,29 @@ fn dangerous_part(part: &str) -> bool {
         "find" => has("-delete") || joined.contains("-exec rm"),
         "crontab" => has("-r"),
         "mv" => args.iter().any(|a| matches!(*a, "/" | "/etc" | "/usr" | "/var" | "/home" | "/root" | "/boot")),
-        "systemctl" | "service" => ["stop", "disable", "mask", "kill", "isolate"].iter().any(|v| has(v)) || joined.contains("poweroff") || joined.contains("reboot"),
+        "systemctl" | "service" => {
+            ["stop", "disable", "mask", "kill", "isolate"].iter().any(|v| has(v))
+                || joined.contains("poweroff")
+                || joined.contains("reboot")
+        }
         "ufw" => has("disable") || has("reset") || has("delete"),
         "iptables" | "ip6tables" => has("-f") || has("--flush") || has("-x"),
         "apt" | "apt-get" | "aptitude" | "dnf" | "yum" | "zypper" | "pacman" | "apk" => {
             ["remove", "purge", "autoremove", "erase", "del", "-r", "-rs", "-rns"].iter().any(|v| has(v))
         }
         "docker" | "podman" => {
-            joined.starts_with("rm") || joined.starts_with("rmi") || joined.contains("prune") || joined.contains("volume rm") || joined.contains("network rm")
+            joined.starts_with("rm")
+                || joined.starts_with("rmi")
+                || joined.contains("prune")
+                || joined.contains("volume rm")
+                || joined.contains("network rm")
                 || joined.contains("compose down") && (has("-v") || has("--volumes"))
-                || joined.starts_with("kill") || joined.starts_with("stop")
+                || joined.starts_with("kill")
+                || joined.starts_with("stop")
         }
-        "git" => joined.starts_with("reset --hard") || joined.starts_with("clean") || joined.starts_with("push") && (has("--force") || has("-f")),
+        "git" => {
+            joined.starts_with("reset --hard") || joined.starts_with("clean") || joined.starts_with("push") && (has("--force") || has("-f"))
+        }
         "mysql" | "mariadb" | "psql" | "redis-cli" => joined.contains("drop ") || joined.contains("flushall") || joined.contains("delete "),
         "truncate" => true,
         _ => false,
@@ -650,7 +683,15 @@ mod tests {
         ] {
             assert!(dangerous(c), "devrait demander validation : {c}");
         }
-        for c in ["rm /tmp/helm-test.txt", "ls -la /srv", "systemctl status nginx", "docker logs --tail 50 app", "git status", "chmod 644 /srv/app/config.yml", "find /var/log -name '*.gz'"] {
+        for c in [
+            "rm /tmp/helm-test.txt",
+            "ls -la /srv",
+            "systemctl status nginx",
+            "docker logs --tail 50 app",
+            "git status",
+            "chmod 644 /srv/app/config.yml",
+            "find /var/log -name '*.gz'",
+        ] {
             assert!(!dangerous(c), "ne devrait pas bloquer : {c}");
         }
     }

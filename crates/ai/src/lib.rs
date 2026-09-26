@@ -74,12 +74,18 @@ pub fn check_base_url(url: &str) -> Result<(), String> {
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     // Retire un éventuel identifiant (`user@`) puis le port.
     let host_port = authority.rsplit('@').next().unwrap_or_default();
-    let host = if let Some(v6) = host_port.strip_prefix('[') { v6.split(']').next().unwrap_or_default() } else { host_port.split(':').next().unwrap_or_default() };
-    let local = host == "localhost" || host == "::1" || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback() || ip.is_private());
+    let host = if let Some(v6) = host_port.strip_prefix('[') {
+        v6.split(']').next().unwrap_or_default()
+    } else {
+        host_port.split(':').next().unwrap_or_default()
+    };
+    let local =
+        host == "localhost" || host == "::1" || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback() || ip.is_private());
     if local {
         Ok(())
     } else {
-        Err("http:// n'est accepté que pour un modèle local (localhost ou réseau privé) : utilise https:// pour un fournisseur distant".into())
+        Err("http:// n'est accepté que pour un modèle local (localhost ou réseau privé) : utilise https:// pour un fournisseur distant"
+            .into())
     }
 }
 
@@ -550,10 +556,24 @@ mod tests {
 
     #[test]
     fn base_url_must_be_encrypted_unless_local() {
-        for ok in ["", "https://api.openai.com/v1", "http://localhost:11434/v1", "http://127.0.0.1:1234/v1", "http://[::1]:8080/v1", "http://192.168.1.10:11434/v1"] {
+        for ok in [
+            "",
+            "https://api.openai.com/v1",
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:1234/v1",
+            "http://[::1]:8080/v1",
+            "http://192.168.1.10:11434/v1",
+        ] {
             assert!(check_base_url(ok).is_ok(), "{ok}");
         }
-        for bad in ["http://api.example.com/v1", "http://8.8.8.8/v1", "http://localhost.evil.com/v1", "http://127.0.0.1@evil.com/v1", "ftp://x", "api.openai.com"] {
+        for bad in [
+            "http://api.example.com/v1",
+            "http://8.8.8.8/v1",
+            "http://localhost.evil.com/v1",
+            "http://127.0.0.1@evil.com/v1",
+            "ftp://x",
+            "api.openai.com",
+        ] {
             assert!(check_base_url(bad).is_err(), "{bad}");
         }
     }
