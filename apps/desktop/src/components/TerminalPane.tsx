@@ -16,6 +16,7 @@ import { useTheme } from "../lib/theme";
 import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
 import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
+import { registerPaneActions, usePaneStatus } from "../lib/paneActions";
 import { ask as askAssistant, explain } from "../lib/assistant";
 import { diagnosePrompt, findLastFailure, type Failure } from "../lib/terminal-errors";
 import { readClipboard, writeClipboard } from "../lib/clipboard";
@@ -682,6 +683,7 @@ ${f.output}`;
         }
       });
       setShare({ invite: info.invite, mode: info.mode });
+      usePaneStatus.getState().setShared(paneId, info.mode);
       await writeClipboard(info.invite).catch(() => {});
       notify("Invitation copiée : envoie-la à la personne. Elle la colle dans Terminal → Rejoindre.", "success");
     } catch (e) {
@@ -692,7 +694,9 @@ ${f.output}`;
   const stopShare = async () => {
     if (idRef.current != null) await api.termShareStop(idRef.current).catch(() => {});
     setShare(null);
+    usePaneStatus.getState().setShared(paneId, null);
   };
+
 
   const find = (backwards = false) => {
     if (!query) return;
@@ -712,11 +716,13 @@ ${f.output}`;
     if (!recording.current) {
       recording.current = { start: performance.now(), cols: term.cols, rows: term.rows, events: [], decoder: new TextDecoder() };
       setIsRecording(true);
+      usePaneStatus.getState().setRecording(paneId, { since: Date.now(), label });
       return;
     }
     const rec = recording.current;
     recording.current = null;
     setIsRecording(false);
+    usePaneStatus.getState().setRecording(paneId, null);
     const { notify } = useApp.getState();
     if (rec.events.length === 0) return notify("Rien à enregistrer : aucune sortie pendant l'enregistrement.", "info");
     const path = await save({
@@ -734,6 +740,21 @@ ${f.output}`;
       notify(errorMessage(e), "error");
     }
   };
+
+  // Actions exposées à la barre d'outils et au dock du terminal (via des références : elles
+  // lisent toujours l'état courant du panneau).
+  const actionsRef = useRef({ toggleRecording, share: () => (share ? void stopShare() : setSharePicker(true)) });
+  actionsRef.current = { toggleRecording, share: () => (share ? void stopShare() : setSharePicker(true)) };
+  useEffect(
+    () =>
+      registerPaneActions(paneId, {
+        search: () => openSearchRef.current(),
+        history: () => openHistoryRef.current(),
+        toggleRecording: () => actionsRef.current.toggleRecording(),
+        share: () => actionsRef.current.share(),
+      }),
+    [paneId],
+  );
 
   /**
    * Enregistre la sélection comme fragment réutilisable. La commande est nettoyée de l'invite

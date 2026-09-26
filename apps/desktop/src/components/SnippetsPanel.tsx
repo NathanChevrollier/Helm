@@ -35,12 +35,12 @@ export default function SnippetsPanel() {
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-border bg-panel">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-xs font-semibold tracking-wide text-muted uppercase">Fragments</span>
-        <IconButton title="Nouveau fragment" onClick={() => setEditing({ id: "", name: "", command: "" })}>
-          <Plus size={14} />
-        </IconButton>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+        <span className="text-xs text-faint">Un clic envoie au terminal actif</span>
+        <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => setEditing({ id: "", name: "", command: "" })}>
+          Nouveau
+        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {snippets.length === 0 && (
@@ -50,7 +50,7 @@ export default function SnippetsPanel() {
           </p>
         )}
         {snippets.map((s) => (
-          <div key={s.id} className="group flex items-center rounded-md hover:bg-hover">
+          <div key={s.id} className="group flex items-center rounded-lg hover:bg-hover">
             <button className="min-w-0 flex-1 px-2 py-1.5 text-left" onClick={() => run(s)} title={s.command}>
               <div className="flex items-center gap-1 truncate text-sm">
                 {hasVars(s.command) && (
@@ -62,13 +62,14 @@ export default function SnippetsPanel() {
               </div>
               <div className="truncate font-mono text-[11px] text-muted">{s.command}</div>
             </button>
-            <div className="hidden pr-1 group-hover:flex">
+            <div className="flex pr-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
               <IconButton title="Modifier" onClick={() => setEditing(s)}>
                 <Pencil size={12} />
               </IconButton>
               <IconButton
                 title="Supprimer"
                 onClick={async () => {
+                  if (!(await useApp.getState().ask({ title: `Supprimer le fragment « ${s.name} » ?`, code: s.command, confirmLabel: "Supprimer", danger: true }))) return;
                   await api.deleteSnippet(s.id);
                   reload();
                 }}
@@ -129,7 +130,7 @@ export default function SnippetsPanel() {
         setAsking(null);
         send(command);
       }} />}
-    </aside>
+    </div>
   );
 }
 

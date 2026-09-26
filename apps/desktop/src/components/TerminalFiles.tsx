@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowUp, Crosshair, Download, File, Folder, FolderInput, FolderOpen, FolderSync, RefreshCw, TextCursorInput, Upload } from "lucide-react";
 import { api, errorMessage, formatBytes, shellQuote, type FsEntry } from "../lib/api";
@@ -6,22 +6,11 @@ import { paneCwd, usePanes } from "../lib/panes";
 import { track } from "../lib/transfers";
 import { useApp, useAppPick } from "../lib/store";
 import { usePolling } from "../lib/poll";
-import { IconButton, Input } from "./ui";
+import { Checkbox, IconButton, Input } from "./ui";
 
 const FileEditor = lazy(() => import("./FileEditor"));
 
 const isDir = (e: FsEntry) => e.kind === "dir" || e.targetIsDir;
-
-/** Largeur du panneau : réglable à la souris, retenue d'une session à l'autre. */
-const WIDTH_KEY = "helm.terminalFiles.width";
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 900;
-const clampWidth = (w: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
-
-function storedWidth(): number {
-  const n = Number(localStorage.getItem(WIDTH_KEY));
-  return Number.isFinite(n) && n > 0 ? clampWidth(n) : 288;
-}
 
 function parent(path: string): string {
   const p = path.replace(/\/+$/, "");
@@ -34,6 +23,7 @@ function parent(path: string): string {
  * (cd), permet d'ouvrir, envoyer, télécharger, ou d'insérer un chemin dans la ligne de commande.
  */
 export default function TerminalFiles({ paneId, visible }: { paneId: string; visible: boolean }) {
+  // Largeur et poignée : gérées par le dock du terminal qui contient ce panneau.
   const { notify, setFilesPath, setSection, setActiveServer, settings, setSettings } = useAppPick("notify", "setFilesPath", "setSection", "setActiveServer", "settings", "setSettings");
   const pane = usePanes((s) => s.panes[paneId]);
   const serverId = pane?.serverId;
@@ -55,27 +45,6 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
   const [editing, setEditing] = useState<string | null>(null);
   /** Dernier dossier vu dans le terminal : on ne suit que ses changements (la navigation manuelle reste). */
   const lastCwd = useRef<string | null>(null);
-  const [width, setWidth] = useState(storedWidth);
-
-  // Glissement de la poignée gauche : le panneau est à droite, sa largeur suit le bord de l'écran.
-  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const move = (ev: PointerEvent) => setWidth(clampWidth(window.innerWidth - ev.clientX));
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      setWidth((w) => {
-        localStorage.setItem(WIDTH_KEY, String(w));
-        return w;
-      });
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-  };
 
   /** Navigation venue du panneau : elle coupe le suivi du terminal, ou l'y emmène selon le mode. */
   const goTo = (dir: string) => {
@@ -162,21 +131,9 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
   const shown = entries.filter((e) => showHidden || !e.name.startsWith("."));
 
   return (
-    <aside data-link={link} className="relative flex shrink-0 flex-col border-l border-border bg-panel" style={{ width }}>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Redimensionner le panneau Fichiers"
-        title="Glisser pour redimensionner · double-clic pour la largeur par défaut"
-        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-accent/30"
-        onPointerDown={startResize}
-        onDoubleClick={() => {
-          setWidth(288);
-          localStorage.setItem(WIDTH_KEY, "288");
-        }}
-      />
+    <div data-link={link} className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-0.5 border-b border-border px-2 py-1.5">
-        <span className="mr-auto pl-1 text-xs font-semibold tracking-wide text-muted uppercase">Fichiers</span>
+        <span className="mr-auto truncate pl-1 font-mono text-[11px] text-muted" title={path ?? undefined}>{follow ? "suit le terminal" : link === "panneau" ? "pilote le terminal" : "navigation libre"}</span>
         {/* Deux sens possibles, jamais les deux à la fois : sinon chacun tirerait l'autre. */}
         <IconButton
           title={follow ? "Le panneau suit le dossier du terminal (cliquer pour arrêter)" : "Suivre le dossier du terminal"}
@@ -244,7 +201,7 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
           >
             {isDir(e) ? <Folder size={14} className="shrink-0 text-accent" /> : <File size={14} className="shrink-0 text-muted" />}
             <span className="min-w-0 flex-1 truncate">{e.name}</span>
-            <span className="flex opacity-0 group-hover:opacity-100">
+            <span className="flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
               <IconButton title="Insérer le chemin dans la ligne de commande" className="size-6" onClick={() => sendToTerminal(`${shellQuote(e.path)} `)}>
                 <TextCursorInput size={13} />
               </IconButton>
@@ -261,19 +218,18 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
           </div>
         ))}
       </div>
-      <label className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-xs text-muted">
-        <input type="checkbox" checked={showHidden} onChange={(e) => setSettings({ showHiddenFiles: e.target.checked })} />
-        Fichiers cachés
-        <span className="ml-auto truncate" title="Glisse des fichiers de Windows sur le terminal : ils sont envoyés dans son dossier courant.">
+      <div className="flex items-center gap-2 border-t border-border px-3 py-1.5 text-xs text-muted">
+        <Checkbox checked={showHidden} onChange={(v) => setSettings({ showHiddenFiles: v })} label="Fichiers cachés" className="text-xs" />
+        <span className="ml-auto truncate text-faint" title="Glisse des fichiers de ton PC sur le terminal : ils sont envoyés dans son dossier courant.">
           Glisser sur le terminal : envoi
         </span>
-      </label>
+      </div>
       {editing && (
         <Suspense fallback={null}>
           <FileEditor serverId={serverId} path={editing} onClose={() => setEditing(null)} />
         </Suspense>
       )}
-    </aside>
+    </div>
   );
 }
 

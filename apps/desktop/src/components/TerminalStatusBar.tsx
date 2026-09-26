@@ -3,12 +3,13 @@ import { ArrowDown, ArrowUp, Cpu, HardDrive, MemoryStick, Timer } from "lucide-r
 import { api, formatBytes, formatDuration, type Metrics } from "../lib/api";
 import { useApp } from "../lib/store";
 import { usePolling } from "../lib/poll";
+import { CRIT_AT, WARN_AT } from "./ui";
 
 const pct = (used: number, total: number) => (total > 0 ? (used / total) * 100 : 0);
 
-/** Couleur d'une jauge : normale, à surveiller, critique. */
+/** Couleur d'une jauge : normale, à surveiller, critique (seuils communs à toute l'app). */
 function tone(value: number): string {
-  return value >= 90 ? "text-danger" : value >= 75 ? "text-warn" : "text-fg";
+  return value >= CRIT_AT ? "text-danger" : value >= WARN_AT ? "text-warn" : "text-fg";
 }
 
 /**
