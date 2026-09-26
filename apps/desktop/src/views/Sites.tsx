@@ -1,16 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  ArrowRight, CircleCheck, CircleX, ExternalLink, FileCode2, Globe, Lock, LockOpen, Plus, Power, PowerOff,
-  History, RefreshCw, ShieldCheck, Trash2, Zap,
+  ArrowRight, CircleCheck, CircleX, ExternalLink, FileCode2, Globe, History, Loader2, Lock, LockOpen, Plus, Power, PowerOff, RefreshCw, ShieldCheck, Trash2, Zap,
 } from "lucide-react";
 import {
   api, ENGINE_LABELS, errorMessage, type Certificate, type Container, type NginxState, type DomainInfo, type ServerBlock, type SiteFile,
   type WebEngine,
 } from "../lib/api";
-import { ensureConnected, useApp, useAppPick } from "../lib/store";
-import { Badge, Button, EmptyState, IconButton, Modal } from "../components/ui";
+import { useApp, useAppPick } from "../lib/store";
+import { useTabIntent } from "../lib/shell";
+import { Badge, Button, Card, Checkbox, DataTable, EmptyState, ErrorState, IconButton, Loading, MenuButton, Modal, ResultBanner, Segmented } from "../components/ui";
 import PageLayout from "../components/PageLayout";
+import ServerGate, { ServerContext } from "../components/ServerGate";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 
@@ -19,10 +20,10 @@ const NewSiteWizard = lazy(() => import("../components/NewSiteWizard"));
 const NginxHistory = lazy(() => import("../components/NginxHistory"));
 
 export default function SitesView() {
-  const serverId = useApp((s) => s.activeServerId);
-  if (!serverId) return <EmptyState icon={<Globe size={40} />} title="Aucun serveur sélectionné" />;
-  return <Sites key={serverId} serverId={serverId} />;
+  return <ServerGate title="Sites" guide="sites">{(serverId) => <Sites key={serverId} serverId={serverId} />}</ServerGate>;
 }
+
+const EMAIL_KEY = "helm.certbotEmail";
 
 const DAY = 86400;
 function certTone(c: Certificate): "ok" | "warn" | "danger" {
@@ -73,13 +74,15 @@ function linkFor(file: SiteFile): string | null {
 
 function Sites({ serverId }: { serverId: string }) {
   const { ask, notify } = useAppPick("ask", "notify");
+  const server = useApp((s) => s.servers.find((x) => x.id === serverId));
+  const [tab, setTab] = useTabIntent<"active" | "disabled" | "certificates">("sites", "active");
+  const [certbotBusy, setCertbotBusy] = useState<string | null>(null);
   // Serveur web affiché : nginx, ou Apache quand il est présent.
   const [engine, setEngine] = useCachedState<WebEngine>(`sitesEngine:${serverId}`, "nginx");
   const web = ENGINE_LABELS[engine];
   const [state, setState] = useCachedState<NginxState | null>(`sites-${engine}:${serverId}`, null);
   const [containers, setContainers] = useCachedState<Container[]>(`sitesContainers:${serverId}`, []);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<SiteFile | null>(null);
   const [wizard, setWizard] = useState(false);
   const [history, setHistory] = useState(false);
@@ -88,12 +91,7 @@ function Sites({ serverId }: { serverId: string }) {
   const [dns, setDns] = useCachedState<Record<string, DomainInfo>>(`sitesDns:${serverId}`, {});
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
-      if (!(await ensureConnected(serverId))) {
-        setError("Non connecté.");
-        return;
-      }
       const [s, d] = await Promise.all([api.sitesState(serverId, engine), api.dockerOverview(serverId).catch(() => null)]);
       // Pas de nginx mais Apache présent : on passe directement à Apache.
       if (engine === "nginx" && !s.installed && s.others.includes("Apache")) {
@@ -105,8 +103,6 @@ function Sites({ serverId }: { serverId: string }) {
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
-    } finally {
-      setLoading(false);
     }
   }, [serverId, engine]);
 
@@ -156,298 +152,369 @@ function Sites({ serverId }: { serverId: string }) {
     }
   };
 
-  if (error) return <EmptyState icon={<Globe size={40} />} title="Impossible de lire la configuration">{error}</EmptyState>;
-  if (!state) return <EmptyState icon={<Globe size={40} />} title="Chargement…" />;
+  /** Certificat Let's Encrypt pour un domaine (première émission ou nouvelle tentative). */
+  const runCertbot = async (domain: string) => {
+    let saved = "";
+    try {
+      saved = localStorage.getItem(EMAIL_KEY) ?? "";
+    } catch {
+      /* rien */
+    }
+    const email = await ask({
+      title: `Certificat HTTPS pour ${domain}`,
+      body: "certbot demande un certificat Let's Encrypt et configure la redirection vers HTTPS. Le domaine doit déjà pointer vers ce serveur et le port 80 être joignable.",
+      input: { label: "E-mail (avertissements d'expiration de Let's Encrypt)", initial: saved },
+      confirmLabel: "Obtenir le certificat",
+    });
+    if (typeof email !== "string" || !email.includes("@")) return;
+    try {
+      localStorage.setItem(EMAIL_KEY, email);
+    } catch {
+      /* rien */
+    }
+    setCertbotBusy(domain);
+    try {
+      const out = await api.sitesCertbot(serverId, domain, email, engine);
+      setOutput({ title: `certbot · ${domain}`, text: out || "Certificat obtenu.", ok: true });
+      await load();
+    } catch (e) {
+      setOutput({ title: `certbot · ${domain} : échec`, text: errorMessage(e), ok: false });
+    } finally {
+      setCertbotBusy(null);
+    }
+  };
+
+  const layout = (children: React.ReactNode) => (
+    <PageLayout title="Sites" guide="sites" context={server && <ServerContext server={server} />}>
+      {children}
+    </PageLayout>
+  );
+  if (error && !state) return layout(<div className="p-7"><ErrorState message={`Impossible de lire la configuration : ${error}`} onRetry={() => void load()} /></div>);
+  if (!state) return layout(<div className="p-7"><Loading rows={6} /></div>);
   if (!state.installed)
-    return (
-      <EmptyState icon={<Globe size={40} />} title={`${web} n'est pas installé sur ce serveur`}>
+    return layout(
+      <EmptyState
+        icon={<Globe />}
+        title={`${web} n'est pas installé sur ce serveur`}
+        action={engine === "apache" ? <Button onClick={() => setEngine("nginx")}>Revenir à nginx</Button> : undefined}
+      >
         {state.others.length > 0
-          ? `Serveur web détecté : ${state.others.join(", ")}. Helm gère nginx et Apache ; les autres onglets (Docker, Pare-feu, Journaux…) restent utilisables.`
+          ? `Serveur web détecté : ${state.others.join(", ")}. Helm gère nginx et Apache ; les autres sections (Docker, Pare-feu, Journaux…) restent utilisables.`
           : "Aucun serveur web détecté."}
-        {engine === "apache" && (
-          <Button className="mt-3" size="sm" onClick={() => setEngine("nginx")}>
-            Revenir à nginx
-          </Button>
-        )}
-      </EmptyState>
+      </EmptyState>,
     );
   // Les deux serveurs web cohabitent : on peut passer de l'un à l'autre.
   const other: WebEngine | null = engine === "nginx" ? (state.others.includes("Apache") ? "apache" : null) : "nginx";
+  const soon = state.certificates.filter((c) => (c.notAfter - Date.now() / 1000) / DAY < 21).length;
+  const extra = state.others.filter((o) => o !== "Apache" && o !== "nginx");
 
   return (
     <PageLayout
       title="Sites"
       guide="sites"
-      subtitle={
-        <span className="flex flex-wrap items-center gap-2">
+      context={server && <ServerContext server={server} />}
+      subtitle="Sous-domaines, certificats et conteneurs derrière le serveur web"
+      status={
+        <>
           {other && (
-            <span className="flex gap-1 rounded-md border border-border bg-bg p-0.5">
-              {(["nginx", "apache"] as const).map((e) => (
-                <button
-                  key={e}
-                  onClick={() => setEngine(e)}
-                  aria-pressed={engine === e}
-                  className={`rounded px-2 py-0.5 ${engine === e ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
-                >
-                  {ENGINE_LABELS[e]}
-                </button>
-              ))}
-            </span>
+            <Segmented
+              size="sm"
+              label="Serveur web"
+              value={engine}
+              onChange={setEngine}
+              options={(["nginx", "apache"] as const).map((e) => ({ value: e, label: ENGINE_LABELS[e] }))}
+            />
           )}
           <Badge>{state.version}</Badge>
           {state.running ? <Badge tone="ok">{web} actif</Badge> : <Badge tone="danger">{web} arrêté</Badge>}
-          <Badge>{sites.length} site(s) actif(s)</Badge>
+          {state.certbot ? <Badge>certbot installé</Badge> : <Badge tone="warn">certbot absent</Badge>}
+          {extra.length > 0 && <Badge tone="warn">aussi détecté : {extra.join(", ")}</Badge>}
           {masques > 0 && (
-            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted" title="Blocs attrape-tout, fragments inclus, redirections internes">
-              <input type="checkbox" checked={showTechnical} onChange={(e) => setShowTechnical(e.target.checked)} />
-              Afficher les {masques} entrée(s) technique(s)
-            </label>
+            <span className="ml-auto" title="Blocs attrape-tout, fragments inclus, redirections internes">
+              <Checkbox className="text-xs text-muted" checked={showTechnical} onChange={setShowTechnical} label={`Afficher les ${masques} entrée(s) technique(s)`} />
+            </span>
           )}
-          {state.others.filter((o) => o !== "Apache" && o !== "nginx").length > 0 && (
-            <Badge tone="warn">aussi détecté : {state.others.filter((o) => o !== "Apache" && o !== "nginx").join(", ")}</Badge>
-          )}
-        </span>
+        </>
       }
+      tabs={[
+        { id: "active", label: "Actifs", count: sites.length },
+        { id: "disabled", label: "Désactivés", count: disabled.length },
+        { id: "certificates", label: "Certificats", count: soon ? `${soon} bientôt` : state.certificates.length, tone: soon ? "warn" : undefined },
+      ]}
+      activeTab={tab}
+      onTab={setTab}
       actions={
         <>
-          <Button
-            size="sm"
-            icon={<ShieldCheck size={13} />}
-            onClick={async () => {
-              const r = await api.sitesTest(serverId, engine).catch((e) => ({ ok: false, output: errorMessage(e) }));
-              setOutput({ title: r.ok ? "Configuration valide" : "Configuration invalide", text: r.output, ok: r.ok });
-            }}
-          >
-            Tester la config
-          </Button>
-          <Button
-            size="sm"
-            icon={<Zap size={13} />}
-            onClick={async () => {
-              try {
-                await api.sitesReload(serverId, engine);
-                notify(`${web} rechargé`, "success");
-              } catch (e) {
-                setOutput({ title: "Rechargement refusé", text: errorMessage(e), ok: false });
-              }
-            }}
-          >
-            Recharger
-          </Button>
-          {state.certbot && (
-            <Button
-              size="sm"
-              icon={<RefreshCw size={13} />}
-              onClick={async () => {
-                notify("Renouvellement des certificats en cours…");
-                const out = await api.sitesRenew(serverId).catch(errorMessage);
-                setOutput({ title: "certbot renew", text: out, ok: true });
-                void load();
-              }}
-            >
-              Renouveler les certificats
-            </Button>
-          )}
-          <Button size="sm" icon={<History size={13} />} onClick={() => setHistory(true)}>
-            Historique
-          </Button>
-          <IconButton title="Actualiser" onClick={() => void load()}>
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </IconButton>
-          <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => setWizard(true)}>
+          <MenuButton
+            label={web}
+            icon={<ShieldCheck size={14} />}
+            title={`Actions sur ${web}`}
+            items={[
+              {
+                label: "Tester la configuration",
+                icon: <ShieldCheck size={14} />,
+                onClick: async () => {
+                  const r = await api.sitesTest(serverId, engine).catch((e) => ({ ok: false, output: errorMessage(e) }));
+                  setOutput({ title: r.ok ? "Configuration valide" : "Configuration invalide", text: r.output, ok: r.ok });
+                },
+              },
+              {
+                label: `Recharger ${web}`,
+                icon: <Zap size={14} />,
+                onClick: async () => {
+                  try {
+                    await api.sitesReload(serverId, engine);
+                    notify(`${web} rechargé`, "success");
+                  } catch (e) {
+                    setOutput({ title: "Rechargement refusé", text: errorMessage(e), ok: false });
+                  }
+                },
+              },
+              ...(state.certbot
+                ? [
+                    {
+                      label: "Renouveler les certificats",
+                      hint: "certbot renew",
+                      icon: <RefreshCw size={14} />,
+                      onClick: async () => {
+                        notify("Renouvellement des certificats en cours…");
+                        const out = await api.sitesRenew(serverId).catch(errorMessage);
+                        setOutput({ title: "certbot renew", text: out, ok: true });
+                        void load();
+                      },
+                    },
+                  ]
+                : []),
+              "separator" as const,
+              { label: "Historique des configurations…", icon: <History size={14} />, onClick: () => setHistory(true) },
+            ]}
+          />
+          <Button variant="primary" icon={<Plus size={15} />} onClick={() => setWizard(true)}>
             Nouveau site
           </Button>
         </>
       }
     >
-      <div className="p-6">
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(440px,1fr))] gap-4">
-          {sites.map((site) => {
-            const httpsBlock = site.blocks.find((b) => b.ssl);
-            const cert = httpsBlock ? certFor(httpsBlock) : undefined;
-            const ports = [...new Set(site.blocks.flatMap((b) => b.upstreamPorts))];
-            const statics = site.blocks.flatMap((b) => (b.root ? [b.root] : b.locations.filter((l) => l.root).map((l) => l.root!)));
-            const redirectsOnly = site.blocks.every((b) => b.returns && !b.locations.length);
-            const days = cert ? Math.floor((cert.notAfter - Date.now() / 1000) / DAY) : null;
-            const check = checks[site.domain];
-            const isDefault = /\/(default|000-default\.conf|default-ssl\.conf)$/.test(site.file.path);
-            const link = linkFor(site.file);
-            return (
-              <div key={site.file.path} className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 font-medium">
-                      {httpsBlock ? <Lock size={14} className="text-ok" /> : <LockOpen size={14} className="text-muted" />}
-                      <span className="truncate">{site.domain}</span>
-                    </div>
-                    {site.aliases.length > 0 && <div className="truncate text-xs text-muted">+ {site.aliases.join(", ")}</div>}
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted">{site.file.realPath}</div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                    <DomainBadges info={dns[site.domain]} />
-                    {cert ? (
-                      <Badge tone={certTone(cert)}>{days! < 0 ? "certificat expiré" : `certificat ${days} j`}</Badge>
-                    ) : httpsBlock ? (
-                      <Badge tone="warn">certificat illisible</Badge>
-                    ) : (
-                      <Badge>HTTP seulement</Badge>
-                    )}
-                  </div>
-                </div>
-
-                {/* Chaîne : domaine → serveur web → port → conteneur */}
-                <div className="flex flex-wrap items-center gap-2 rounded-md bg-bg px-3 py-2 text-xs">
-                  <span className="font-medium">{site.domain}</span>
-                  <ArrowRight size={12} className="text-muted" />
-                  <span className="text-muted">
-                    {web} {httpsBlock ? ":443" : ":80"}
-                  </span>
-                  {ports.map((p) => {
-                    const c = containerOnPort(p);
-                    return (
-                      <span key={p} className="flex items-center gap-2">
-                        <ArrowRight size={12} className="text-muted" />
-                        <span className="font-mono">127.0.0.1:{p}</span>
-                        {c && (
-                          <>
-                            <ArrowRight size={12} className="text-muted" />
-                            <span className="flex items-center gap-1.5">
-                              <span className={`size-1.5 rounded-full ${c.state === "running" ? "bg-ok" : "bg-danger"}`} />
-                              {c.name}
-                            </span>
-                          </>
+      <div className="px-7 py-5">
+        {tab === "active" &&
+          (sites.length === 0 ? (
+            <EmptyState
+              icon={<Globe />}
+              title="Aucun site actif"
+              action={
+                <Button variant="primary" icon={<Plus size={14} />} onClick={() => setWizard(true)}>
+                  Nouveau site
+                </Button>
+              }
+            >
+              L'assistant crée le conteneur (ou pointe vers un port existant), le vhost et le certificat HTTPS, puis vérifie que le site répond.
+            </EmptyState>
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(460px,1fr))] gap-3.5">
+              {sites.map((site) => {
+                const httpsBlock = site.blocks.find((b) => b.ssl);
+                const cert = httpsBlock ? certFor(httpsBlock) : undefined;
+                const ports = [...new Set(site.blocks.flatMap((b) => b.upstreamPorts))];
+                const statics = site.blocks.flatMap((b) => (b.root ? [b.root] : b.locations.filter((l) => l.root).map((l) => l.root!)));
+                const redirectsOnly = site.blocks.every((b) => b.returns && !b.locations.length);
+                const days = cert ? Math.floor((cert.notAfter - Date.now() / 1000) / DAY) : null;
+                const check = checks[site.domain];
+                const isDefault = /\/(default|000-default\.conf|default-ssl\.conf)$/.test(site.file.path);
+                const link = linkFor(site.file);
+                const tone = cert ? certTone(cert) : httpsBlock ? "warn" : undefined;
+                const c = ports.length ? containerOnPort(ports[0]) : undefined;
+                const target = ports.length ? ports.map((x) => `:${x}`).join(" ") : statics.length ? statics[0] : redirectsOnly ? "redirection" : "—";
+                return (
+                  <Card key={site.file.path} tone={tone === "danger" ? "danger" : tone === "warn" ? "warn" : undefined} className="flex flex-col gap-3.5">
+                    <div className="flex items-start gap-2.5">
+                      {httpsBlock ? <Lock size={17} className="mt-0.5 shrink-0 text-ok" /> : <LockOpen size={17} className="mt-0.5 shrink-0 text-warn" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">{site.domain}</div>
+                        {site.aliases.length > 0 && <div className="truncate text-xs text-muted">+ {site.aliases.join(", ")}</div>}
+                        <div className="truncate font-mono text-[11px] text-faint">{site.file.realPath}</div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                        <DomainBadges info={dns[site.domain]} />
+                        {cert ? (
+                          <Badge tone={certTone(cert)}>{days! < 0 ? "certificat expiré" : `certificat ${days} j`}</Badge>
+                        ) : httpsBlock ? (
+                          <Badge tone="warn">certificat illisible</Badge>
+                        ) : (
+                          <Badge>HTTP seulement</Badge>
                         )}
-                        {!c && containers.length > 0 && <span className="text-warn">aucun conteneur sur ce port</span>}
-                      </span>
-                    );
-                  })}
-                  {statics.length > 0 && ports.length === 0 && (
-                    <>
-                      <ArrowRight size={12} className="text-muted" />
-                      <span className="font-mono text-muted">{statics[0]}</span>
-                    </>
-                  )}
-                  {redirectsOnly && <span className="text-muted">(redirection)</span>}
-                </div>
+                      </div>
+                    </div>
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Button size="sm" icon={<FileCode2 size={12} />} onClick={() => setEditing(site.file)}>Éditer</Button>
-                  <Button size="sm" icon={<ExternalLink size={12} />} onClick={() => void openUrl(`${httpsBlock ? "https" : "http"}://${site.domain}`)} disabled={isDefault}>
-                    Ouvrir
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={isDefault}
-                    onClick={async () => {
-                      setChecks((c) => ({ ...c, [site.domain]: "" }));
-                      try {
-                        const code = await api.sitesCheck(serverId, site.domain);
-                        setChecks((c) => ({ ...c, [site.domain]: code }));
-                      } catch (e) {
-                        notify(errorMessage(e), "error");
-                      }
-                    }}
-                  >
-                    Tester
-                  </Button>
-                  {check && (
-                    <span className={`flex items-center gap-1 text-xs ${/^[23]/.test(check) ? "text-ok" : "text-danger"}`}>
-                      {/^[23]/.test(check) ? <CircleCheck size={13} /> : <CircleX size={13} />} HTTP {check}
-                    </span>
-                  )}
-                  <span className="ml-auto flex">
-                    {link && (
-                      <IconButton
-                        title="Désactiver le site"
+                    {/* Chaîne : domaine → serveur web → cible → conteneur */}
+                    <div className="grid grid-cols-[minmax(0,1fr)_12px_minmax(0,0.8fr)_12px_minmax(0,1fr)_12px_minmax(0,1fr)] items-center gap-1.5 text-xs">
+                      <ChainNode label="Domaine" value={site.domain} />
+                      <ArrowRight size={12} className="text-faint" />
+                      <ChainNode label={web} value={httpsBlock ? ":443 · :80" : ":80"} />
+                      <ArrowRight size={12} className="text-faint" />
+                      <ChainNode label={ports.length ? "127.0.0.1" : statics.length ? "Dossier" : "Cible"} value={target} mono />
+                      <ArrowRight size={12} className="text-faint" />
+                      {c ? (
+                        <ChainNode label="Conteneur" value={c.name} dot={c.state === "running" ? "ok" : "danger"} />
+                      ) : (
+                        <ChainNode label="Conteneur" value={ports.length && containers.length > 0 ? "aucun sur ce port" : "—"} dashed warn={ports.length > 0 && containers.length > 0} />
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Button size="sm" icon={<FileCode2 size={12} />} onClick={() => setEditing(site.file)}>
+                        Éditer la config
+                      </Button>
+                      <Button size="sm" icon={<ExternalLink size={12} />} onClick={() => void openUrl(`${httpsBlock ? "https" : "http"}://${site.domain}`)} disabled={isDefault}>
+                        Ouvrir
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={isDefault}
+                        title="Appelle l'URL depuis le serveur et affiche le code HTTP"
                         onClick={async () => {
-                          const ok = await ask({
-                            title: `Désactiver ${site.domain} ?`,
-                            body: `Le site ne sera plus servi par ${web}. Sa configuration est conservée dans sites-available et peut être réactivée.`,
-                            confirmLabel: "Désactiver",
-                            danger: true,
-                          });
-                          if (ok) await runApply(`Désactivation de ${site.domain}`, () => api.sitesSetEnabled(serverId, site.file.realPath, link, false, engine));
+                          setChecks((x) => ({ ...x, [site.domain]: "…" }));
+                          try {
+                            const code = await api.sitesCheck(serverId, site.domain);
+                            setChecks((x) => ({ ...x, [site.domain]: code }));
+                          } catch (e) {
+                            setChecks((x) => ({ ...x, [site.domain]: "" }));
+                            notify(errorMessage(e), "error");
+                          }
                         }}
                       >
-                        <PowerOff size={14} />
-                      </IconButton>
-                    )}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {disabled.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-sm font-medium text-muted">Sites désactivés</h2>
-            <div className="flex flex-col gap-2">
-              {disabled.map((site) => (
-                <div key={site.file.path} className="flex items-center gap-3 rounded-lg border border-border bg-panel px-4 py-2 text-sm">
-                  <span className="flex-1 truncate">{site.domain}</span>
-                  <span className="truncate font-mono text-xs text-muted">{site.file.realPath}</span>
-                  <Button
-                    size="sm"
-                    icon={<Power size={12} />}
-                    onClick={() => void runApply(`Activation de ${site.domain}`, () => api.sitesSetEnabled(serverId, site.file.realPath, linkFor(site.file) ?? "", true, engine))}
-                  >
-                    Activer
-                  </Button>
-                  <IconButton
-                    title="Supprimer définitivement"
-                    onClick={async () => {
-                      const ok = await ask({
-                        title: `Supprimer la configuration de ${site.domain} ?`,
-                        body: `Le fichier est supprimé de sites-available (une sauvegarde de ${state.confRoot} est faite avant). Les conteneurs et certificats ne sont pas touchés.`,
-                        confirmLabel: "Supprimer",
-                        danger: true,
-                      });
-                      if (ok) await runApply(`Suppression de ${site.domain}`, () => api.sitesDelete(serverId, site.file.realPath, linkFor(site.file) ?? "", engine));
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </IconButton>
-                </div>
-              ))}
+                        Tester l'URL
+                      </Button>
+                      {check === "…" && <Loader2 size={13} className="animate-spin text-muted" />}
+                      {check && check !== "…" && (
+                        <span className={`flex items-center gap-1 text-xs ${/^[23]/.test(check) ? "text-ok" : "text-danger"}`}>
+                          {/^[23]/.test(check) ? <CircleCheck size={13} /> : <CircleX size={13} />} HTTP {check}
+                        </span>
+                      )}
+                      <span className="ml-auto flex items-center gap-1">
+                        {state.certbot && !isDefault && (!httpsBlock || (days !== null && days < 21)) && (
+                          <Button size="sm" variant="outline" className="border-warn/50 text-warn" loading={certbotBusy === site.domain} onClick={() => void runCertbot(site.domain)}>
+                            {httpsBlock ? "Renouveler" : "Activer HTTPS"}
+                          </Button>
+                        )}
+                        <MenuButton
+                          size="sm"
+                          items={[
+                            ...(state.certbot && !isDefault ? [{ label: httpsBlock ? "Relancer certbot pour ce domaine…" : "Activer HTTPS (certbot)…", icon: <Lock size={14} />, onClick: () => void runCertbot(site.domain) }] : []),
+                            { label: "Historique des configurations…", icon: <History size={14} />, onClick: () => setHistory(true) },
+                            ...(link
+                              ? [
+                                  "separator" as const,
+                                  {
+                                    label: "Désactiver le site…",
+                                    icon: <PowerOff size={14} />,
+                                    danger: true,
+                                    onClick: async () => {
+                                      const ok = await ask({
+                                        title: `Désactiver ${site.domain} ?`,
+                                        body: `Le site ne sera plus servi par ${web}. Sa configuration est conservée dans sites-available et peut être réactivée (onglet Désactivés).`,
+                                        confirmLabel: "Désactiver",
+                                        danger: true,
+                                      });
+                                      if (ok) await runApply(`Désactivation de ${site.domain}`, () => api.sitesSetEnabled(serverId, site.file.realPath, link, false, engine));
+                                    },
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
+                      </span>
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
-          </section>
-        )}
+          ))}
 
-        {state.certificates.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-sm font-medium text-muted">Certificats</h2>
-            <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-panel text-left text-xs text-muted">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Domaines</th>
-                    <th className="px-3 py-2 font-medium">Expire</th>
-                    <th className="px-3 py-2 font-medium">Émetteur</th>
-                    <th className="px-3 py-2 font-medium">Fichier</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.certificates.map((c) => {
-                    const days = Math.floor((c.notAfter - Date.now() / 1000) / DAY);
-                    return (
-                      <tr key={c.path} className="border-t border-border/50">
-                        <td className="px-3 py-2">{c.domains.join(", ") || c.subject}</td>
-                        <td className="px-3 py-2">
+        {tab === "disabled" &&
+          (disabled.length === 0 ? (
+            <EmptyState icon={<PowerOff />} title="Aucun site désactivé">
+              Un site désactivé n'est plus servi, mais sa configuration reste dans sites-available pour être réactivée d'un clic.
+            </EmptyState>
+          ) : (
+            <Card padded={false} className="overflow-hidden">
+              <DataTable
+                rows={disabled}
+                rowKey={(x) => x.file.path}
+                columns={[
+                  { key: "domain", header: "Site", sortValue: (x) => x.domain, render: (x) => <span className="font-medium">{x.domain}</span> },
+                  { key: "path", header: "Fichier", width: "minmax(0,1.3fr)", render: (x) => <span className="font-mono text-xs text-muted">{x.file.realPath}</span> },
+                ]}
+                actionsWidth={150}
+                rowActions={(site) => (
+                  <>
+                    <Button
+                      size="sm"
+                      icon={<Power size={12} />}
+                      onClick={() => void runApply(`Activation de ${site.domain}`, () => api.sitesSetEnabled(serverId, site.file.realPath, linkFor(site.file) ?? "", true, engine))}
+                    >
+                      Activer
+                    </Button>
+                    <IconButton
+                      size="sm"
+                      title="Supprimer définitivement"
+                      onClick={async () => {
+                        const ok = await ask({
+                          title: `Supprimer la configuration de ${site.domain} ?`,
+                          body: `Le fichier est supprimé de sites-available (une sauvegarde de ${state.confRoot} est faite avant). Les conteneurs et certificats ne sont pas touchés.`,
+                          confirmLabel: "Supprimer",
+                          danger: true,
+                        });
+                        if (ok) await runApply(`Suppression de ${site.domain}`, () => api.sitesDelete(serverId, site.file.realPath, linkFor(site.file) ?? "", engine));
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </IconButton>
+                  </>
+                )}
+              />
+            </Card>
+          ))}
+
+        {tab === "certificates" &&
+          (state.certificates.length === 0 ? (
+            <EmptyState icon={<Lock />} title="Aucun certificat">
+              {state.certbot ? "Active HTTPS depuis la carte d'un site : certbot obtient et renouvelle le certificat." : "certbot n'est pas installé sur ce serveur."}
+            </EmptyState>
+          ) : (
+            <Card padded={false} className="overflow-hidden">
+              <DataTable
+                rows={state.certificates}
+                rowKey={(c) => c.path}
+                initialSort={{ key: "expires", dir: "asc" }}
+                columns={[
+                  { key: "domains", header: "Domaines", width: "minmax(0,1.3fr)", sortValue: (c) => c.domains[0] ?? c.subject, render: (c) => <span>{c.domains.join(", ") || c.subject}</span> },
+                  {
+                    key: "expires",
+                    header: "Expire",
+                    width: "200px",
+                    sortValue: (c) => c.notAfter,
+                    render: (c) => {
+                      const days = Math.floor((c.notAfter - Date.now() / 1000) / DAY);
+                      return (
+                        <span className="flex items-center gap-2">
                           <Badge tone={certTone(c)}>{days < 0 ? "expiré" : `dans ${days} j`}</Badge>
-                          <span className="ml-2 text-xs text-muted">{new Date(c.notAfter * 1000).toLocaleDateString("fr-FR")}</span>
-                        </td>
-                        <td className="max-w-60 truncate px-3 py-2 text-xs text-muted">{c.issuer.replace(/^.*O = /, "").replace(/,.*$/, "")}</td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-muted">{c.path}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
+                          <span className="text-xs text-muted">{new Date(c.notAfter * 1000).toLocaleDateString("fr-FR")}</span>
+                        </span>
+                      );
+                    },
+                  },
+                  { key: "issuer", header: "Émetteur", width: "minmax(0,0.8fr)", render: (c) => <span className="text-xs text-muted">{c.issuer.replace(/^.*O = /, "").replace(/,.*$/, "")}</span> },
+                  { key: "path", header: "Fichier", render: (c) => <span className="font-mono text-[11px] text-faint">{c.path}</span> },
+                ]}
+                rowMenu={
+                  state.certbot
+                    ? (c) => [{ label: "Relancer certbot pour ce domaine…", icon: <RefreshCw size={14} />, disabled: !c.domains[0], onClick: () => c.domains[0] && void runCertbot(c.domains[0]) }]
+                    : undefined
+                }
+              />
+            </Card>
+          ))}
       </div>
 
       <Suspense fallback={null}>
@@ -457,10 +524,27 @@ function Sites({ serverId }: { serverId: string }) {
       </Suspense>
       {output && (
         <Modal title={output.title} width="max-w-3xl" onClose={() => setOutput(null)}>
-          <pre className={`max-h-[60vh] overflow-auto rounded-md bg-bg p-3 font-mono text-xs whitespace-pre-wrap select-text ${output.ok ? "" : "text-danger"}`}>{output.text}</pre>
+          <ResultBanner tone={output.ok ? "ok" : "danger"} title={output.ok ? "Terminé" : "Échec : rien n'a été modifié"}>
+            <pre className="max-h-[55vh] overflow-auto font-mono text-xs whitespace-pre-wrap">{output.text}</pre>
+          </ResultBanner>
         </Modal>
       )}
     </PageLayout>
+  );
+}
+
+/** Étape de la chaîne d'un site (domaine → serveur web → cible → conteneur). */
+function ChainNode({ label, value, mono, dot, dashed, warn }: { label: string; value: string; mono?: boolean; dot?: "ok" | "danger"; dashed?: boolean; warn?: boolean }) {
+  return (
+    <div className={`flex min-w-0 flex-col gap-px rounded-lg border bg-subtle px-2.5 py-1.5 ${dashed ? "border-dashed" : ""} ${warn ? "border-warn/50" : "border-border"}`}>
+      <span className="text-[10px] text-faint">{label}</span>
+      <span className={`flex min-w-0 items-center gap-1.5 ${mono ? "font-mono" : ""} ${warn ? "text-warn" : dashed ? "text-faint" : ""}`}>
+        {dot && <span className={`size-1.5 shrink-0 rounded-full ${dot === "ok" ? "bg-ok" : "bg-danger"}`} />}
+        <span className="truncate" title={value}>
+          {value}
+        </span>
+      </span>
+    </div>
   );
 }
 
