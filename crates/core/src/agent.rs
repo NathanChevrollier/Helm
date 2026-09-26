@@ -1,7 +1,5 @@
 //! Installation et pilotage de l'agent `helmd` sur le serveur, via SSH.
 
-use std::path::Path;
-
 use helm_protocol::{AgentConfig, AgentStatus, HistoryPoint, Request, Response, CONFIG_PATH};
 use serde::Serialize;
 
@@ -188,8 +186,11 @@ pub async fn save_config(conn: &Connection, cfg: &AgentConfig, sudo: Option<&str
 }
 
 /// Envoie le binaire adapté à l'architecture du serveur et l'installe comme service.
-/// `binary_for` renvoie le chemin local du binaire pour une architecture (`x86_64`, `aarch64`).
-pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(&str) -> Option<std::path::PathBuf>) -> Result<String> {
+/// `binary_for` renvoie le binaire (embarqué dans l'app) pour une architecture (`x86_64`,
+/// `aarch64`). Il n'est jamais écrit sur le disque du PC : l'empreinte vérifiée par le serveur est
+/// calculée sur les octets mêmes qui partent, sans fenêtre où un fichier local pourrait être
+/// remplacé par un autre programme (puis installé en root).
+pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(&str) -> Option<&'static [u8]>) -> Result<String> {
     // Conditions de l'agent : Linux, processeur x86_64 ou ARM 64 bits (sans systemd, il tourne en arrière-plan).
     let env = conn.run("uname -s; uname -m").await?;
     let mut lines = env.lines().map(str::trim);
@@ -204,10 +205,9 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
             "processeur {arch} non pris en charge par l'agent (x86_64 et ARM 64 bits seulement). Le monitoring direct reste disponible."
         ))
     })?;
-    let local = binary_for(target).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
-    let bytes = std::fs::read(&local).map_err(|e| Error::Other(format!("{} : {e}", local.display())))?;
-    let sha256: String = ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect();
-    let remote = upload_binary(conn, &local).await?;
+    let bytes = binary_for(target).filter(|b| !b.is_empty()).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
+    let sha256: String = ring::digest::digest(&ring::digest::SHA256, bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let remote = upload_binary(conn, bytes).await?;
     // Le script lit l'unité systemd sur stdin.
     let cmd = format!("sh -c {} helmd-install {} {sha256}", shell_quote(INSTALL_SCRIPT), shell_quote(&remote));
     let out = conn.exec_sudo(&cmd, sudo, Some(SYSTEMD_UNIT.as_bytes())).await?.into_result()?;
@@ -216,22 +216,14 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
 
 /// Envoie le binaire dans un dossier temporaire privé (0700, nom imprévisible) : aucun autre
 /// compte du serveur ne peut le créer à l'avance ni le remplacer avant son installation.
-async fn upload_binary(conn: &Connection, local: &Path) -> Result<String> {
+async fn upload_binary(conn: &Connection, bytes: &[u8]) -> Result<String> {
     let private = conn.run("mktemp -d /tmp/helmd-upload.XXXXXXXXXX").await?.trim().to_string();
     if !private.starts_with("/tmp/helmd-upload.") || !private[5..].chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return Err(Error::Other(format!("dossier temporaire inattendu : {private}")));
     }
     let sftp = conn.sftp().await?;
     let remote = format!("{private}/helmd");
-    let noop = |_p: crate::sftp::Progress| true;
-    let dir = std::env::temp_dir().join(format!("helm-agent-{}", std::process::id()));
-    // `upload` conserve le nom du fichier : on passe par une copie nommée comme la cible.
-    std::fs::create_dir_all(&dir).map_err(|e| Error::Other(e.to_string()))?;
-    let staged = dir.join("helmd");
-    std::fs::copy(local, &staged).map_err(|e| Error::Other(format!("{} : {e}", local.display())))?;
-    let res = crate::sftp::upload(&sftp, &staged, &private, &noop).await;
-    let _ = std::fs::remove_dir_all(&dir);
-    res?;
+    crate::sftp::write_bytes(&sftp, &remote, bytes).await?;
     Ok(remote)
 }
 

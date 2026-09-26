@@ -141,20 +141,12 @@ pub async fn agent_install(
     let detail = String::new();
     let r: Result<String, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        let dir = std::env::temp_dir().join("helm-agents");
-        std::fs::create_dir_all(&dir).map_err(err)?;
-        let binary_for = |arch: &str| {
-            let bytes = match arch {
-                "x86_64" => AGENT_X86_64,
-                "aarch64" => AGENT_AARCH64,
-                _ => return None,
-            };
-            if bytes.is_empty() {
-                return None;
+        let binary_for = |arch: &str| -> Option<&'static [u8]> {
+            match arch {
+                "x86_64" => Some(AGENT_X86_64),
+                "aarch64" => Some(AGENT_AARCH64),
+                _ => None,
             }
-            let path = dir.join(format!("helmd-{arch}"));
-            std::fs::write(&path, bytes).ok()?;
-            Some(path)
         };
         agent::install(&conn, pw.as_deref(), binary_for).await.map_err(err)
     }

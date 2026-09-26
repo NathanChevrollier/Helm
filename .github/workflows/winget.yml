@@ -36,7 +36,7 @@ jobs:
 
       - name: Soumission à microsoft/winget-pkgs
         if: steps.gate.outputs.enabled == 'true'
-        uses: vedantmgoyal9/winget-releaser@v2
+        uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         with:
           identifier: NathanChevrollier.Helm
           # Seul l'installeur NSIS est concerné ; les .sig et latest.json ne sont pas des installeurs.
