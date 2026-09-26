@@ -5,7 +5,7 @@ import { api, errorMessage, type SyncMode, type SyncView } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { runSync, useSync } from "../lib/sync";
 import { useApp } from "../lib/store";
-import { Button, Field, Input } from "./ui";
+import { Button, Checkbox, Field, Input, Segmented } from "./ui";
 
 const MODES: { id: SyncMode; label: string }[] = [
   { id: "off", label: "Désactivée" },
@@ -86,28 +86,17 @@ export default function SyncSettings() {
   const kept = (has: boolean | undefined) => (has ? "Déjà enregistrée : laisse vide pour la conserver." : undefined);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-panel p-4">
       <div>
-        <span className="flex items-center gap-2 font-medium">
-          <CloudCog size={16} className="text-accent" />
-          Synchronisation entre PC
+        <span className="flex items-center gap-2 text-[13px] font-medium">
+          <CloudCog size={15} className="text-accent" />
+          Synchronisation entre postes
         </span>
-        <span className="block text-sm text-muted">
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted">
           Serveurs, bureaux à distance, identifiants, clés d'hôte approuvées, snippets et tunnels identiques sur tous tes PC. Tout est chiffré avec ta phrase de passe avant de quitter ce PC : ni le fichier ni le serveur ne peuvent le lire.
         </span>
       </div>
-      <div className="flex w-fit gap-1 rounded-md border border-border bg-bg p-1">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => setMode(m.id)}
-            className={`rounded px-3 py-1 text-xs transition-colors ${mode === m.id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      <Segmented label="Mode de synchronisation" size="sm" value={mode} onChange={setMode} options={MODES.map((m) => ({ value: m.id, label: m.label }))} />
 
       {mode === "file" && (
         <Field label="Fichier" hint="Place-le dans un dossier déjà synchronisé (OneDrive, Dropbox, Syncthing, partage réseau) et choisis le même sur tes autres PC.">
@@ -154,13 +143,12 @@ export default function SyncSettings() {
               <Input type="password" value={confirm} autoComplete="new-password" disabled={!passphrase} onChange={(e) => setConfirm(e.target.value)} />
             </Field>
           </div>
-          <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" className="mt-1" checked={includeSecrets} onChange={(e) => setIncludeSecrets(e.target.checked)} />
-            <span>
-              Synchroniser aussi les secrets (mots de passe SSH et sudo, passphrases)
-              <span className="block text-xs text-muted">Pratique, mais leur sécurité repose alors sur ta phrase de passe : choisis-la longue.</span>
-            </span>
-          </label>
+          <Checkbox
+            checked={includeSecrets}
+            onChange={setIncludeSecrets}
+            label="Synchroniser aussi les secrets (mots de passe SSH et sudo, passphrases)"
+            hint="Pratique, mais leur sécurité repose alors sur ta phrase de passe : choisis-la longue."
+          />
         </>
       )}
 

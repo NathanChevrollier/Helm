@@ -10,7 +10,7 @@ import { SECTIONS } from "../sections";
 import { Button, FOCUS_RING } from "./ui";
 
 /** Une commande : copiable, et insérable dans le terminal actif sans être exécutée. */
-export function Command({ command, sudo }: { command: string; sudo?: boolean }) {
+function Command({ command, sudo }: { command: string; sudo?: boolean }) {
   const [copied, setCopied] = useState(false);
   const full = sudo ? `sudo ${command}` : command;
 

@@ -5,7 +5,7 @@ import "../lib/monaco";
 import { api, errorMessage } from "../lib/api";
 import { useApp } from "../lib/store";
 import { useMonacoTheme } from "../lib/theme";
-import { Button, Field, Input, Modal } from "./ui";
+import { Button, Checkbox, ErrorState, Field, Input, Modal, Textarea } from "./ui";
 
 const Editor = lazy(() => import("@monaco-editor/react"));
 
@@ -105,10 +105,7 @@ export default function NewComposeProject({
           <Button variant="ghost" onClick={onClose}>
             Annuler
           </Button>
-          <label className="mr-auto flex items-center gap-2 self-center text-sm">
-            <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} />
-            Démarrer tout de suite
-          </label>
+          <Checkbox className="mr-auto self-center" checked={start} onChange={setStart} label="Démarrer tout de suite" />
           <Button variant="primary" loading={busy} icon={start ? <Rocket size={14} /> : <FileCode2 size={14} />} disabled={!validName(name)} onClick={() => void create()}>
             {start ? "Créer et démarrer" : "Créer"}
           </Button>
@@ -117,7 +114,7 @@ export default function NewComposeProject({
     >
       <div className="flex flex-col gap-3">
         {preset?.notes && preset.notes.length > 0 && (
-          <ul className="flex list-inside list-disc flex-col gap-1 rounded-md border border-accent/40 bg-accent/5 p-3 text-xs">
+          <ul className="flex list-inside list-disc flex-col gap-1 rounded-lg border border-accent/40 bg-accent/8 p-3 text-xs">
             {preset.notes.map((n, i) => (
               <li key={i}>{n}</li>
             ))}
@@ -155,15 +152,15 @@ export default function NewComposeProject({
         </div>
         {showEnv && (
           <Field label="Fichier .env (variables et mots de passe)" hint="Enregistré à côté du compose, lisible par root seulement (chmod 600).">
-            <textarea
-              className="h-24 w-full resize-none rounded-md border border-border bg-bg p-2 font-mono text-xs outline-none focus:border-accent"
+            <Textarea
+              className="h-24 resize-none font-mono text-xs"
               placeholder={"MYSQL_PASSWORD=…\nAPP_SECRET=…"}
               value={env}
               onChange={(e) => setEnv(e.target.value)}
             />
           </Field>
         )}
-        {error && <pre className="rounded-md border border-danger/40 bg-danger/10 p-3 font-mono text-xs whitespace-pre-wrap text-danger select-text">{error}</pre>}
+        {error && <ErrorState message={<pre className="font-mono text-xs whitespace-pre-wrap">{error}</pre>} />}
         <p className="text-xs text-muted">
           Helm vérifie le fichier avec <span className="font-mono">docker compose config</span> avant de démarrer quoi que ce soit. Pense à ne publier les ports que sur 127.0.0.1 et à passer par un site (nginx ou Apache) pour l'exposer.
         </p>

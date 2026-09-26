@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { useApp } from "./store";
+import { useLock } from "./lock";
 
 interface RefreshState {
   /** Incrémenté à chaque demande d'actualisation globale. */
@@ -46,7 +47,7 @@ export function useAutoRefresh(load: (auto: boolean) => unknown, opts: { serverI
     if (!auto || !enabled || !connected || secs <= 0) return;
     let busy = false;
     const id = setInterval(async () => {
-      if (busy || document.hidden) return;
+      if (busy || document.hidden || useLock.getState().locked) return;
       busy = true;
       try {
         await ref.current(true);

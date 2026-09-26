@@ -32,8 +32,45 @@ use tokio::sync::Mutex;
 const MAX_BODY: usize = 8 * 1024 * 1024;
 const MIN_TOKEN_LEN: usize = 24;
 
+/// Compteur par clé sur une fenêtre fixe : au plus `max` évènements par `window`.
+pub struct Limiter {
+    max: u32,
+    window: Duration,
+    hits: std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>,
+}
+
+impl Limiter {
+    pub fn new(max: u32, window: Duration) -> Self {
+        Self { max, window, hits: Default::default() }
+    }
+
+    /// Compte un évènement pour `key` ; `false` si la limite est dépassée.
+    pub fn allow(&self, key: &str) -> bool {
+        let now = std::time::Instant::now();
+        let mut hits = self.hits.lock().unwrap_or_else(|e| e.into_inner());
+        if hits.len() > 10_000 {
+            let window = self.window;
+            hits.retain(|_, (start, _)| now.duration_since(*start) < window);
+        }
+        let entry = hits.entry(key.to_string()).or_insert((now, 0));
+        if now.duration_since(entry.0) >= self.window {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+        entry.1 <= self.max
+    }
+}
+
+/// Réponses « jeton invalide » en attente (chacune dort 400 ms) : au-delà, refus immédiat, pour
+/// qu'un flot de requêtes sans jeton ne puisse pas accumuler des milliers de tâches endormies.
+static PENDING_REFUSALS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(64);
+
 pub struct App {
     dir: PathBuf,
+    /// Envois de réglages par espace : un PC normal en fait quelques-uns par heure.
+    writes: Limiter,
+    /// Ouvertures de sessions de partage par espace.
+    room_opens: Limiter,
     /// Empreintes SHA-256 des jetons autorisés (les jetons eux-mêmes ne sont pas gardés).
     tokens: HashSet<String>,
     /// Sérialise les écritures : la vérification de révision et l'écriture sont atomiques.
@@ -70,6 +107,17 @@ fn error(status: StatusCode, message: &str) -> Response {
 }
 
 impl App {
+    pub fn new(dir: PathBuf, tokens: HashSet<String>) -> Self {
+        Self {
+            dir,
+            writes: Limiter::new(60, Duration::from_secs(60)),
+            room_opens: Limiter::new(30, Duration::from_secs(3600)),
+            tokens,
+            write: Mutex::new(()),
+            rooms: relay::Rooms::default(),
+        }
+    }
+
     /// Fichier de l'espace du jeton présenté, ou `None` si le jeton est inconnu.
     pub fn space(&self, headers: &HeaderMap) -> Option<PathBuf> {
         let token = headers.get("authorization")?.to_str().ok()?.strip_prefix("Bearer ")?.trim();
@@ -94,9 +142,16 @@ fn is_encrypted_envelope(data: &str) -> bool {
 }
 
 pub async fn unauthorized() -> Response {
-    // Freine les essais de jetons au hasard.
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    // Freine les essais de jetons au hasard, dans la limite des refus déjà en attente.
+    if let Ok(_permit) = PENDING_REFUSALS.try_acquire() {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
     error(StatusCode::UNAUTHORIZED, "jeton invalide")
+}
+
+/// Identifiant court d'un espace (pour les limites), tiré du nom de son fichier.
+pub fn space_key(path: &Path) -> String {
+    path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 async fn get_state(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
@@ -110,6 +165,9 @@ async fn get_state(State(app): State<Arc<App>>, headers: HeaderMap) -> Response 
 
 async fn put_state(State(app): State<Arc<App>>, headers: HeaderMap, Json(push): Json<Push>) -> Response {
     let Some(path) = app.space(&headers) else { return unauthorized().await };
+    if !app.writes.allow(&space_key(&path)) {
+        return error(StatusCode::TOO_MANY_REQUESTS, "trop d'envois : réessaie dans une minute");
+    }
     if !is_encrypted_envelope(&push.data) {
         return error(StatusCode::UNPROCESSABLE_ENTITY, "contenu refusé : seules les données chiffrées par Helm sont acceptées");
     }
@@ -189,7 +247,7 @@ async fn main() {
     let addr: SocketAddr =
         std::env::var("HELM_SYNC_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()).parse().expect("HELM_SYNC_ADDR invalide");
     let count = tokens.len();
-    let app = Arc::new(App { dir, tokens, write: Mutex::new(()), rooms: relay::Rooms::default() });
+    let app = Arc::new(App::new(dir, tokens));
     // Ménage régulier des sessions de partage expirées.
     let sweeper = app.clone();
     tokio::spawn(async move {
@@ -211,12 +269,7 @@ mod tests {
 
     async fn serve() -> (String, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let app = Arc::new(App {
-            dir: dir.path().to_path_buf(),
-            tokens: parse_tokens(TOKEN).unwrap(),
-            write: Mutex::new(()),
-            rooms: relay::Rooms::default(),
-        });
+        let app = Arc::new(App::new(dir.path().to_path_buf(), parse_tokens(TOKEN).unwrap()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, router(app)).await.unwrap() });
@@ -300,6 +353,16 @@ mod tests {
             }
         }
         panic!("la session aurait dû être fermée avec le départ de l'hôte");
+    }
+
+    #[test]
+    fn limiter_counts_per_key_and_window() {
+        let l = Limiter::new(2, Duration::from_millis(50));
+        assert!(l.allow("a") && l.allow("a"));
+        assert!(!l.allow("a"), "troisième envoi dans la fenêtre : refusé");
+        assert!(l.allow("b"), "les autres espaces ne sont pas touchés");
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(l.allow("a"), "nouvelle fenêtre");
     }
 
     #[test]

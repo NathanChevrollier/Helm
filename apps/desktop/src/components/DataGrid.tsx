@@ -2,10 +2,10 @@
 // double-clic. L'édition n'est proposée que si Helm connaît la clé primaire de la table affichée —
 // sans elle, aucune ligne n'est identifiable de façon sûre et le tableau reste en lecture seule.
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Filter as FilterIcon, KeyRound, ListFilter, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Filter as FilterIcon, KeyRound, ListFilter, Maximize2, Trash2, X } from "lucide-react";
 import { DB_FILTER_OPS, type DbColumn, type DbFilter, type DbFilterOp, type DbQueryResult } from "../lib/api";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
-import { Button, Input } from "./ui";
+import { Button, Input, Select } from "./ui";
 
 export interface Sort {
   column: string;
@@ -57,18 +57,21 @@ export default function DataGrid({
   const byName = new Map((columns ?? []).map((c) => [c.name, c]));
   const primary = (columns ?? []).filter((c) => c.primary).map((c) => c.name);
 
-  const headerMenu = (column: string, e: React.MouseEvent) => {
+  const headerMenu = (column: string, e: React.MouseEvent, anchor?: DOMRect) => {
     e.preventDefault();
+    e.stopPropagation();
     const filtered = filters.some((f) => f.column === column);
+    const x = anchor ? anchor.left : e.clientX;
+    const y = anchor ? anchor.bottom + 4 : e.clientY;
     setMenu({
-      x: e.clientX,
-      y: e.clientY,
+      x,
+      y,
       items: [
         { label: "Trier croissant", icon: <ArrowUp size={13} />, onClick: () => onSort({ column, desc: false }) },
         { label: "Trier décroissant", icon: <ArrowDown size={13} />, onClick: () => onSort({ column, desc: true }) },
         ...(sort ? ([{ label: "Ne plus trier", icon: <X size={13} />, onClick: () => onSort(null) }] as MenuItem[]) : []),
         "separator",
-        { label: "Filtrer cette colonne…", icon: <FilterIcon size={13} />, onClick: () => setFilterOn({ column, x: e.clientX, y: e.clientY }) },
+        ...(columns ? ([{ label: "Filtrer cette colonne…", icon: <FilterIcon size={13} />, onClick: () => setFilterOn({ column, x, y }) }] as MenuItem[]) : []),
         {
           label: "Retirer le filtre",
           icon: <X size={13} />,
@@ -95,9 +98,9 @@ export default function DataGrid({
   return (
     <>
       <table className="min-w-full text-xs">
-        <thead className="sticky top-0 z-10 bg-panel text-left text-muted">
+        <thead className="sticky top-0 z-10 bg-subtle text-left text-muted">
           <tr>
-            {editable && <th className="w-8 border-b border-border" />}
+            <th className="w-14 border-b border-border" />
             {result.columns.map((c, i) => {
               const meta = byName.get(c);
               const active = sort?.column === c;
@@ -105,7 +108,7 @@ export default function DataGrid({
               return (
                 <th
                   key={i}
-                  className="cursor-pointer border-b border-border px-3 py-1.5 font-medium whitespace-nowrap select-none hover:bg-hover"
+                  className="group/th cursor-pointer border-b border-l border-border border-l-line py-1.5 pr-1 pl-3 font-medium whitespace-nowrap select-none hover:bg-hover"
                   title={
                     columns
                       ? `${meta?.dataType ?? "?"}${meta?.primary ? " · clé primaire" : ""}${meta?.nullable === false ? " · NOT NULL" : ""}\nClic : trier · Clic droit : menu`
@@ -119,6 +122,16 @@ export default function DataGrid({
                     {c}
                     {active && (sort.desc ? <ArrowDown size={11} className="text-accent" /> : <ArrowUp size={11} className="text-accent" />)}
                     {filtered.length > 0 && <FilterIcon size={10} className="text-accent" />}
+                    {meta && <span className="ml-1 font-mono text-[10px] font-normal text-faint">{meta.dataType}</span>}
+                    <button
+                      type="button"
+                      title="Trier, filtrer…"
+                      aria-label={`Menu de la colonne ${c}`}
+                      className="ml-0.5 rounded p-0.5 text-faint hover:bg-hover-strong hover:text-fg"
+                      onClick={(e) => headerMenu(c, e, e.currentTarget.getBoundingClientRect())}
+                    >
+                      <ChevronDown size={12} />
+                    </button>
                   </span>
                 </th>
               );
@@ -127,25 +140,26 @@ export default function DataGrid({
         </thead>
         <tbody>
           {result.rows.map((row, i) => (
-            <tr key={i} className="group border-b border-border/40 hover:bg-hover-soft">
-              {editable && (
-                <td className="px-1 text-center align-middle">
-                  <button
-                    className="text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-danger focus-visible:opacity-100"
-                    title="Supprimer cette ligne"
-                    onClick={() => onDeleteRow(i)}
-                  >
-                    <Trash2 size={12} />
+            <tr key={i} className="group border-b border-line hover:bg-hover-soft">
+              <td className="px-1.5 align-middle whitespace-nowrap">
+                <span className="flex items-center gap-0.5">
+                  <button className="rounded p-1 text-faint hover:bg-hover-strong hover:text-fg" title="Ouvrir la fiche de la ligne" onClick={() => onOpenRow(row)}>
+                    <Maximize2 size={11} />
                   </button>
-                </td>
-              )}
+                  {editable && (
+                    <button className="rounded p-1 text-faint hover:bg-danger/15 hover:text-danger" title="Supprimer cette ligne" onClick={() => onDeleteRow(i)}>
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </span>
+              </td>
               {row.map((v, j) => {
                 const isEditing = editing?.row === i && editing.col === j;
                 return (
                   <td
                     key={j}
-                    className={`max-w-80 px-3 py-1 font-mono select-text ${isEditing ? "" : "truncate"} ${editable ? "cursor-cell" : "cursor-pointer"}`}
-                    title={editable ? "Double-clic : modifier · Clic : lire la ligne" : "Clic : lire la ligne entière"}
+                    className={`max-w-80 border-l border-line px-3 py-1.5 font-mono select-text ${isEditing ? "" : "truncate"} ${editable ? "cursor-cell" : "cursor-pointer"}`}
+                    title={editable ? "Double-clic : modifier la cellule" : "Clic : lire la ligne entière"}
                     onClick={() => !isEditing && !editable && onOpenRow(row)}
                     onDoubleClick={() => {
                       if (!editable) return onOpenRow(row);
@@ -251,13 +265,7 @@ function FilterForm({
     >
       <p className="mb-2 truncate font-mono text-[11px] text-muted">{column}</p>
       <div className="flex gap-1">
-        <select className="h-7 rounded-md border border-border bg-bg px-1 text-xs" value={op} onChange={(e) => setOp(e.target.value as DbFilterOp)}>
-          {DB_FILTER_OPS.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <Select size="sm" aria-label="Opérateur" value={op} onChange={setOp} options={DB_FILTER_OPS.map((o) => ({ value: o, label: o }))} />
         {needsValue && (
           <Input
             className="h-7 flex-1 font-mono text-xs"

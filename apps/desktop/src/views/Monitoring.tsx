@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
-import { Activity } from "lucide-react";
+// Supervision : ressources en direct ou sur l'historique de l'agent, processus, services,
+// tâches planifiées, et l'agent helmd avec ses alertes.
+import { useCallback, useMemo, useState } from "react";
 import { api, errorMessage, type AgentInfo } from "../lib/api";
-import { ensureConnected, useApp } from "../lib/store";
-import { Badge, EmptyState } from "../components/ui";
+import { useApp } from "../lib/store";
+import { useTabIntent } from "../lib/shell";
+import { Badge, Segmented } from "../components/ui";
 import PageLayout from "../components/PageLayout";
-import Overview from "./monitoring/Overview";
+import ServerGate, { ServerContext } from "../components/ServerGate";
+import Overview, { RANGES, type RangeId } from "./monitoring/Overview";
 import Processes from "./monitoring/Processes";
 import Services from "./monitoring/Services";
 import Agent from "./monitoring/Agent";
@@ -12,26 +15,23 @@ import ScheduleView from "./monitoring/Schedule";
 import { usePolling } from "../lib/poll";
 import { useCachedState } from "../lib/cache";
 
-const TABS = [
-  { id: "overview", label: "Vue d'ensemble" },
-  { id: "processes", label: "Processus" },
-  { id: "services", label: "Services" },
-  { id: "schedule", label: "Tâches planifiées" },
-  { id: "agent", label: "Agent & alertes" },
-] as const;
-type TabId = (typeof TABS)[number]["id"];
+type TabId = "overview" | "processes" | "services" | "schedule" | "agent";
 
 export default function MonitoringView() {
-  const serverId = useApp((s) => s.activeServerId);
-  if (!serverId) return <EmptyState icon={<Activity size={40} />} title="Aucun serveur sélectionné" />;
-  return <Monitoring key={serverId} serverId={serverId} />;
+  return <ServerGate title="Supervision" guide="agent">{(serverId) => <Monitoring key={serverId} serverId={serverId} />}</ServerGate>;
 }
 
 function Monitoring({ serverId }: { serverId: string }) {
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
-  const [tab, setTab] = useState<TabId>("overview");
-  const [ready, setReady] = useState<boolean | null>(null);
+  const [tab, setTab] = useTabIntent<TabId>("monitoring", "overview");
+  const [range, setRange] = useState<RangeId>("live");
   const [agent, setAgent] = useCachedState<AgentInfo | null>(`agent:${serverId}`, null);
+  const [counts, setCounts] = useState<{ processes?: number; services?: number; jobs?: number }>({});
+  // Compteurs des onglets, remontés par chaque vue (fonctions stables : pas de boucle de rendu).
+  const onCount = useMemo(() => {
+    const make = (k: "processes" | "services" | "jobs") => (n: number) => setCounts((c) => (c[k] === n ? c : { ...c, [k]: n }));
+    return { processes: make("processes"), services: make("services"), jobs: make("jobs") };
+  }, []);
 
   const loadAgent = useCallback(async () => {
     try {
@@ -41,45 +41,60 @@ function Monitoring({ serverId }: { serverId: string }) {
     }
   }, [serverId]);
 
-  useEffect(() => {
-    void ensureConnected(serverId).then((ok) => {
-      setReady(ok);
-      if (ok) void loadAgent();
-    });
-  }, [serverId, loadAgent]);
-
-  // Rafraîchit l'état des alertes toutes les 30 s.
-  usePolling(loadAgent, 30_000, [loadAgent], !!ready);
-
-  if (ready === false) return <EmptyState icon={<Activity size={40} />} title="Non connecté">Connexion au serveur impossible.</EmptyState>;
-  if (ready === null) return <EmptyState icon={<Activity size={40} />} title="Connexion…" />;
+  // État de l'agent et des alertes, relu toutes les 30 s.
+  usePolling(loadAgent, 30_000, [loadAgent]);
 
   const alerts = agent?.status?.activeAlerts.length ?? 0;
+  const agentOk = !!agent?.running;
 
   return (
     <PageLayout
-      context={server?.name}
+      context={server && <ServerContext server={server} />}
       title="Supervision"
-      guide="agent"
-      subtitle={
-        <span className="flex items-center gap-2">
-          {agent?.running ? <Badge tone="ok">agent helmd actif</Badge> : <Badge>mode direct (sans historique)</Badge>}
-          {alerts > 0 && <Badge tone="danger">{alerts} alerte(s) en cours</Badge>}
-        </span>
+      guide={tab === "schedule" ? "schedule" : "agent"}
+      subtitle={agentOk ? `agent helmd ${agent?.status?.version ?? ""} actif · historique 30 jours` : "mode direct : mesures en temps réel, sans historique"}
+      status={alerts > 0 ? <Badge tone="danger">{alerts} alerte{alerts > 1 ? "s" : ""} en cours</Badge> : undefined}
+      actions={
+        tab === "overview" ? (
+          <Segmented
+            label="Période"
+            value={range}
+            onChange={setRange}
+            options={RANGES.map((r) => ({
+              value: r.id,
+              label: r.label,
+              disabled: r.secs > 0 && !agentOk,
+              title: r.secs > 0 && !agentOk ? "Installe l'agent helmd (onglet Alertes et agent) pour conserver l'historique" : undefined,
+            }))}
+          />
+        ) : undefined
       }
-      tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}
+      tabs={[
+        { id: "overview", label: "Vue d'ensemble" },
+        { id: "processes", label: "Processus", count: counts.processes },
+        { id: "services", label: "Services", count: counts.services },
+        { id: "schedule", label: "Tâches planifiées", count: counts.jobs },
+        { id: "agent", label: "Alertes et agent", count: alerts || undefined, tone: alerts ? "danger" : undefined },
+      ]}
       activeTab={tab}
       onTab={setTab}
+      scroll={tab !== "processes" && tab !== "services"}
     >
-      <div className="overflow-x-hidden p-6">
-        <div className={tab === "overview" ? "" : "hidden"}>
-          <Overview serverId={serverId} agent={agent} visible={tab === "overview"} />
-        </div>
-        {tab === "processes" && <Processes serverId={serverId} visible />}
-        {tab === "services" && <Services serverId={serverId} />}
-        {tab === "schedule" && <ScheduleView serverId={serverId} />}
-        {tab === "agent" && <Agent serverId={serverId} agent={agent} reload={loadAgent} />}
+      <div className={tab === "overview" ? "px-7 py-5" : "hidden"}>
+        <Overview serverId={serverId} agent={agent} visible={tab === "overview"} range={range} onOpenAgent={() => setTab("agent")} />
       </div>
+      {tab === "processes" && <Processes serverId={serverId} visible onCount={onCount.processes} />}
+      {tab === "services" && <Services serverId={serverId} onCount={onCount.services} />}
+      {tab === "schedule" && (
+        <div className="px-7 py-5">
+          <ScheduleView serverId={serverId} onCount={onCount.jobs} />
+        </div>
+      )}
+      {tab === "agent" && (
+        <div className="px-7 py-5">
+          <Agent serverId={serverId} agent={agent} reload={loadAgent} />
+        </div>
+      )}
     </PageLayout>
   );
 }

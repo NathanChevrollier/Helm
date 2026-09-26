@@ -53,7 +53,7 @@ publiés sur la page [Releases](https://github.com/NathanChevrollier/Helm/releas
 | Linux | `.AppImage` (mises à jour automatiques), `.deb` ou `.rpm` |
 
 Helm vérifie au démarrage si une nouvelle version existe et propose de l'installer
-(Réglages → Préférences → Mises à jour). Les paquets sont signés : une version altérée est refusée.
+(Réglages → Maintenance → Mises à jour). Les paquets sont signés : une version altérée est refusée.
 
 > **Windows** — tant que la signature de code SignPath n'est pas active, SmartScreen affiche
 > « Windows a protégé votre ordinateur » → *Informations complémentaires* → *Exécuter quand même*.
@@ -72,8 +72,10 @@ Helm vérifie au démarrage si une nouvelle version existe et propose de l'insta
    `~/.ssh/config` existantes peuvent être importées d'un clic.
 2. **Approuver la clé d'hôte** à la première connexion : son empreinte est mémorisée et toute
    modification ultérieure bloque la connexion.
-3. **Travailler** — la colonne de gauche donne les sections, la barre du haut le serveur actif.
-   La palette de commandes (**Ctrl+K**) ouvre n'importe quelle action sans quitter le clavier.
+3. **Travailler** — le sélecteur en haut de la colonne de gauche choisit le serveur actif
+   (**Ctrl+Shift+S**) ; en dessous, les sections du poste puis celles du serveur. La palette de
+   commandes (**Ctrl+K**, préfixes `>` actions, `@` serveurs, `/` chemins, `#` conteneurs) ouvre
+   n'importe quelle action sans quitter le clavier.
 
 Les secrets ne sont jamais écrits dans les fichiers de configuration : ils vont dans le coffre-fort
 du système (Windows Credential Manager, Trousseau macOS, Secret Service sous Linux).
@@ -134,18 +136,18 @@ lecture seule** : état, historique, alertes, conteneurs, journaux, sites, confi
 audit, sauvegardes, processus, fichiers de configuration.
 
 - Aucun outil ne peut modifier un serveur ni exécuter une commande libre.
-- Seuls les serveurs autorisés dans Réglages → Accès IA sont visibles.
+- Seuls les serveurs autorisés dans Réglages → Accès IA (MCP) sont visibles.
 - Les secrets sont masqués et les clés privées refusées.
 - Chaque appel est inscrit au journal d'actions.
 
-La configuration à copier se trouve dans Réglages → Accès IA.
+La configuration à copier se trouve dans Réglages → Accès IA (MCP).
 
 ## Agent `helmd`
 
 Optionnel : Helm fonctionne sans lui, mais l'agent apporte l'historique et les alertes hors ligne.
 
 - Binaire Linux statique d'environ 2 Mo (x86_64 et arm64), embarqué dans l'app et installé en un
-  clic depuis Supervision → Agent & alertes.
+  clic depuis Supervision → Alertes et agent.
 - Tourne sous un utilisateur système dédié, avec un service systemd durci (`ProtectSystem=strict`,
   `NoNewPrivileges`, 64 Mo de RAM maximum).
 - **N'écoute que sur un socket unix** (`/run/helmd/helmd.sock`) : l'app l'interroge à travers la
@@ -169,7 +171,7 @@ Optionnel : Helm fonctionne sans lui, mais l'agent apporte l'historique et les a
   Le serveur web n'est jamais rechargé avec une configuration invalide et les autres sites ne sont
   pas touchés ; les écritures hors des répertoires de configuration sont refusées.
 - **Commandes sensibles confirmées** (suppression, redémarrage, diffusion à plusieurs serveurs).
-- **Journal d'actions** local, consultable dans Réglages, alimenté par l'app, le MCP et l'assistant.
+- **Journal d'actions** local, consultable dans Réglages → Journal d'actions, alimenté par l'app, le MCP et l'assistant.
 - **Verrouillage de l'app** par mot de passe, manuel (Ctrl+Shift+L) ou après inactivité.
 
 ## Compatibilité serveur
@@ -188,11 +190,13 @@ Les fonctions non disponibles sur un serveur sont signalées dans l'interface pl
 
 ## Raccourcis clavier
 
-Tous modifiables dans Réglages → Préférences.
+Tous modifiables dans Réglages → Raccourcis (F1 affiche l'aide-mémoire).
 
 | Action | Par défaut |
 |---|---|
 | Palette de commandes | `Ctrl+K` |
+| Changer de serveur | `Ctrl+Shift+S` |
+| Aide-mémoire des raccourcis | `F1` |
 | Assistant IA | `Ctrl+I` |
 | Verrouiller Helm | `Ctrl+Shift+L` |
 | Nouvel onglet de terminal | `Ctrl+Shift+T` |

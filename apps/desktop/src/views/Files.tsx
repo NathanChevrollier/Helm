@@ -3,16 +3,21 @@ import { create } from "zustand";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowLeftRight, ArrowUp, Columns2, Download, Eye, EyeOff, File, FileArchive, FileDiff, FilePlus, Folder, FolderOpen,
-  FolderPlus, House, Link2, PackageOpen, Pencil, RefreshCw, Search, Shield, SquareTerminal, Star, Trash2, Upload, X,
+  ArrowLeftRight, ArrowUp, ChevronRight, Copy, Download, Eye, File, FileArchive, FileDiff, FilePlus, Filter, Folder, FolderOpen, FolderPlus, HardDrive, History, House, Link2,
+  PackageOpen, PanelLeft, Pencil, PenLine, Plus, RefreshCw, Search, Shield, SlidersHorizontal, SquareTerminal, Star, Trash2, Upload, X,
 } from "lucide-react";
 import { api, ARCHIVE_EXTENSIONS, errorMessage, formatBytes, shellQuote, type ArchiveFormat, type FsEntry, type Listing } from "../lib/api";
 import { track } from "../lib/transfers";
 import TransfersBar from "../components/TransfersBar";
 import { useAutoRefresh } from "../lib/refresh";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
-import { Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import {
+  Button, Checkbox, DataTable, Drawer, ErrorState, Eyebrow, Field, IconButton, Input, Loading, MenuButton, Modal, Select, type Column, type MenuItem,
+} from "../components/ui";
 import PageLayout from "../components/PageLayout";
+import ServerGate, { ServerContext } from "../components/ServerGate";
+import { writeClipboard } from "../lib/clipboard";
+import { useTheme } from "../lib/theme";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 const FileSearch = lazy(() => import("../components/FileSearch"));
@@ -87,28 +92,29 @@ async function copyToOther(from: PaneId, serverId: string, paths: string[]) {
 }
 
 export default function FilesView() {
-  const { activeServerId, servers } = useAppPick("activeServerId", "servers");
+  return <ServerGate title="Fichiers" guide="files">{(serverId, server) => <Files key={serverId} serverId={serverId} serverName={server.name} />}</ServerGate>;
+}
+
+function Files({ serverId, serverName }: { serverId: string; serverName: string }) {
+  const servers = useApp((s) => s.servers);
+  const server = servers.find((s) => s.id === serverId);
   const [dual, setDual] = useState(false);
   const [rightServer, setRightServer] = useState<string | null>(null);
   const drag = usePanes((s) => s.drag);
-
-  if (!activeServerId) {
-    return <EmptyState icon={<FolderOpen size={40} />} title="Aucun serveur sélectionné">Choisis un serveur dans la liste à gauche.</EmptyState>;
-  }
-  const right = rightServer && servers.some((s) => s.id === rightServer) ? rightServer : activeServerId;
+  const right = rightServer && servers.some((s) => s.id === rightServer) ? rightServer : serverId;
 
   return (
     <PageLayout
-      context={servers.find((s) => s.id === activeServerId)?.name}
+      context={server ? <ServerContext server={server} /> : serverName}
       title="Fichiers"
-      subtitle="Explorateur SFTP. Le second panneau sert à copier d'un serveur à l'autre."
+      subtitle={dual ? "Glisse des éléments d'un panneau à l'autre pour les copier, même entre deux serveurs" : "Explorateur SFTP : glisse des fichiers de ton PC pour les envoyer"}
       guide="files"
       scroll={false}
     >
       <div className="flex min-h-0 w-full flex-col">
         <div className="flex min-h-0 flex-1">
           <div className="min-w-0 flex-1">
-            <Explorer key={`l-${activeServerId}`} serverId={activeServerId} pane="left" dual={dual} onToggleDual={() => setDual((v) => !v)} />
+            <Explorer key={`l-${serverId}`} serverId={serverId} pane="left" dual={dual} onToggleDual={() => setDual((v) => !v)} />
           </div>
           {dual && (
             <div className="min-w-0 flex-1 border-l border-border">
@@ -118,13 +124,20 @@ export default function FilesView() {
         </div>
         <TransfersBar />
         {drag && (
-          <div className="pointer-events-none fixed z-50 rounded-md border border-accent bg-panel px-2 py-1 text-xs shadow-xl" style={{ left: drag.x + 12, top: drag.y + 12 }}>
+          <div className="pointer-events-none fixed z-50 rounded-lg border border-accent bg-raised px-2 py-1 text-xs shadow-xl" style={{ left: drag.x + 12, top: drag.y + 12 }}>
             {drag.label}
           </div>
         )}
       </div>
     </PageLayout>
   );
+}
+
+/** Derniers dossiers ouverts par serveur (session courante). */
+const recentDirs = new Map<string, string[]>();
+function pushRecentDir(serverId: string, path: string) {
+  const list = [path, ...(recentDirs.get(serverId) ?? []).filter((p) => p !== path)].slice(0, 6);
+  recentDirs.set(serverId, list);
 }
 
 function Explorer({
@@ -163,6 +176,24 @@ function Explorer({
   const [miniRunning, setMiniRunning] = useState(false);
   const miniInputRef = useRef<HTMLInputElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [editingPath, setEditingPath] = useState(false);
+  const [preview, setPreview] = useState<FsEntry | null>(null);
+  const theme = useTheme((s) => s.theme);
+  const [sidebarOpen, setSidebarOpenState] = useState(() => {
+    try {
+      return localStorage.getItem("helm.files.sidebar") !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const setSidebarOpen = (v: boolean) => {
+    setSidebarOpenState(v);
+    try {
+      localStorage.setItem("helm.files.sidebar", v ? "open" : "closed");
+    } catch {
+      /* préférence non retenue */
+    }
+  };
   /** Ligne a montrer a l'ouverture de l'editeur, venue d'un resultat de recherche. */
   const [editingLine, setEditingLine] = useState<number | undefined>(undefined);
   /** Compression en cours de préparation : les éléments choisis. */
@@ -185,6 +216,7 @@ function Explorer({
         setPathInput(l.path);
         setSelected(new Set());
         usePanes.getState().setCwd(pane, serverId, l.path);
+        pushRecentDir(serverId, l.path);
         if (pane === "left") setFilesPath(serverId, l.path);
       } catch (e) {
         setError(errorMessage(e));
@@ -348,12 +380,15 @@ function Explorer({
     setSelected(next);
   };
 
-  const act = async (fn: () => Promise<unknown>) => {
+  /** Lance une action puis relit le dossier ; `false` si elle a échoué (l'erreur est affichée). */
+  const act = async (fn: () => Promise<unknown>): Promise<boolean> => {
     try {
       await fn();
       refresh();
+      return true;
     } catch (e) {
       notify(errorMessage(e), "error");
+      return false;
     }
   };
 
@@ -430,279 +465,406 @@ function Explorer({
   const single = selectedEntries.length === 1 ? selectedEntries[0] : null;
   /** Exactement deux fichiers sélectionnés : la comparaison a un sens. */
   const pair = selectedEntries.length === 2 && selectedEntries.every((e) => !isDir(e)) ? selectedEntries : null;
+  const bookmarked = bookmarks.some((b) => b.path === cwd);
+  const hiddenCount = (listing?.entries ?? []).filter((e) => e.name.startsWith(".")).length;
+  const recents = (recentDirs.get(serverId) ?? []).filter((p) => p !== cwd && !bookmarks.some((b) => b.path === p));
+  const showSidebar = !dual && sidebarOpen;
+  const terminalHere = (dir: string) => openTab(serverId, { title: dir, command: `cd ${shellQuote(dir)} && exec "$SHELL" -l` });
+  const copyPath = (path: string) => void writeClipboard(path).then(() => notify("Chemin copié", "success"));
+
+  const rowMenu = (e: FsEntry): MenuItem[] => {
+    const sel = selected.has(e.path) ? selectedEntries : [e];
+    const many = sel.length > 1;
+    return [
+      ...(many
+        ? []
+        : ([
+            isDir(e)
+              ? { label: "Ouvrir", icon: <FolderOpen size={14} />, onClick: () => void load(e.path) }
+              : { label: "Éditer", icon: <Pencil size={14} />, onClick: () => activate(e) },
+            ...(!isDir(e) ? [{ label: "Aperçu", icon: <Eye size={14} />, onClick: () => setPreview(e) }] : []),
+          ] as MenuItem[])),
+      { label: many ? `Télécharger ${sel.length} éléments` : "Télécharger", icon: <Download size={14} />, onClick: () => void download(sel) },
+      ...(dual ? [{ label: "Copier vers l'autre panneau", icon: <ArrowLeftRight size={14} />, onClick: () => void copyToOther(pane, serverId, sel.map((x) => x.path)) }] : []),
+      "separator",
+      ...(many
+        ? []
+        : ([
+            { label: "Renommer", hint: "F2", icon: <PenLine size={14} />, onClick: () => void rename(e) },
+            { label: "Permissions…", icon: <Shield size={14} />, onClick: () => setChmodOf(e) },
+            { label: "Copier le chemin", icon: <Copy size={14} />, onClick: () => copyPath(e.path) },
+          ] as MenuItem[])),
+      { label: "Compresser…", icon: <FileArchive size={14} />, onClick: () => setArchiving(sel.map((x) => x.path)) },
+      ...(!many && isArchive(e) ? [{ label: "Extraire ici", icon: <PackageOpen size={14} />, onClick: () => void extract(e) }] : []),
+      ...(pair && selected.has(e.path) ? [{ label: "Comparer les deux fichiers", icon: <FileDiff size={14} />, onClick: () => void compare(pair[0], pair[1]) }] : []),
+      ...(!many && isDir(e)
+        ? ([
+            { label: "Terminal dans ce dossier", icon: <SquareTerminal size={14} />, onClick: () => terminalHere(e.path) },
+            ...(!bookmarks.some((b) => b.path === e.path) ? [{ label: "Ajouter aux raccourcis", icon: <Star size={14} />, onClick: () => addBookmark(serverId, e.path) }] : []),
+          ] as MenuItem[])
+        : []),
+      "separator",
+      { label: many ? `Supprimer ${sel.length} éléments…` : "Supprimer…", hint: "Suppr", icon: <Trash2 size={14} />, danger: true, onClick: () => void remove(sel) },
+    ];
+  };
+
+  const columns: Column<FsEntry>[] = [
+    {
+      key: "name",
+      header: "Nom",
+      width: "minmax(0,1fr)",
+      sortValue: (e) => `${isDir(e) ? 0 : 1}${e.name.toLowerCase()}`,
+      render: (e) => (
+        <span className="flex min-w-0 items-center gap-2.5">
+          {e.kind === "symlink" ? (
+            <Link2 size={15} className={`shrink-0 ${e.targetIsDir ? "text-accent" : "text-[#c792ea]"}`} />
+          ) : isDir(e) ? (
+            <Folder size={15} className="shrink-0 text-accent" />
+          ) : (
+            <File size={15} className="shrink-0 text-muted" />
+          )}
+          <span className={`truncate ${isDir(e) ? "font-medium" : ""}`}>{e.name}</span>
+        </span>
+      ),
+    },
+    { key: "size", header: "Taille", width: "96px", align: "right", sortValue: (e) => (isDir(e) ? -1 : e.size), render: (e) => <span className="text-xs text-muted tabular-nums">{isDir(e) || e.kind === "symlink" ? "—" : formatBytes(e.size)}</span> },
+    {
+      key: "modified",
+      header: "Modifié",
+      width: "150px",
+      sortValue: (e) => e.modified ?? 0,
+      render: (e) => <span className="text-xs text-muted tabular-nums">{e.modified ? new Date(e.modified * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""}</span>,
+    },
+    ...(dual ? [] : [{ key: "perms", header: "Droits", width: "110px", sortValue: (e: FsEntry) => e.permissions, render: (e: FsEntry) => <span className="font-mono text-xs text-muted">{e.permissions}</span> }]),
+    ...(dual
+      ? []
+      : [
+          {
+            key: "owner",
+            header: "Propriétaire",
+            width: "130px",
+            sortValue: (e: FsEntry) => e.owner ?? "",
+            render: (e: FsEntry) => (
+              <span className="text-xs text-muted">
+                {e.owner}
+                {e.group && e.group !== e.owner ? `:${e.group}` : ""}
+              </span>
+            ),
+          },
+        ]),
+  ];
 
   return (
-    <div ref={root} data-pane={pane} className="relative flex h-full flex-col" onKeyDown={(e) => {
-      if (e.target instanceof HTMLInputElement) return;
-      if (e.key === "Delete") void remove(selectedEntries);
-      if (e.key === "F2" && single) void rename(single);
-      if (e.key === "Backspace") void load(parentOf(cwd));
-      if (e.key === "F5") refresh();
-      // Ctrl+P : chercher un fichier ou du texte dans toute l'arborescence.
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    }} tabIndex={-1}>
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+    <div
+      ref={root}
+      data-pane={pane}
+      className="relative flex h-full flex-col outline-none"
+      onKeyDown={(e) => {
+        if (e.target instanceof HTMLInputElement) return;
+        if (e.key === "Delete") void remove(selectedEntries);
+        if (e.key === "F2" && single) void rename(single);
+        if (e.key === "Backspace") void load(parentOf(cwd));
+        if (e.key === "F5") refresh();
+        if (e.key === "Escape" && selected.size) setSelected(new Set());
+        // Ctrl+P : chercher un fichier ou du texte dans toute l'arborescence.
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+          e.preventDefault();
+          setSearchOpen(true);
+        }
+      }}
+      tabIndex={-1}
+    >
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-2.5">
         {onServerChange && (
-          <select
-            className="mr-1 h-8 max-w-40 rounded-md border border-border bg-bg px-2 text-xs"
-            value={serverId}
-            onChange={(e) => onServerChange(e.target.value)}
-            aria-label="Serveur du panneau"
-          >
-            {servers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <Select className="w-36" value={serverId} onChange={onServerChange} aria-label="Serveur du panneau" options={servers.map((s) => ({ value: s.id, label: s.name }))} />
         )}
-        <IconButton title="Dossier parent" onClick={() => void load(parentOf(cwd))} disabled={cwd === "/"}>
+        {!dual && (
+          <IconButton title={sidebarOpen ? "Masquer les emplacements" : "Afficher les emplacements"} active={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)}>
+            <PanelLeft size={15} />
+          </IconButton>
+        )}
+        <IconButton title="Dossier parent (Retour arrière)" onClick={() => void load(parentOf(cwd))} disabled={cwd === "/"}>
           <ArrowUp size={15} />
         </IconButton>
-        <IconButton title="Dossier personnel" onClick={() => void load("")}>
-          <House size={15} />
-        </IconButton>
-        <IconButton
-          title={bookmarks.some((b) => b.path === cwd) ? "Retirer ce dossier des raccourcis" : "Ajouter ce dossier aux raccourcis"}
-          className={bookmarks.some((b) => b.path === cwd) ? "text-warn" : ""}
-          disabled={!cwd}
-          onClick={() => (bookmarks.some((b) => b.path === cwd) ? removeBookmark(serverId, cwd) : addBookmark(serverId, cwd))}
-        >
-          <Star size={15} fill={bookmarks.some((b) => b.path === cwd) ? "currentColor" : "none"} />
-        </IconButton>
-        <IconButton title="Actualiser (F5)" onClick={refresh}>
-          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-        </IconButton>
-        <form
-          className="mx-2 flex min-w-0 flex-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void load(pathInput.trim() || "/");
-          }}
-        >
-          <Input className="font-mono text-xs" value={pathInput} onChange={(e) => setPathInput(e.target.value)} aria-label="Chemin" />
-        </form>
-        <Input className="!w-44" placeholder="Filtrer…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <IconButton title="Chercher un fichier ou du texte dans l'arborescence (Ctrl+P)" onClick={() => setSearchOpen(true)}>
-          <Search size={15} />
-        </IconButton>
-        <IconButton
-          title={miniTerminalOpen ? "Fermer le mini terminal" : "Ouvrir le mini terminal dans ce dossier"}
-          className={miniTerminalOpen ? "text-accent" : ""}
-          aria-pressed={miniTerminalOpen}
-          onClick={() => {
-            setMiniTerminalOpen((open) => !open);
-            setTimeout(() => miniInputRef.current?.focus(), 0);
-          }}
-        >
-          <SquareTerminal size={15} />
-        </IconButton>
-        <IconButton title={showHidden ? "Masquer les fichiers cachés" : "Afficher les fichiers cachés"} onClick={() => setSettings({ showHiddenFiles: !showHidden })}>
-          {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
-        </IconButton>
-        <IconButton title={dual ? "Fermer le double panneau" : "Double panneau (copie entre serveurs)"} className={dual ? "text-accent" : ""} onClick={onToggleDual}>
-          <Columns2 size={15} />
-        </IconButton>
-      </div>
-
-      {miniTerminalOpen && (
-        <div className="shrink-0 border-b border-border bg-panel px-3 py-2">
+        {editingPath ? (
           <form
-            className="flex items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void runMiniCommand();
+            className="flex min-w-0 flex-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setEditingPath(false);
+              void load(pathInput.trim() || "/");
             }}
           >
-            <span className="shrink-0 font-mono text-xs text-accent" title={cwd}>
-              {cwd || "…"} $
-            </span>
             <Input
-              ref={miniInputRef}
-              className="h-8 flex-1 font-mono text-xs"
-              value={miniCommand}
-              disabled={!cwd || miniRunning}
-              placeholder={cwd ? "Entrer une commande…" : "Chargement du dossier…"}
-              onChange={(event) => setMiniCommand(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-                event.preventDefault();
-                const next = event.key === "ArrowUp" ? Math.min(miniHistoryIndex + 1, miniHistory.length - 1) : Math.max(miniHistoryIndex - 1, -1);
-                setMiniHistoryIndex(next);
-                setMiniCommand(next < 0 ? "" : (miniHistory[next] ?? ""));
-              }}
-              aria-label={`Commande dans ${cwd}`}
+              autoFocus
+              className="font-mono text-xs"
+              value={pathInput}
+              onChange={(e) => setPathInput(e.target.value)}
+              onBlur={() => setEditingPath(false)}
+              onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setEditingPath(false))}
+              aria-label="Chemin"
             />
-            <Button size="sm" type="submit" variant="primary" loading={miniRunning} disabled={!cwd || !miniCommand.trim()}>
-              Exécuter
-            </Button>
           </form>
-          {miniOutput.length > 0 && (
-            <pre className="mt-2 max-h-32 overflow-auto rounded border border-border bg-bg p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{miniOutput.join("\n")}</pre>
-          )}
-        </div>
-      )}
-
-      {bookmarks.length > 0 && (
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-3 py-1.5" aria-label="Raccourcis">
-          <Star size={12} className="mr-1 shrink-0 text-warn" fill="currentColor" />
-          {bookmarks.map((b) => (
-            <span
-              key={b.path}
-              className={`group flex shrink-0 items-center rounded-md border text-xs ${b.path === cwd ? "border-accent/50 bg-accent/10 text-fg" : "border-border text-muted hover:text-fg"}`}
+        ) : (
+          <nav
+            aria-label="Chemin"
+            onClick={(e) => e.target === e.currentTarget && setEditingPath(true)}
+            title="Cliquer dans le vide pour saisir un chemin"
+            className="flex h-8 min-w-0 flex-1 cursor-text items-center gap-0.5 overflow-hidden rounded-lg border border-border bg-subtle px-1.5 font-mono text-xs"
+          >
+            <button type="button" className="rounded px-1.5 py-0.5 text-muted hover:bg-hover hover:text-fg" onClick={() => void load("/")}>
+              /
+            </button>
+            {crumbs.map((c, i) => (
+              <span key={i} className="flex min-w-0 items-center gap-0.5">
+                {i > 0 && <ChevronRight size={12} className="shrink-0 text-faint" />}
+                <button
+                  type="button"
+                  className={`truncate rounded px-1.5 py-0.5 hover:bg-hover hover:text-fg ${i === crumbs.length - 1 ? "bg-raised text-fg" : "text-muted"}`}
+                  onClick={() => void load("/" + crumbs.slice(0, i + 1).join("/"))}
+                >
+                  {c}
+                </button>
+              </span>
+            ))}
+            <span className="min-w-6 flex-1 self-stretch" onClick={() => setEditingPath(true)} />
+            <IconButton
+              size="sm"
+              title={bookmarked ? "Retirer ce dossier des raccourcis" : "Ajouter ce dossier aux raccourcis"}
+              className={bookmarked ? "text-warn" : ""}
+              disabled={!cwd}
+              onClick={() => (bookmarked ? removeBookmark(serverId, cwd) : addBookmark(serverId, cwd))}
             >
-              <button
-                className="flex items-center gap-1 py-0.5 pr-1 pl-2"
-                title={`${b.path} · double-clic pour renommer`}
-                onClick={() => void load(b.path)}
-                onDoubleClick={async () => {
-                  const name = await ask({ title: "Renommer le raccourci", body: b.path, input: { label: "Nom", initial: b.name }, confirmLabel: "Renommer" });
-                  if (typeof name === "string" && name.trim()) renameBookmark(serverId, b.path, name.trim());
-                }}
-              >
-                <Folder size={12} /> {b.name}
-              </button>
-              <button className="invisible px-1 text-muted group-hover:visible hover:text-danger" title="Retirer le raccourci" onClick={() => removeBookmark(serverId, b.path)}>
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5">
-        <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden font-mono text-xs text-muted">
-          <button className="rounded px-1 hover:bg-hover hover:text-fg" onClick={() => void load("/")}>/</button>
-          {crumbs.map((c, i) => (
-            <span key={i} className="flex items-center gap-0.5">
-              <button className="truncate rounded px-1 hover:bg-hover hover:text-fg" onClick={() => void load("/" + crumbs.slice(0, i + 1).join("/"))}>
-                {c}
-              </button>
-              {i < crumbs.length - 1 && <span>/</span>}
-            </span>
-          ))}
-        </nav>
-        <Button size="sm" variant="ghost" icon={<FolderPlus size={13} />} onClick={() => void newItem("dir")}>Dossier</Button>
-        <Button size="sm" variant="ghost" icon={<FilePlus size={13} />} onClick={() => void newItem("file")}>Fichier</Button>
+              <Star size={14} fill={bookmarked ? "currentColor" : "none"} />
+            </IconButton>
+          </nav>
+        )}
+        <label className="relative w-40 shrink-0">
+          <Filter size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
+          <Input className="pl-7" placeholder="Filtrer" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </label>
+        <MenuButton
+          label={dual ? undefined : "Nouveau"}
+          icon={<Plus size={14} />}
+          title="Nouveau dossier ou fichier"
+          items={[
+            { label: "Dossier…", icon: <FolderPlus size={14} />, onClick: () => void newItem("dir") },
+            { label: "Fichier vide…", icon: <FilePlus size={14} />, onClick: () => void newItem("file") },
+          ]}
+        />
         <Button
-          size="sm"
-          variant="ghost"
-          icon={<Upload size={13} />}
+          icon={<Upload size={14} />}
+          title="Envoyer des fichiers de ton PC dans ce dossier"
           onClick={async () => {
             const files = await open({ multiple: true, title: "Fichiers à envoyer" });
             if (files) void upload(Array.isArray(files) ? files : [files]);
           }}
         >
-          Envoyer
+          {dual ? null : "Envoyer"}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<SquareTerminal size={13} />}
-          onClick={() => openTab(serverId, { title: cwd, command: `cd ${shellQuote(cwd)} && exec "$SHELL" -l` })}
-        >
-          Terminal ici
-        </Button>
+        <IconButton title="Chercher un fichier ou du texte dans l'arborescence (Ctrl+P)" onClick={() => setSearchOpen(true)}>
+          <Search size={15} />
+        </IconButton>
+        <IconButton title="Actualiser (F5)" onClick={refresh}>
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+        </IconButton>
+        <MenuButton
+          icon={<SlidersHorizontal size={15} />}
+          title="Affichage et outils"
+          items={[
+            { label: "Fichiers cachés", checked: showHidden, onClick: () => setSettings({ showHiddenFiles: !showHidden }) },
+            { label: "Double panneau (copie entre serveurs)", checked: dual, onClick: onToggleDual },
+            {
+              label: "Mini terminal dans ce dossier",
+              checked: miniTerminalOpen,
+              onClick: () => {
+                setMiniTerminalOpen((v) => !v);
+                setTimeout(() => miniInputRef.current?.focus(), 0);
+              },
+            },
+            "separator",
+            { label: "Ouvrir un terminal ici", icon: <SquareTerminal size={14} />, disabled: !cwd, onClick: () => terminalHere(cwd) },
+            { label: "Copier le chemin du dossier", icon: <Copy size={14} />, disabled: !cwd, onClick: () => copyPath(cwd) },
+          ]}
+        />
       </div>
 
-      {/* Barre toujours présente : sa hauteur fixe évite que les lignes bougent entre deux clics. */}
-      <div className={`flex h-10 shrink-0 items-center gap-1 border-b border-border px-3 text-xs ${selectedEntries.length ? "bg-accent/5" : ""}`}>
-        {selectedEntries.length === 0 ? (
-          <span className="text-muted">
-            {entries.length} élément(s) · double-clic pour ouvrir · glisse des fichiers ici pour les envoyer{dual ? " ou vers l'autre panneau pour les copier" : ""}
-          </span>
-        ) : (
-        <>
-          <span className="mr-2 text-muted">{selectedEntries.length} sélectionné(s)</span>
-          {dual && (
-            <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={13} />} onClick={() => void copyToOther(pane, serverId, selectedEntries.map((e) => e.path))}>
-              Copier vers l'autre panneau
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => void download(selectedEntries)}>Télécharger</Button>
-          {single && !isDir(single) && (
-            <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => { setEditingLine(undefined); setEditing(single.path); }}>Éditer</Button>
-          )}
-          {single && isDir(single) && !bookmarks.some((b) => b.path === single.path) && (
-            <Button size="sm" variant="ghost" icon={<Star size={13} />} onClick={() => addBookmark(serverId, single.path)}>
-              Raccourci
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" icon={<FileArchive size={13} />} onClick={() => setArchiving(selectedEntries.map((e) => e.path))}>
-            Compresser
-          </Button>
-          {single && isArchive(single) && (
-            <Button size="sm" variant="ghost" icon={<PackageOpen size={13} />} onClick={() => void extract(single)}>
-              Extraire ici
-            </Button>
-          )}
-          {pair && (
-            <Button size="sm" variant="ghost" icon={<FileDiff size={13} />} onClick={() => void compare(pair[0], pair[1])}>
-              Comparer
-            </Button>
-          )}
-          {single && <Button size="sm" variant="ghost" onClick={() => void rename(single)}>Renommer (F2)</Button>}
-          {single && <Button size="sm" variant="ghost" icon={<Shield size={13} />} onClick={() => setChmodOf(single)}>Permissions</Button>}
-          <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={() => void remove(selectedEntries)}>Supprimer</Button>
-        </>
+      <div className="flex min-h-0 flex-1">
+        {showSidebar && (
+          <aside className="scroll-thin flex w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-subtle px-2 py-3" aria-label="Emplacements">
+            <Eyebrow className="px-2 pb-1">Emplacements</Eyebrow>
+            <PlaceButton icon={<House size={14} />} label="Dossier personnel" onClick={() => void load("")} />
+            <PlaceButton icon={<HardDrive size={14} />} label="Racine /" active={cwd === "/"} onClick={() => void load("/")} />
+            <Eyebrow className="px-2 pt-3 pb-1">Raccourcis</Eyebrow>
+            {bookmarks.length === 0 && <p className="px-2 text-[11.5px] text-faint">L'étoile du chemin ajoute le dossier courant ici.</p>}
+            {bookmarks.map((b) => (
+              <PlaceButton
+                key={b.path}
+                icon={<Star size={14} className="text-warn" fill="currentColor" />}
+                label={b.name}
+                title={b.path}
+                active={b.path === cwd}
+                onClick={() => void load(b.path)}
+                menu={[
+                  {
+                    label: "Renommer…",
+                    icon: <PenLine size={14} />,
+                    onClick: async () => {
+                      const name = await ask({ title: "Renommer le raccourci", body: b.path, input: { label: "Nom", initial: b.name }, confirmLabel: "Renommer" });
+                      if (typeof name === "string" && name.trim()) renameBookmark(serverId, b.path, name.trim());
+                    },
+                  },
+                  { label: "Retirer des raccourcis", icon: <X size={14} />, onClick: () => removeBookmark(serverId, b.path) },
+                ]}
+              />
+            ))}
+            {recents.length > 0 && (
+              <>
+                <Eyebrow className="px-2 pt-3 pb-1">Récents</Eyebrow>
+                {recents.map((p) => (
+                  <PlaceButton key={p} icon={<History size={14} />} label={p} mono title={p} onClick={() => void load(p)} />
+                ))}
+              </>
+            )}
+          </aside>
         )}
-      </div>
 
-      <div className="min-h-0 flex-1 overflow-auto select-none" onClick={(e) => e.target === e.currentTarget && setSelected(new Set())}>
-        {error ? (
-          <EmptyState icon={<Folder size={36} />} title="Impossible d'ouvrir ce dossier">{error}</EmptyState>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-panel text-left text-xs text-muted">
-              <tr>
-                <th className="px-3 py-1.5 font-medium">Nom</th>
-                <th className="w-24 px-3 py-1.5 text-right font-medium">Taille</th>
-                <th className="w-40 px-3 py-1.5 font-medium">Modifié</th>
-                <th className="w-28 px-3 py-1.5 font-medium">Droits</th>
-                <th className="w-32 px-3 py-1.5 font-medium">Propriétaire</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e) => (
-                <tr
-                  key={e.path}
-                  onMouseDown={(ev) => onRowMouseDown(ev, e)}
-                  onClick={(ev) => onRowClick(ev, e)}
-                  onDoubleClick={() => activate(e)}
-                  className={`cursor-default border-b border-border/40 ${selected.has(e.path) ? "bg-accent/15" : "hover:bg-hover-soft"}`}
-                >
-                  <td className="px-3 py-1">
-                    <span className="flex items-center gap-2">
-                      {e.kind === "symlink" ? (
-                        <Link2 size={15} className={e.targetIsDir ? "text-accent" : "text-muted"} />
-                      ) : isDir(e) ? (
-                        <Folder size={15} className="text-accent" />
-                      ) : (
-                        <File size={15} className="text-muted" />
-                      )}
-                      <span className="truncate">{e.name}</span>
-                    </span>
-                  </td>
-                  <td className="px-3 py-1 text-right text-xs text-muted tabular-nums">{isDir(e) ? "" : formatBytes(e.size)}</td>
-                  <td className="px-3 py-1 text-xs text-muted tabular-nums">
-                    {e.modified ? new Date(e.modified * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""}
-                  </td>
-                  <td className="px-3 py-1 font-mono text-xs text-muted">{e.permissions}</td>
-                  <td className="px-3 py-1 text-xs text-muted">{e.owner}{e.group && e.group !== e.owner ? `:${e.group}` : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {!error && listing && entries.length === 0 && <p className="p-6 text-center text-sm text-muted">Dossier vide</p>}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {error ? (
+            <div className="p-5">
+              <ErrorState message={error} onRetry={refresh}>
+                <Button size="sm" variant="ghost" onClick={() => void load("")}>
+                  Dossier personnel
+                </Button>
+              </ErrorState>
+            </div>
+          ) : !listing ? (
+            <div className="p-5">
+              <Loading rows={8} />
+            </div>
+          ) : (
+            <DataTable
+              className="min-h-0 flex-1 select-none"
+              rows={entries}
+              rowKey={(e) => e.path}
+              columns={columns}
+              rowHeight={36}
+              initialSort={{ key: "name", dir: "asc" }}
+              isSelected={(e) => selected.has(e.path)}
+              onRowClick={(e, ev) => onRowClick(ev, e)}
+              onRowDoubleClick={activate}
+              onRowMouseDown={(e, ev) => onRowMouseDown(ev, e)}
+              rowMenu={rowMenu}
+              onBackgroundClick={() => setSelected(new Set())}
+              empty={filter ? `Aucun élément ne contient « ${filter} ».` : "Dossier vide. Glisse des fichiers ici pour les envoyer."}
+            />
+          )}
+
+          {selectedEntries.length > 0 && (
+            <div className="animate-pop-in pointer-events-auto absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-xl border border-border-strong bg-raised py-1 pr-1 pl-3.5 shadow-2xl">
+              <span className="mr-2 shrink-0 text-[12.5px] font-semibold whitespace-nowrap">
+                {selectedEntries.length} sélectionné{selectedEntries.length > 1 ? "s" : ""}
+              </span>
+              {dual && (
+                <Button size="sm" variant="ghost" icon={<ArrowLeftRight size={13} />} onClick={() => void copyToOther(pane, serverId, selectedEntries.map((e) => e.path))}>
+                  Vers l'autre panneau
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => void download(selectedEntries)}>
+                Télécharger
+              </Button>
+              {single && !isDir(single) && (
+                <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => activate(single)}>
+                  Éditer
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" icon={<FileArchive size={13} />} onClick={() => setArchiving(selectedEntries.map((e) => e.path))}>
+                Compresser
+              </Button>
+              {single && isArchive(single) && (
+                <Button size="sm" variant="ghost" icon={<PackageOpen size={13} />} onClick={() => void extract(single)}>
+                  Extraire
+                </Button>
+              )}
+              {pair && (
+                <Button size="sm" variant="ghost" icon={<FileDiff size={13} />} onClick={() => void compare(pair[0], pair[1])}>
+                  Comparer
+                </Button>
+              )}
+              {single && (
+                <Button size="sm" variant="ghost" icon={<Shield size={13} />} onClick={() => setChmodOf(single)}>
+                  Droits
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" className="text-danger hover:text-danger" icon={<Trash2 size={13} />} onClick={() => void remove(selectedEntries)}>
+                Supprimer
+              </Button>
+              <span className="mx-1 h-5 w-px shrink-0 bg-border-strong" />
+              <IconButton size="sm" title="Désélectionner (Échap)" onClick={() => setSelected(new Set())}>
+                <X size={14} />
+              </IconButton>
+            </div>
+          )}
+
+          {miniTerminalOpen && (
+            <div className="shrink-0 border-t border-border bg-term px-4 py-2.5">
+              <div className="mb-1.5 flex items-center justify-between text-[11px] text-faint">
+                <span>Mini terminal · une commande à la fois, dans le dossier affiché</span>
+                <IconButton size="sm" title="Fermer le mini terminal" onClick={() => setMiniTerminalOpen(false)}>
+                  <X size={13} />
+                </IconButton>
+              </div>
+              {miniOutput.length > 0 && (
+                <pre className="mb-2 max-h-36 overflow-auto rounded-lg border border-border bg-bg p-2 font-mono text-[11px] whitespace-pre-wrap text-muted select-text">{miniOutput.join("\n")}</pre>
+              )}
+              <form
+                className="flex items-center gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void runMiniCommand();
+                }}
+              >
+                <span className="max-w-60 shrink-0 truncate font-mono text-xs text-accent" title={cwd}>
+                  {cwd || "…"} $
+                </span>
+                <Input
+                  ref={miniInputRef}
+                  className="flex-1 font-mono text-xs"
+                  value={miniCommand}
+                  disabled={!cwd || miniRunning}
+                  placeholder={cwd ? "Commande… (↑ ↓ : historique)" : "Chargement du dossier…"}
+                  onChange={(event) => setMiniCommand(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+                    event.preventDefault();
+                    const next = event.key === "ArrowUp" ? Math.min(miniHistoryIndex + 1, miniHistory.length - 1) : Math.max(miniHistoryIndex - 1, -1);
+                    setMiniHistoryIndex(next);
+                    setMiniCommand(next < 0 ? "" : (miniHistory[next] ?? ""));
+                  }}
+                  aria-label={`Commande dans ${cwd}`}
+                />
+                <Button size="sm" type="submit" variant="primary" loading={miniRunning} disabled={!cwd || !miniCommand.trim()}>
+                  Exécuter
+                </Button>
+              </form>
+            </div>
+          )}
+
+          <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-rail px-4 text-[11.5px] text-muted">
+            <span>
+              {entries.length} élément{entries.length > 1 ? "s" : ""}
+              {!showHidden && hiddenCount > 0 && ` · ${hiddenCount} caché${hiddenCount > 1 ? "s" : ""}`}
+            </span>
+            <span className="truncate text-faint">Maj+clic : plage · Ctrl+clic : ajouter · F2 renommer · Suppr · clic droit : actions</span>
+          </footer>
+        </div>
       </div>
 
       {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-accent bg-accent/10">
-          <div className="rounded-lg bg-panel px-4 py-3 text-sm shadow-xl">Déposer pour envoyer dans <span className="font-mono">{cwd}</span></div>
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10">
+          <div className="rounded-xl bg-raised px-4 py-3 text-[13px] shadow-xl">
+            Déposer pour envoyer dans <span className="font-mono">{cwd}</span>
+          </div>
         </div>
       )}
 
@@ -718,6 +880,18 @@ function Explorer({
             }}
           />
         </Suspense>
+      )}
+      {preview && (
+        <PreviewDrawer
+          serverId={serverId}
+          entry={preview}
+          onClose={() => setPreview(null)}
+          onEdit={() => {
+            setPreview(null);
+            activate(preview);
+          }}
+          onDownload={() => void download([preview])}
+        />
       )}
       {chmodOf && <ChmodDialog entry={chmodOf} onClose={() => setChmodOf(null)} onApply={(mode) => act(() => api.fsChmod(serverId, chmodOf.path, mode))} />}
       {searchOpen && (
@@ -739,18 +913,69 @@ function Explorer({
       )}
       {archiving && <ArchiveDialog paths={archiving} onClose={() => setArchiving(null)} onCreate={archive} />}
       {diff && (
-        <Modal title={`${diff.left.split("/").pop()} ↔ ${diff.right.split("/").pop()}`} width="max-w-[95vw]" onClose={() => setDiff(null)}>
-          <p className="mb-2 font-mono text-[11px] text-muted">
-            {diff.left} ↔ {diff.right}
-          </p>
+        <Modal title={`${diff.left.split("/").pop()} ↔ ${diff.right.split("/").pop()}`} description={`${diff.left} ↔ ${diff.right}`} width="max-w-[95vw]" onClose={() => setDiff(null)}>
           <div className="h-[70vh]">
-            <Suspense fallback={<p className="text-xs text-muted">Chargement du comparateur…</p>}>
-              <DiffView original={diff.original} modified={diff.modified} language="plaintext" theme={useApp.getState().settings.theme === "light" ? "vs" : "vs-dark"} />
+            <Suspense fallback={<Loading label="Chargement du comparateur…" />}>
+              <DiffView original={diff.original} modified={diff.modified} language="plaintext" theme={theme === "light" ? "vs" : "vs-dark"} />
             </Suspense>
           </div>
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Entrée de la colonne « Emplacements » (avec un menu « ⋯ » pour les raccourcis). */
+function PlaceButton({ icon, label, onClick, active, title, mono, menu }: { icon: React.ReactNode; label: string; onClick: () => void; active?: boolean; title?: string; mono?: boolean; menu?: MenuItem[] }) {
+  return (
+    <div className={`group flex items-center rounded-lg ${active ? "bg-raised text-fg" : "text-fg/85 hover:bg-hover"}`}>
+      <button type="button" onClick={onClick} title={title} className={`flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left ${mono ? "font-mono text-[11px] text-muted" : "text-[12.5px]"}`}>
+        <span className="shrink-0 text-muted">{icon}</span>
+        <span className="truncate">{label}</span>
+      </button>
+      {menu && (
+        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+          <MenuButton size="sm" items={menu} title={`Raccourci ${label}`} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Aperçu rapide d'un fichier texte (les 64 premiers Ko), sans ouvrir l'éditeur. */
+function PreviewDrawer({ serverId, entry, onClose, onEdit, onDownload }: { serverId: string; entry: FsEntry; onClose: () => void; onEdit: () => void; onDownload: () => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.fsReadRange(serverId, entry.path, 0, 64 * 1024).then(
+      (w) => !cancelled && setText(w.text + (w.size > w.len ? `\n\n… (${formatBytes(w.size - w.len)} de plus : ouvre l'éditeur pour la suite)` : "")),
+      (e) => !cancelled && setError(errorMessage(e)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId, entry.path]);
+  return (
+    <Drawer
+      modal={false}
+      width={560}
+      title={entry.name}
+      subtitle={`${entry.path} · ${formatBytes(entry.size)} · ${entry.permissions}`}
+      onClose={onClose}
+      actions={
+        <>
+          <Button size="sm" variant="primary" icon={<Pencil size={13} />} onClick={onEdit}>
+            Éditer
+          </Button>
+          <Button size="sm" icon={<Download size={13} />} onClick={onDownload}>
+            Télécharger
+          </Button>
+        </>
+      }
+    >
+      {error ? <ErrorState message={error} /> : text === null ? <Loading rows={10} /> : <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap select-text">{text}</pre>}
+    </Drawer>
   );
 }
 
@@ -786,21 +1011,33 @@ function ArchiveDialog({
       title={`Compresser ${paths.length > 1 ? `${paths.length} éléments` : paths[0].split("/").pop()}`}
       onClose={onClose}
       footer={
-        <Button variant="primary" disabled={!name.trim()} onClick={() => void onCreate(paths, name.trim(), format)}>
-          Compresser
-        </Button>
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button variant="primary" disabled={!name.trim()} onClick={() => void onCreate(paths, name.trim(), format)}>
+            Compresser
+          </Button>
+        </>
       }
     >
       <p className="mb-3 text-xs text-muted">
         La compression a lieu sur le serveur : aucun octet ne transite par ton PC. L'archive est déposée dans le dossier affiché.
       </p>
-      <div className="mb-3 flex flex-col gap-1">
+      <div className="mb-4 grid gap-2" role="radiogroup" aria-label="Format">
         {FORMATS.map((f) => (
-          <label key={f.id} className="flex items-center gap-2 text-sm">
-            <input type="radio" name="format" checked={format === f.id} onChange={() => setFormat(f.id)} />
-            <span className="font-mono">{f.label}</span>
-            <span className="text-xs text-muted">— {f.hint}</span>
-          </label>
+          <button
+            key={f.id}
+            type="button"
+            role="radio"
+            aria-checked={format === f.id}
+            onClick={() => setFormat(f.id)}
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-[13px] ${format === f.id ? "border-accent bg-accent/10" : "border-border hover:border-border-strong"}`}
+          >
+            <span className={`size-3.5 shrink-0 rounded-full border-2 ${format === f.id ? "border-accent bg-accent" : "border-border-strong"}`} />
+            <span className="w-16 font-mono">{f.label}</span>
+            <span className="text-xs text-muted">{f.hint}</span>
+          </button>
         ))}
       </div>
       <Field label="Nom de l'archive" hint={`Extension attendue : .${ARCHIVE_EXTENSIONS[format]}`}>
@@ -810,7 +1047,7 @@ function ArchiveDialog({
   );
 }
 
-function ChmodDialog({ entry, onClose, onApply }: { entry: FsEntry; onClose: () => void; onApply: (mode: number) => Promise<void> }) {
+function ChmodDialog({ entry, onClose, onApply }: { entry: FsEntry; onClose: () => void; onApply: (mode: number) => Promise<boolean> }) {
   const [mode, setMode] = useState(entry.mode & 0o777);
   const who = [
     ["Propriétaire", 6],
@@ -827,15 +1064,20 @@ function ChmodDialog({ entry, onClose, onApply }: { entry: FsEntry; onClose: () 
       title={`Permissions de ${entry.name}`}
       onClose={onClose}
       footer={
-        <Button
-          variant="primary"
-          onClick={async () => {
-            await onApply(mode | (entry.mode & 0o7000));
-            onClose();
-          }}
-        >
-          Appliquer
-        </Button>
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="primary"
+            onClick={async () => {
+              // La fenêtre reste ouverte si le serveur refuse : on voit ce qui n'a pas été appliqué.
+              if (await onApply(mode | (entry.mode & 0o7000))) onClose();
+            }}
+          >
+            Appliquer
+          </Button>
+        </>
       }
     >
       <table className="mb-4 w-full text-sm">
@@ -851,12 +1093,9 @@ function ChmodDialog({ entry, onClose, onApply }: { entry: FsEntry; onClose: () 
               <td className="py-1.5 text-muted">{label}</td>
               {perms.map(([p, bit]) => (
                 <td key={p} className="text-center">
-                  <input
-                    type="checkbox"
-                    aria-label={`${label} ${p}`}
-                    checked={(mode & (bit << shift)) !== 0}
-                    onChange={(e) => setMode((m) => (e.target.checked ? m | (bit << shift) : m & ~(bit << shift)))}
-                  />
+                  <span className="inline-flex" aria-label={`${label} ${p}`}>
+                    <Checkbox checked={(mode & (bit << shift)) !== 0} onChange={(v) => setMode((m) => (v ? m | (bit << shift) : m & ~(bit << shift)))} />
+                  </span>
                 </td>
               ))}
             </tr>

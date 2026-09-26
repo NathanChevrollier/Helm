@@ -1,18 +1,32 @@
-import { useCallback, useEffect, useState } from "react";
-import { Columns2, MoreHorizontal,
-  Rows2, FolderTree, History, LayoutGrid, Plus, Radio, ScrollText, Server, Share2, SquareTerminal, Users, X } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import {
+  Circle, Columns2, FolderTree, History, LayoutGrid, PanelRight, Plus, Radio, Rows2, ScrollText, Search, Server, Share2, Square, SquareTerminal, Users, X,
+} from "lucide-react";
 import TerminalPane from "../components/TerminalPane";
 import SnippetsPanel from "../components/SnippetsPanel";
 import TerminalFiles from "../components/TerminalFiles";
 import TerminalStatusBar from "../components/TerminalStatusBar";
 import TransfersBar from "../components/TransfersBar";
-import { ContextMenu } from "../components/ContextMenu";
 import { api, errorMessage, type TmuxSession } from "../lib/api";
 import { useBroadcast } from "../lib/broadcast";
 import { usePanes } from "../lib/panes";
+import { paneActions, usePaneStatus } from "../lib/paneActions";
 import { ensureConnected, newTmuxName, useApp, useAppPick, type TermTab } from "../lib/store";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
-import { matches } from "../lib/shortcuts";
+import {
+  Badge, Button, Checkbox, EmptyState, ErrorState, Field, IconButton, Input, MenuButton, Modal, ResizeHandle, Skeleton, Textarea, ToolbarSep, useResizable, type MenuItem,
+} from "../components/ui";
+import { display, matches, shortcutOf } from "../lib/shortcuts";
+import { focusedTerminal } from "../lib/focus";
+
+const HistoryList = lazy(() => import("../components/HistoryPalette").then((m) => ({ default: m.HistoryList })));
+
+type DockTab = "files" | "snippets" | "history" | "recordings";
+const DOCK_TABS: { id: DockTab; label: string; icon: React.ReactNode }[] = [
+  { id: "files", label: "Fichiers", icon: <FolderTree size={13} /> },
+  { id: "snippets", label: "Fragments", icon: <ScrollText size={13} /> },
+  { id: "history", label: "Historique", icon: <History size={13} /> },
+  { id: "recordings", label: "", icon: <Circle size={12} /> },
+];
 
 const SHELLS = ["bash", "zsh", "sh", "fish", "dash", "ash"];
 
@@ -35,11 +49,23 @@ function tabPaneIds(tab: TermTab): string[] {
 export default function TerminalView({ visible }: { visible: boolean }) {
   const { tabs, activeTab, setActiveTab, closeTab, openTab, openGridTab, openJoinTab, updateTab, activeServerId, servers, ask, notify, settings } = useAppPick("tabs", "activeTab", "setActiveTab", "closeTab", "openTab", "openGridTab", "openJoinTab", "updateTab", "activeServerId", "servers", "ask", "notify", "settings");
   const [titles, setTitles] = useState<Record<string, string>>({});
-  const [showSnippets, setShowSnippets] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
-  const [splitMenu, setSplitMenu] = useState<{ x: number; y: number } | null>(null);
-  /** Menu « … » : diffusion, partage, multi-serveurs, sessions persistantes. */
-  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Dock latéral : un seul panneau à la fois (fichiers, fragments, historique, enregistrements). */
+  const [dock, setDock] = useState<DockTab | null>(() => {
+    try {
+      const v = localStorage.getItem("helm.terminal.dock");
+      return v === "files" || v === "snippets" || v === "history" || v === "recordings" ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("helm.terminal.dock", dock ?? "");
+    } catch {
+      /* préférence non retenue */
+    }
+  }, [dock]);
+  const dockSize = useResizable("terminal-dock", 330, 240, 760, "left");
 
   // Le panneau actif suit l'onglet affiché, sans attendre un clic dans le terminal : sinon le
   // panneau Fichiers restait branché sur l'onglet précédent et semblait ne plus suivre les « cd ».
@@ -137,18 +163,53 @@ export default function TerminalView({ visible }: { visible: boolean }) {
       : !current.command && !!current.tmux;
     updateTab(current.key, { split: persistent ? newTmuxName() : "", splitServerId: other ? serverId : undefined, splitDir: dir });
   };
-  const toggleSplit = (e: React.MouseEvent) => {
-    if (!current || current.grid) return;
-    if (current.split != null) {
-      const name = current.split;
-      const on = current.splitServerId ?? current.serverId;
-      updateTab(current.key, { split: null, splitServerId: undefined });
-      if (name) void api.tmuxKill(on, name).catch(() => {});
-    } else {
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      setSplitMenu({ x: r.left, y: r.bottom + 4 });
-    }
+  /** Retire la division : la session du second panneau est fermée, après confirmation. */
+  const unsplit = async () => {
+    if (!current || current.split == null) return;
+    const name = current.split;
+    const on = current.splitServerId ?? current.serverId;
+    if (
+      name &&
+      !(await ask({
+        title: "Retirer la division ?",
+        body: "Le second terminal sera fermé, ainsi que sa session sur le serveur (et ce qui y tourne).",
+        confirmLabel: "Retirer",
+        danger: true,
+      }))
+    )
+      return;
+    updateTab(current.key, { split: null, splitServerId: undefined });
+    if (name) void api.tmuxKill(on, name).catch(() => {});
   };
+
+  const splitItems = (): MenuItem[] => {
+    if (!current) return [];
+    if (current.split != null)
+      return [
+        {
+          label: current.splitDir === "rows" ? "Passer côte à côte" : "Passer l'un au-dessus de l'autre",
+          icon: current.splitDir === "rows" ? <Columns2 size={14} /> : <Rows2 size={14} />,
+          onClick: () => {
+            // Les proportions repartent de la moitié : celles de l'autre sens n'ont pas de sens ici.
+            setSplitRatios((x) => ({ ...x, [current.key]: 0.5 }));
+            updateTab(current.key, { splitDir: current.splitDir === "rows" ? "cols" : "rows" });
+          },
+        },
+        "separator",
+        { label: "Retirer la division…", icon: <X size={14} />, danger: true, onClick: () => void unsplit() },
+      ];
+    const others = servers.filter((s) => s.id !== current.serverId);
+    return [
+      { label: "Côte à côte", icon: <Columns2 size={14} />, onClick: () => void splitWith(current.serverId, "cols") },
+      { label: "L'un au-dessus de l'autre", icon: <Rows2 size={14} />, onClick: () => void splitWith(current.serverId, "rows") },
+      ...(others.length
+        ? ([{ heading: "Avec un autre serveur" }, ...others.map((s) => ({ label: s.name, hint: s.host, icon: <Server size={14} style={{ color: s.color ?? undefined }} />, onClick: () => void splitWith(s.id) }))] as MenuItem[])
+        : []),
+    ];
+  };
+
+  const recording = usePaneStatus((s) => (activePane ? s.recording[activePane] : undefined));
+  const sharedMode = usePaneStatus((s) => (activePane ? s.shared[activePane] : undefined));
 
   /** Glissement de la poignée entre les deux panneaux d'un onglet divisé. */
   const startSplitResize = (key: string, rows: boolean) => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -177,20 +238,28 @@ export default function TerminalView({ visible }: { visible: boolean }) {
         ? `${serverOf(t.splitServerId ?? t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title} (${t.splitDir === "rows" ? "bas" : "droite"})`
         : `${serverOf(t.serverId)?.name ?? "?"} · ${titles[t.key] ?? t.title}`;
 
+  const act = paneActions(activePane);
+  const runner = activePaneServer ?? current?.serverId ?? activeServerId;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-11 shrink-0 items-stretch border-b border-border bg-rail pl-2">
-        <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+      <div className="flex h-[42px] shrink-0 items-center gap-1 border-b border-border bg-rail pr-2 pl-2">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden" role="tablist" aria-label="Terminaux ouverts">
           {tabs.map((t) => {
             const s = serverOf(t.serverId);
             const active = t.key === activeTab;
             return (
               <div
                 key={t.key}
+                role="tab"
+                aria-selected={active}
+                tabIndex={0}
                 onClick={() => setActiveTab(t.key)}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setActiveTab(t.key)}
                 onAuxClick={(e) => e.button === 1 && void close(t)}
-                className={`group flex max-w-60 min-w-32 cursor-pointer items-center gap-2 border-b-2 px-3.5 text-[13px] ${
-                  active ? "border-accent bg-bg font-medium text-fg" : "border-transparent text-muted hover:text-fg"
+                title={`${titles[t.key] ?? t.title} · clic molette pour fermer`}
+                className={`group flex h-[30px] max-w-60 min-w-28 shrink-0 cursor-default items-center gap-2 rounded-lg pr-1 pl-3 text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                  active ? "bg-panel font-medium text-fg ring-1 ring-border-strong/70" : "text-muted hover:bg-hover hover:text-fg"
                 }`}
               >
                 {t.join ? (
@@ -200,80 +269,109 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                 ) : (
                   <span className="size-[7px] shrink-0 rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
                 )}
-                <span className="flex-1 truncate" title={titles[t.key] ?? t.title}>
-                  {t.title}
-                </span>
-                {t.tmux && <span title="Session persistante (tmux)" className="text-[9px] text-muted">●</span>}
+                <span className="flex-1 truncate">{t.title}</span>
+                {t.tmux && <Badge tone="ok" className="h-4! px-1.5! text-[10px]!" title="Session persistante (tmux) : elle survit à la fermeture de Helm">tmux</Badge>}
                 <button
-                  className="rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-hover-strong"
+                  type="button"
+                  className={`flex size-5 shrink-0 items-center justify-center rounded hover:bg-hover-strong ${active ? "" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     void close(t);
                   }}
-                  aria-label="Fermer l'onglet"
+                  aria-label={`Fermer l'onglet ${t.title}`}
+                  title={`Fermer (${display(shortcutOf("closeTab"))})`}
                 >
                   <X size={12} />
                 </button>
               </div>
             );
           })}
-          <IconButton
-            title="Nouveau terminal (Ctrl+Shift+T)"
-            className="m-2"
-            disabled={!activeServerId}
-            onClick={() => activeServerId && openTab(activeServerId)}
-          >
+          <IconButton size="sm" title={`Nouveau terminal (${display(shortcutOf("newTab"))})`} disabled={!activeServerId} onClick={() => activeServerId && openTab(activeServerId)}>
             <Plus size={15} />
           </IconButton>
         </div>
-        {/* Trois groupes séparés par un filet : disposition, panneaux, puis le partage — rare — rangé
-            derrière « … ». Auparavant, huit boutons de même poids se disputaient la barre. */}
-        <div className="flex items-center gap-1.5 px-3">
+        {/* Trois groupes : disposition · panneau latéral · partage et sessions. */}
+        <div className="flex shrink-0 items-center gap-1">
           {broadcast.active && (
             <Button size="sm" variant="danger" icon={<Radio size={13} />} onClick={() => broadcast.setActive(false)}>
               Arrêter la diffusion
             </Button>
           )}
-          <ToolButton label="Diviser" title="Diviser l'écran (même serveur ou un autre)" icon={<Columns2 size={13} />} disabled={!current || !!current.grid || !!current.join} active={current?.split != null} onClick={toggleSplit} />
-          {current?.split != null && (
-            <ToolButton
-              label="Orientation"
-              title={current.splitDir === "rows" ? "Passer côte à côte" : "Passer l'un au-dessus de l'autre"}
-              icon={current.splitDir === "rows" ? <Rows2 size={13} /> : <Columns2 size={13} />}
-              onClick={() => {
-                // Les proportions repartent de la moitié : celles de l'autre sens n'ont pas de sens ici.
-                setSplitRatios((x) => ({ ...x, [current.key]: 0.5 }));
-                updateTab(current.key, { splitDir: current.splitDir === "rows" ? "cols" : "rows" });
-              }}
-            />
-          )}
-          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-          <ToolButton label="Fichiers" title="Fichiers du serveur, au dossier courant du terminal" icon={<FolderTree size={13} />} active={showFiles} disabled={!current || !!current.join} onClick={() => setShowFiles((v) => !v)} />
-          <ToolButton label="Fragments" title="Fragments enregistrés : un clic les envoie au terminal actif" icon={<ScrollText size={13} />} active={showSnippets} onClick={() => setShowSnippets((v) => !v)} />
-          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
-          <IconButton
-            title="Partage, diffusion et sessions"
-            onClick={(e) => {
-              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              setMoreMenu({ x: Math.max(8, r.right - 280), y: r.bottom + 6 });
-            }}
-          >
-            <MoreHorizontal size={16} />
+          <MenuButton
+            size="sm"
+            variant={current?.split != null ? "subtle" : "ghost"}
+            label="Diviser"
+            icon={current?.splitDir === "rows" ? <Rows2 size={14} /> : <Columns2 size={14} />}
+            title="Diviser l'écran (même serveur ou un autre)"
+            disabled={!current || !!current.grid || !!current.join}
+            align="end"
+            items={splitItems}
+          />
+          <Button size="sm" variant="ghost" icon={<LayoutGrid size={14} />} disabled={servers.length < 2} onClick={() => setMultiPicker(true)} title="Un terminal par serveur, en grille">
+            Grille
+          </Button>
+          <ToolbarSep />
+          <Button size="sm" variant={dock ? "subtle" : "ghost"} icon={<PanelRight size={14} />} aria-pressed={!!dock} onClick={() => setDock(dock ? null : "files")} title="Panneau latéral : fichiers, fragments, historique, enregistrements">
+            Panneau
+          </Button>
+          <ToolbarSep />
+          <IconButton size="sm" title={`Rechercher dans le terminal (${display(shortcutOf("termSearch"))})`} disabled={!act} onClick={() => act?.search()}>
+            <Search size={15} />
           </IconButton>
+          <IconButton size="sm" title={recording ? "Arrêter et enregistrer la session" : "Enregistrer la session (asciicast)"} active={!!recording} disabled={!act} onClick={() => void act?.toggleRecording()}>
+            {recording ? <Square size={13} fill="currentColor" className="text-danger" /> : <Circle size={14} />}
+          </IconButton>
+          <MenuButton
+            size="sm"
+            variant={sharedMode ? "subtle" : "ghost"}
+            label="Partage"
+            icon={<Share2 size={14} />}
+            title="Partager, rejoindre, diffuser la saisie"
+            items={() => [
+              { label: sharedMode ? "Arrêter le partage de ce terminal" : "Partager ce terminal…", icon: <Share2 size={14} />, disabled: !act || !!current?.join, onClick: () => act?.share() },
+              { label: "Rejoindre un terminal partagé…", icon: <Users size={14} />, onClick: () => setJoinPicker(true) },
+              "separator",
+              {
+                label: "Diffuser la saisie à plusieurs terminaux…",
+                icon: <Radio size={14} />,
+                disabled: Object.keys(useBroadcast.getState().panes).length < 2,
+                onClick: () => setBroadcastPicker(true),
+              },
+            ]}
+          />
+          <Button size="sm" variant="ghost" icon={<History size={14} />} disabled={!runner} onClick={() => runner && setSessionsOf(runner)} title="Sessions persistantes (tmux) du serveur">
+            Sessions
+          </Button>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1">
           {tabs.length === 0 && (
-            <EmptyState icon={<SquareTerminal size={40} />} title="Aucun terminal ouvert">
-              {activeServerId ? (
-                <Button variant="primary" className="mt-2" onClick={() => openTab(activeServerId)}>
-                  Ouvrir un terminal sur {serverOf(activeServerId)?.name}
-                </Button>
-              ) : (
-                "Ajoute d'abord un serveur dans l'onglet Serveurs."
-              )}
+            <EmptyState
+              icon={<SquareTerminal />}
+              title="Aucun terminal ouvert"
+              action={
+                activeServerId ? (
+                  <>
+                    <Button variant="primary" icon={<Plus size={15} />} onClick={() => openTab(activeServerId)}>
+                      Terminal sur {serverOf(activeServerId)?.name}
+                    </Button>
+                    {servers.length > 1 && (
+                      <Button icon={<LayoutGrid size={14} />} onClick={() => setMultiPicker(true)}>
+                        Plusieurs serveurs en grille
+                      </Button>
+                    )}
+                    <Button variant="ghost" icon={<Users size={14} />} onClick={() => setJoinPicker(true)}>
+                      Rejoindre un partage
+                    </Button>
+                  </>
+                ) : undefined
+              }
+            >
+              {activeServerId
+                ? `Sessions persistantes (tmux) : elles continuent sur le serveur quand Helm est fermé. ${display(shortcutOf("newTab"))} ouvre un nouvel onglet.`
+                : "Ajoute d'abord un serveur dans la section Serveurs."}
             </EmptyState>
           )}
           {tabs.map((t) => {
@@ -328,57 +426,66 @@ export default function TerminalView({ visible }: { visible: boolean }) {
             );
           })}
         </div>
-        {showFiles && activePane && <TerminalFiles paneId={activePane} visible={visible} />}
-        {showSnippets && <SnippetsPanel />}
+        {dock && (
+          <>
+            <ResizeHandle {...dockSize.handle} />
+            <aside className="flex shrink-0 flex-col border-l border-border bg-subtle" style={{ width: dockSize.size }} aria-label="Panneau du terminal">
+              <nav className="flex shrink-0 items-center border-b border-border px-1.5" role="tablist">
+                {DOCK_TABS.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={dock === d.id}
+                    aria-label={d.label || "Enregistrements"}
+                    title={d.label || "Enregistrements"}
+                    onClick={() => setDock(d.id)}
+                    className={`flex h-9 min-w-0 items-center gap-1.5 border-b-2 px-2 text-[12px] ${dock === d.id ? "border-accent font-medium text-fg" : "border-transparent text-muted hover:text-fg"}`}
+                  >
+                    {d.icon}
+                    {d.label && <span className="truncate">{d.label}</span>}
+                  </button>
+                ))}
+                <IconButton size="sm" className="ml-auto" title="Fermer le panneau" onClick={() => setDock(null)}>
+                  <X size={14} />
+                </IconButton>
+              </nav>
+              <div className="min-h-0 flex-1">
+                {dock === "files" &&
+                  (activePane && !current?.join ? (
+                    <TerminalFiles paneId={activePane} visible={visible} />
+                  ) : (
+                    <p className="p-4 text-xs text-muted">Ouvre un terminal connecté pour parcourir ses fichiers.</p>
+                  ))}
+                {dock === "snippets" && <SnippetsPanel />}
+                {dock === "history" &&
+                  (runner && !current?.join ? (
+                    <div className="h-full p-3">
+                      <Suspense fallback={null}>
+                        <HistoryList
+                          key={runner}
+                          serverId={runner}
+                          compact
+                          onPick={(command, run) => {
+                            if (focusedTerminal.id == null) return notify("Clique d'abord dans un terminal connecté.", "info");
+                            void api.termWrite(focusedTerminal.id, run ? command + "\r" : command);
+                            focusedTerminal.focus?.();
+                          }}
+                        />
+                      </Suspense>
+                    </div>
+                  ) : (
+                    <p className="p-4 text-xs text-muted">Ouvre un terminal pour lire l'historique de son shell.</p>
+                  ))}
+                {dock === "recordings" && <RecordingsPanel activePane={activePane} />}
+              </div>
+            </aside>
+          </>
+        )}
       </div>
       <TransfersBar />
       {settings.terminalStatusBar && activePaneServer && <TerminalStatusBar serverId={activePaneServer} visible={visible} />}
 
-      {moreMenu && (
-        <ContextMenu
-          x={moreMenu.x}
-          y={moreMenu.y}
-          onClose={() => setMoreMenu(null)}
-          items={[
-            {
-              label: "Diffuser la saisie à plusieurs terminaux…",
-              icon: <Radio size={14} />,
-              disabled: Object.keys(broadcast.panes).length < 2,
-              onClick: () => setBroadcastPicker(true),
-            },
-            {
-              label: "Un terminal par serveur (multi-serveurs)…",
-              icon: <LayoutGrid size={14} />,
-              disabled: servers.length < 2,
-              onClick: () => setMultiPicker(true),
-            },
-            "separator",
-            { label: "Rejoindre un terminal partagé…", icon: <Users size={14} />, onClick: () => setJoinPicker(true) },
-            {
-              label: "Sessions persistantes (tmux)…",
-              icon: <History size={14} />,
-              disabled: !(current?.serverId ?? activeServerId),
-              onClick: () => setSessionsOf(current?.serverId ?? activeServerId),
-            },
-          ]}
-        />
-      )}
-
-      {splitMenu && current && (
-        <ContextMenu
-          x={splitMenu.x}
-          y={splitMenu.y}
-          onClose={() => setSplitMenu(null)}
-          items={[
-            { label: "Côte à côte", icon: <Columns2 size={14} />, onClick: () => void splitWith(current.serverId, "cols") },
-            { label: "L'un au-dessus de l'autre", icon: <Rows2 size={14} />, onClick: () => void splitWith(current.serverId, "rows") },
-            "separator",
-            ...servers
-              .filter((s) => s.id !== current.serverId)
-              .map((s) => ({ label: s.name, hint: s.host, icon: <Server size={14} style={{ color: s.color ?? undefined }} />, onClick: () => void splitWith(s.id) })),
-          ]}
-        />
-      )}
       {joinPicker && (
         <JoinPicker
           onClose={() => setJoinPicker(false)}
@@ -427,7 +534,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
 function PaneHeader({ serverId }: { serverId: string }) {
   const s = useApp((st) => st.servers.find((x) => x.id === serverId));
   return (
-    <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-border bg-rail px-2 text-[11px]">
+    <div className="flex h-7 shrink-0 items-center gap-2 border-b border-line bg-rail px-3 text-[11.5px]">
       <span className="size-[7px] rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
       <span className="font-medium">{s?.name ?? "?"}</span>
       <span className="truncate font-mono text-muted">
@@ -472,37 +579,47 @@ function MultiServerPicker({ onClose, onOpen }: { onClose: () => void; onOpen: (
       title="Terminaux multi-serveurs"
       onClose={onClose}
       footer={
-        <Button variant="primary" icon={<LayoutGrid size={14} />} disabled={selected.length < 2} onClick={() => onOpen(selected, broadcastOn)}>
-          Ouvrir {selected.length} terminaux
-        </Button>
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button variant="primary" icon={<LayoutGrid size={14} />} disabled={selected.length < 2} onClick={() => onOpen(selected, broadcastOn)}>
+            Ouvrir {selected.length} terminaux
+          </Button>
+        </>
       }
     >
       <p className="mb-3 text-sm text-muted">Un terminal par serveur, affichés côte à côte dans un même onglet. Pratique pour lancer la même commande sur plusieurs hôtes et comparer les résultats.</p>
       <ul className="mb-3 flex flex-col gap-1">
         {servers.map((s) => (
           <li key={s.id}>
-            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-hover">
+              <Checkbox
+                className="flex-1"
                 checked={selected.includes(s.id)}
-                onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)))}
+                onChange={(v) => setSelected((prev) => (v ? [...prev, s.id] : prev.filter((x) => x !== s.id)))}
+                label={
+                  <span className="flex items-center gap-2">
+                    <span className="size-[7px] rounded-full" style={{ background: s.color ?? "var(--color-accent)" }} />
+                    {s.name}
+                  </span>
+                }
               />
-              <span className="size-[7px] rounded-full" style={{ background: s.color ?? "var(--color-accent)" }} />
-              <span className="text-sm">{s.name}</span>
-              <span className="ml-auto font-mono text-xs text-muted">
+              <span className="font-mono text-xs text-muted">
                 {s.username}@{s.host}
               </span>
-            </label>
+            </div>
           </li>
         ))}
       </ul>
-      <label className="flex items-start gap-3 rounded-md border border-border p-3 text-sm">
-        <input type="checkbox" className="mt-0.5" checked={broadcastOn} onChange={(e) => setBroadcastOn(e.target.checked)} />
-        <span>
-          Diffuser la saisie à tous les terminaux
-          <span className="block text-xs text-muted">Les commandes sensibles (rm -rf, reboot…) demandent confirmation. Arrêt avec « Arrêter la diffusion ».</span>
-        </span>
-      </label>
+      <div className="rounded-lg border border-border p-3">
+        <Checkbox
+          checked={broadcastOn}
+          onChange={setBroadcastOn}
+          label="Diffuser la saisie à tous les terminaux"
+          hint="Les commandes sensibles (rm -rf, reboot…) demandent confirmation. Arrêt avec « Arrêter la diffusion »."
+        />
+      </div>
     </Modal>
   );
 }
@@ -531,8 +648,8 @@ function JoinPicker({ onClose, onJoin }: { onClose: () => void; onJoin: (code: s
         Colle l'invitation reçue (elle commence par <span className="font-mono">helm-term:</span>). Tu verras le terminal de la personne en
         direct ; si elle a partagé le contrôle, tu pourras aussi y taper.
       </p>
-      <textarea
-        className="h-28 w-full resize-none rounded-md border border-border bg-bg p-2 font-mono text-xs outline-none focus:border-accent"
+      <Textarea
+        className="h-28 resize-none font-mono text-xs"
         placeholder="helm-term:…"
         value={code}
         onChange={(e) => setCode(e.target.value)}
@@ -555,17 +672,22 @@ function BroadcastPicker({ onClose }: { onClose: () => void }) {
       title="Diffuser la saisie"
       onClose={onClose}
       footer={
-        <Button
-          variant="danger"
-          icon={<Radio size={14} />}
-          disabled={selected.size < 2}
-          onClick={() => {
-            setActive(true, [...selected]);
-            onClose();
-          }}
-        >
-          Diffuser à {selected.size} terminaux
-        </Button>
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            variant="danger"
+            icon={<Radio size={14} />}
+            disabled={selected.size < 2}
+            onClick={() => {
+              setActive(true, [...selected]);
+              onClose();
+            }}
+          >
+            Diffuser à {selected.size} terminaux
+          </Button>
+        </>
       }
     >
       <p className="mb-3 text-sm text-muted">
@@ -574,19 +696,18 @@ function BroadcastPicker({ onClose }: { onClose: () => void }) {
       <ul className="flex flex-col gap-1">
         {ids.map((id) => (
           <li key={id}>
-            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
-              <input
-                type="checkbox"
+            <div className="rounded-lg px-2 py-1.5 hover:bg-hover">
+              <Checkbox
                 checked={selected.has(id)}
-                onChange={(e) => {
+                onChange={(v) => {
                   const next = new Set(selected);
-                  if (e.target.checked) next.add(id);
+                  if (v) next.add(id);
                   else next.delete(id);
                   setSelected(next);
                 }}
+                label={panes[id].label}
               />
-              <span className="text-sm">{panes[id].label}</span>
-            </label>
+            </div>
           </li>
         ))}
         {ids.length < 2 && <li className="text-sm text-muted">Ouvre et connecte au moins deux terminaux.</li>}
@@ -621,11 +742,12 @@ function SessionsModal({
       <p className="mb-3 text-sm text-muted">
         Ces terminaux continuent de tourner sur le serveur, même app fermée. Rouvre-les pour reprendre exactement là où tu en étais.
       </p>
-      {error && <p className="text-sm text-danger">{error}</p>}
-      {list && list.length === 0 && <p className="text-sm text-muted">Aucune session Helm sur ce serveur.</p>}
+      {error && <ErrorState message={error} onRetry={load} />}
+      {!list && !error && <Skeleton rows={3} />}
+      {list && list.length === 0 && <p className="text-[13px] text-muted">Aucune session Helm sur ce serveur.</p>}
       <ul className="flex flex-col gap-2">
         {list?.map((s) => (
-          <li key={s.name} className="flex items-center gap-3 rounded-md border border-border px-3 py-2 text-sm">
+          <li key={s.name} className="flex items-center gap-3 rounded-lg border border-border bg-subtle px-3 py-2 text-[13px]">
             <span className="font-mono text-xs">{s.name}</span>
             <Badge tone={SHELLS.includes(s.command) ? "muted" : "accent"}>{s.command}</Badge>
             {openNames.includes(s.name) ? <Badge tone="ok">ouverte</Badge> : s.attached ? <Badge tone="warn">ouverte ailleurs</Badge> : null}
@@ -653,20 +775,43 @@ function SessionsModal({
   );
 }
 
-/** Bouton texte de la barre d'onglets du terminal. */
-function ToolButton({ label, title, icon, active, disabled, onClick }: { label: string; title: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick: (e: React.MouseEvent) => void }) {
+/** Onglet « Enregistrements » du dock : sessions en cours d'enregistrement et lancement sur le terminal actif. */
+function RecordingsPanel({ activePane }: { activePane: string | null }) {
+  const recording = usePaneStatus((s) => s.recording);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const entries = Object.entries(recording);
+  const elapsed = (since: number) => {
+    const s = Math.floor((Date.now() - since) / 1000);
+    return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  };
+  const act = paneActions(activePane);
   return (
-    <button
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      aria-pressed={active}
-      className={`flex h-7 items-center gap-1.5 rounded-[7px] border px-2.5 text-xs transition-colors disabled:opacity-40 ${
-        active ? "border-accent/60 bg-accent/10 text-fg" : "border-border text-muted hover:text-fg"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
+    <div className="flex flex-col gap-3 p-3 text-[13px]">
+      <p className="text-xs text-muted">
+        Enregistre ce qui s'affiche dans un terminal au format asciicast (<span className="font-mono">.cast</span>), relisible avec asciinema. Pratique pour documenter une intervention.
+      </p>
+      {entries.length === 0 ? (
+        <Button variant="primary" icon={<Circle size={13} />} disabled={!act || (activePane != null && activePane in recording)} onClick={() => void act?.toggleRecording()}>
+          Enregistrer le terminal actif
+        </Button>
+      ) : (
+        entries.map(([pane, r]) => (
+          <div key={pane} className="flex flex-col gap-2 rounded-xl border border-danger/35 bg-danger/8 p-3">
+            <div className="flex items-center gap-2">
+              <span className="size-2 animate-pulse rounded-full bg-danger" />
+              <span className="min-w-0 flex-1 truncate font-medium">{r.label}</span>
+              <span className="font-mono text-xs text-muted">{elapsed(r.since)}</span>
+            </div>
+            <Button size="sm" variant="danger" icon={<Square size={12} fill="currentColor" />} onClick={() => void paneActions(pane)?.toggleRecording()}>
+              Arrêter et enregistrer le fichier
+            </Button>
+          </div>
+        ))
+      )}
+    </div>
   );
 }

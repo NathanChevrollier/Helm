@@ -1,36 +1,64 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { CheckCircle2, Copy, History, Lock, SlidersHorizontal, XCircle } from "lucide-react";
-import { api, errorMessage, type AuditEntry, type McpConfig } from "../lib/api";
-import { writeClipboard } from "../lib/clipboard";
+// Réglages : navigation latérale par thème, chaque réglage simple s'enregistre dès qu'on le change.
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Bot,
+  CheckCircle2,
+  Download,
+  History,
+  Keyboard,
+  Lock,
+  Minus,
+  Monitor,
+  Plug,
+  Plus,
+  RefreshCw,
+  Search,
+  SquareTerminal,
+  Wrench,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
+import { api, errorMessage, importMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useAppPick } from "../lib/store";
+import { useTabIntent } from "../lib/shell";
 import { hashPassword, useLock } from "../lib/lock";
 import type { ThemeSetting } from "../lib/theme";
 import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Badge, Button, Input } from "../components/ui";
+import { Badge, Button, Card, Checkbox, CodeBlock, DataTable, Field, IconButton, Input, Loading, Segmented, Select, Switch, type Column } from "../components/ui";
 import PageLayout from "../components/PageLayout";
 import { checkForUpdate } from "../lib/updater";
 import SyncSettings from "../components/SyncSettings";
 import AiSettingsPanel from "../components/AiSettings";
 
-const TABS = [
-  { id: "prefs", label: "Réglages", icon: SlidersHorizontal },
-  { id: "journal", label: "Journal d'actions", icon: History },
-] as const;
-type TabId = (typeof TABS)[number]["id"];
+/** Nom du système, pour parler de « Windows », « macOS » ou « Linux » plutôt que d'un seul. */
+export const OS_NAME = /Windows/i.test(navigator.userAgent) ? "Windows" : /Mac/i.test(navigator.userAgent) ? "macOS" : "Linux";
+const VAULT = OS_NAME === "Windows" ? "Gestionnaire d'identification de Windows" : OS_NAME === "macOS" ? "Trousseau de macOS" : "coffre-fort du système (Secret Service)";
 
-/**
- * Un groupe de réglages. Les cartes s'y rangent en colonnes selon la place disponible : une seule
- * colonne étroite laissait les trois quarts de l'écran vides.
- */
-export function Group({ title, description, children, wide }: { title: string; description?: string; children: ReactNode; wide?: boolean }) {
+type TabId = "general" | "terminal" | "shortcuts" | "lock" | "ai" | "mcp" | "sync" | "maintenance" | "journal";
+const NAV: { id: TabId; label: string; icon: LucideIcon; description: string }[] = [
+  { id: "general", label: "Général", icon: Monitor, description: "Thème, actualisation, notifications et fichiers." },
+  { id: "terminal", label: "Terminal", icon: SquareTerminal, description: "Sessions persistantes, police, clic droit, monitoring." },
+  { id: "shortcuts", label: "Raccourcis", icon: Keyboard, description: "Tous modifiables : clique sur un raccourci puis tape la combinaison voulue." },
+  { id: "lock", label: "Sécurité de l'app", icon: Lock, description: "Verrouillage de Helm sur ce poste." },
+  { id: "ai", label: "Assistant IA", icon: Bot, description: "Fournisseur, modèle, clé et ce que l'assistant a le droit de consulter." },
+  { id: "mcp", label: "Accès IA (MCP)", icon: Plug, description: "Serveurs lisibles par l'IA et branchement de Claude Code ou Claude Desktop." },
+  { id: "sync", label: "Synchronisation", icon: RefreshCw, description: "Retrouver sa configuration sur un autre poste, ou l'exporter dans un fichier chiffré." },
+  { id: "maintenance", label: "Maintenance", icon: Wrench, description: "Mises à jour et journaux de l'app." },
+  { id: "journal", label: "Journal d'actions", icon: History, description: "Chaque modification faite par Helm sur un serveur, et chaque lecture de l'IA via MCP." },
+];
+
+/** Groupe de réglages : un titre, puis des lignes dans une même carte. */
+export function Group({ title, description, children, wide }: { title?: string; description?: string; children: ReactNode; wide?: boolean }) {
   return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {description && <p className="text-[13px] text-muted">{description}</p>}
-      </div>
-      <div className={wide ? "flex flex-col gap-3" : "grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] items-start gap-3"}>{children}</div>
+    <section className="flex flex-col gap-2.5">
+      {(title || description) && (
+        <div>
+          {title && <h2 className="text-sm font-semibold">{title}</h2>}
+          {description && <p className="text-[13px] text-muted">{description}</p>}
+        </div>
+      )}
+      {wide ? <div className="flex flex-col gap-3">{children}</div> : <Card padded={false} className="divide-y divide-border">{children}</Card>}
     </section>
   );
 }
@@ -39,132 +67,337 @@ export function Group({ title, description, children, wide }: { title: string; d
  * Réglage à valeur (liste, bouton…) : ce que l'on règle à gauche, la valeur en cours à droite.
  * Même disposition partout, pour qu'on sache d'un coup d'œil ce que l'on modifie.
  */
-export function Setting({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+export function Setting({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-start gap-4 rounded-lg border border-border bg-panel p-4">
+    <div className="flex items-center gap-4 px-4 py-3.5">
       <div className="min-w-0 flex-1">
-        <div className="font-medium">{title}</div>
-        {description && <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{description}</p>}
+        <div className="text-[13px] font-medium">{title}</div>
+        {description && <p className="mt-0.5 text-xs leading-relaxed text-muted">{description}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2">{children}</div>
     </div>
   );
 }
 
-/** Réglage à deux états : l'état courant est écrit à côté de la case. */
-export function Toggle({
-  title,
-  description,
-  checked,
-  onChange,
-  onLabel = "Activé",
-  offLabel = "Désactivé",
-}: {
-  title: string;
-  description?: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  onLabel?: string;
-  offLabel?: string;
-}) {
+/** Réglage à deux états. */
+export function Toggle({ title, description, checked, onChange }: { title: string; description?: ReactNode; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex cursor-pointer items-start gap-4 rounded-lg border border-border bg-panel p-4">
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">{title}</div>
-        {description && <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{description}</p>}
-      </div>
-      <span className="flex shrink-0 items-center gap-2">
-        <span className={`text-xs ${checked ? "text-accent" : "text-muted"}`}>{checked ? onLabel : offLabel}</span>
-        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      </span>
-    </label>
+    <Setting title={title} description={description}>
+      <Switch checked={checked} onChange={onChange} label={title} />
+    </Setting>
   );
 }
 
 export default function SettingsView() {
-  const [tab, setTab] = useState<TabId>("prefs");
+  const [tab, setTab] = useTabIntent<TabId>("settings", "general");
+  const current = NAV.find((n) => n.id === tab) ?? NAV[0];
   return (
-    <PageLayout
-      title="Réglages"
-      subtitle="Préférences de l'app, verrouillage, assistant, synchronisation et journal des actions."
-      guide="settings"
-      tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}
-      activeTab={tab}
-      onTab={setTab}
-    >
-      <div className="p-6">
-        {tab === "journal" && <Journal />}
-        {tab === "prefs" && <Preferences />}
+    <PageLayout title="Réglages" subtitle="Préférences de l'app, verrouillage, assistant, synchronisation et journal des actions." guide="settings" scroll={false}>
+      <div className="flex min-h-0 flex-1">
+        <nav className="flex w-56 shrink-0 flex-col gap-0.5 overflow-auto border-r border-border bg-panel p-2" aria-label="Rubriques des réglages">
+          {NAV.map((n) => {
+            const on = n.id === current.id;
+            const Icon = n.icon;
+            return (
+              <button
+                key={n.id}
+                type="button"
+                aria-current={on ? "page" : undefined}
+                onClick={() => setTab(n.id)}
+                className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${on ? "bg-accent/12 font-medium text-fg" : "text-fg/80 hover:bg-hover"}`}
+              >
+                <Icon size={15} className={on ? "text-accent" : "text-muted"} />
+                {n.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="min-w-0 flex-1 overflow-auto">
+          <div className={`mx-auto flex flex-col gap-6 px-8 py-6 ${current.id === "journal" ? "max-w-6xl" : "max-w-3xl"}`}>
+            <header>
+              <h2 className="text-lg font-semibold tracking-tight">{current.label}</h2>
+              <p className="text-[13px] text-muted">{current.description}</p>
+            </header>
+            {current.id === "general" && <General />}
+            {current.id === "terminal" && <TerminalPrefs />}
+            {current.id === "shortcuts" && <Shortcuts />}
+            {current.id === "lock" && <AppLock />}
+            {current.id === "ai" && <AiSettingsPanel onOpenAccess={() => setTab("mcp")} />}
+            {current.id === "mcp" && <AiAccess />}
+            {current.id === "sync" && (
+              <>
+                <SyncSettings />
+                <ExportImport />
+              </>
+            )}
+            {current.id === "maintenance" && <Maintenance />}
+            {current.id === "journal" && <Journal />}
+          </div>
+        </div>
       </div>
     </PageLayout>
   );
 }
 
+function General() {
+  const { settings, setSettings } = useAppPick("settings", "setSettings");
+  return (
+    <>
+      <Group title="Affichage">
+        <Setting title="Thème" description={`« Système » suit le thème clair ou sombre de ${OS_NAME}.`}>
+          <Segmented
+            label="Thème"
+            size="sm"
+            value={settings.theme}
+            onChange={(theme: ThemeSetting) => setSettings({ theme })}
+            options={[
+              { value: "dark", label: "Sombre" },
+              { value: "light", label: "Clair" },
+              { value: "system", label: "Système" },
+            ]}
+          />
+        </Setting>
+        <Setting title="Actualisation automatique" description="Conteneurs, sites, services, fichiers… relus régulièrement sur les serveurs connectés. F5 ou ⟳ actualisent à tout moment.">
+          <Select
+            className="w-44"
+            value={settings.autoRefreshSecs}
+            onChange={(autoRefreshSecs) => setSettings({ autoRefreshSecs })}
+            options={[
+              { value: 0, label: "Manuelle" },
+              { value: 5, label: "Toutes les 5 s" },
+              { value: 15, label: "Toutes les 15 s" },
+              { value: 30, label: "Toutes les 30 s" },
+              { value: 60, label: "Toutes les minutes" },
+            ]}
+          />
+        </Setting>
+      </Group>
+      <Group title="Notifications et fichiers">
+        <Toggle
+          title={`Notifications ${OS_NAME} pour les alertes`}
+          description="Tant que Helm est ouvert, une notification apparaît dès qu'une alerte se déclenche (CPU, mémoire, disque, site injoignable…). Helm fermé, c'est l'agent qui prévient (Discord, ntfy, webhook)."
+          checked={settings.alertNotifications}
+          onChange={(alertNotifications) => setSettings({ alertNotifications })}
+        />
+        <Toggle
+          title="Afficher les fichiers cachés"
+          description="Fichiers et dossiers dont le nom commence par un point (.env, .ssh…), dans l'explorateur de fichiers."
+          checked={settings.showHiddenFiles}
+          onChange={(showHiddenFiles) => setSettings({ showHiddenFiles })}
+        />
+      </Group>
+    </>
+  );
+}
+
+function TerminalPrefs() {
+  const { settings, setSettings, servers } = useAppPick("settings", "setSettings", "servers");
+  const declined = Object.keys(settings.tmuxDeclined).filter((id) => settings.tmuxDeclined[id]);
+  const size = settings.terminalFontSize;
+  const setSize = (n: number) => setSettings({ terminalFontSize: Math.min(28, Math.max(9, n)) });
+  return (
+    <>
+      <Group>
+        <Toggle
+          title="Sessions persistantes (tmux)"
+          description="Les nouveaux terminaux tournent dans une session tmux : ils survivent aux coupures réseau et à la fermeture de Helm, et se rattachent automatiquement."
+          checked={settings.persistentSessions}
+          onChange={(persistentSessions) => setSettings({ persistentSessions })}
+        />
+        <Setting title="Taille du texte" description="Aussi Ctrl+= / Ctrl+- / Ctrl+0 dans un terminal.">
+          <IconButton size="sm" title="Plus petit" disabled={size <= 9} onClick={() => setSize(size - 1)}>
+            <Minus size={14} />
+          </IconButton>
+          <span className="w-12 text-center font-mono text-[13px] tabular-nums">{size} px</span>
+          <IconButton size="sm" title="Plus grand" disabled={size >= 28} onClick={() => setSize(size + 1)}>
+            <Plus size={14} />
+          </IconButton>
+        </Setting>
+        <Setting title="Clic droit" description="Menu (copier, coller, envoyer des fichiers, ouvrir le dossier…) ou copier/coller immédiat, comme PuTTY.">
+          <Select
+            className="w-52"
+            value={settings.terminalRightClick}
+            onChange={(terminalRightClick) => setSettings({ terminalRightClick })}
+            options={[
+              { value: "menu", label: "Menu contextuel" },
+              { value: "paste", label: "Copier / coller (PuTTY)" },
+            ]}
+          />
+        </Setting>
+        <Toggle
+          title="Monitoring sous le terminal"
+          description="CPU, mémoire, disque, charge et réseau du serveur du terminal actif, rafraîchis toutes les 3 secondes."
+          checked={settings.terminalStatusBar}
+          onChange={(terminalStatusBar) => setSettings({ terminalStatusBar })}
+        />
+        {declined.length > 0 && (
+          <Setting title="Installation de tmux refusée" description={declined.map((id) => servers.find((s) => s.id === id)?.name ?? "serveur supprimé").join(", ")}>
+            <Button size="sm" onClick={() => setSettings({ tmuxDeclined: {} })}>
+              Reproposer
+            </Button>
+          </Setting>
+        )}
+      </Group>
+      <div className="rounded-lg border border-border bg-term p-3 font-mono text-fg" style={{ fontSize: size }}>
+        <span className="text-ok">debian@prod-01</span>:<span className="text-accent">~</span>$ docker compose ps
+      </div>
+    </>
+  );
+}
+
+function Maintenance() {
+  const { notify } = useAppPick("notify");
+  const [checking, setChecking] = useState(false);
+  return (
+    <Group>
+      <Setting title="Mises à jour" description="Helm vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.">
+        <Button
+          size="sm"
+          loading={checking}
+          onClick={() => {
+            setChecking(true);
+            void checkForUpdate(true).finally(() => setChecking(false));
+          }}
+        >
+          Rechercher
+        </Button>
+      </Setting>
+      <Setting title="Journaux de Helm" description="Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.">
+        <Button size="sm" onClick={() => void api.logsOpenDir().catch((e) => notify(errorMessage(e), "error"))}>
+          Ouvrir le dossier
+        </Button>
+      </Setting>
+    </Group>
+  );
+}
+
+const PERIODS = [
+  { value: "1", label: "24 dernières heures" },
+  { value: "7", label: "7 derniers jours" },
+  { value: "30", label: "30 derniers jours" },
+  { value: "all", label: "Tout" },
+] as const;
+type Period = (typeof PERIODS)[number]["value"];
+
 function Journal() {
+  const { notify } = useAppPick("notify");
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [origin, setOrigin] = useState<"all" | "app" | "mcp">("all");
+  const [period, setPeriod] = useState<Period>("all");
+  const [failedOnly, setFailedOnly] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setEntries(await api.auditList(5000));
+    } catch (e) {
+      notify(errorMessage(e), "error");
+      setEntries((x) => x ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [notify]);
   useEffect(() => {
-    void api.auditList(2000).then(setEntries);
-  }, []);
+    void load();
+  }, [load]);
+
   const rows = useMemo(() => {
     const f = filter.toLowerCase();
+    const since = period === "all" ? 0 : Date.now() - Number(period) * 86_400_000;
     return (entries ?? []).filter(
-      (e) => (origin === "all" || e.origin === origin) && (!f || `${e.serverName} ${e.action} ${e.detail} ${e.error ?? ""}`.toLowerCase().includes(f)),
+      (e) =>
+        e.t >= since &&
+        (!failedOnly || !e.ok) &&
+        (origin === "all" || e.origin === origin) &&
+        (!f || `${e.serverName} ${e.action} ${e.detail} ${e.error ?? ""}`.toLowerCase().includes(f)),
     );
-  }, [entries, filter, origin]);
+  }, [entries, filter, origin, period, failedOnly]);
+
+  const exportCsv = async () => {
+    const path = await saveDialog({ title: "Exporter le journal", defaultPath: `helm-journal-${new Date().toISOString().slice(0, 10)}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+    if (!path) return;
+    const cell = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const lines = [
+      ["date", "origine", "serveur", "action", "détail", "résultat", "erreur"].join(";"),
+      ...rows.map((e) => [new Date(e.t).toISOString(), e.origin, e.serverName, e.action, e.detail, e.ok ? "ok" : "échec", e.error ?? ""].map((v) => cell(String(v))).join(";")),
+    ];
+    try {
+      // BOM : Excel reconnaît l'UTF-8 et affiche correctement les accents.
+      await api.saveTextFile(path, "\ufeff" + lines.join("\r\n"));
+      notify(`${rows.length} entrée(s) exportée(s)`, "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const columns: Column<AuditEntry>[] = [
+    { key: "t", header: "Date", width: "150px", sortValue: (e) => e.t, render: (e) => <span className="text-xs text-muted tabular-nums">{new Date(e.t).toLocaleString("fr-FR")}</span> },
+    { key: "origin", header: "Origine", width: "80px", sortValue: (e) => e.origin, render: (e) => (e.origin === "mcp" ? <Badge tone="accent">IA</Badge> : <Badge>Helm</Badge>) },
+    { key: "server", header: "Serveur", width: "130px", sortValue: (e) => e.serverName, render: (e) => <span className="truncate text-xs">{e.serverName}</span> },
+    { key: "action", header: "Action", width: "170px", sortValue: (e) => e.action, render: (e) => <span className="truncate font-mono text-xs">{e.action}</span> },
+    {
+      key: "detail",
+      header: "Détail",
+      render: (e) => (
+        <span className="truncate text-xs text-muted" title={e.detail}>
+          {e.detail}
+        </span>
+      ),
+    },
+    {
+      key: "ok",
+      header: "Résultat",
+      width: "minmax(0,0.6fr)",
+      sortValue: (e) => (e.ok ? 1 : 0),
+      render: (e) =>
+        e.ok ? (
+          <CheckCircle2 size={14} className="text-ok" />
+        ) : (
+          <span className="flex min-w-0 items-center gap-1 text-xs text-danger" title={e.error ?? ""}>
+            <XCircle size={14} className="shrink-0" /> <span className="truncate">{e.error}</span>
+          </span>
+        ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">Chaque modification faite par Helm sur un serveur, et chaque lecture faite par l'IA via MCP, est inscrite ici (fichier local, jamais envoyé ailleurs).</p>
-      <div className="flex items-center gap-2">
-        <Input className="!w-80" placeholder="Filtrer (serveur, action, détail)…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <select className="h-8 rounded-md border border-border bg-bg px-2 text-sm" value={origin} onChange={(e) => setOrigin(e.target.value as typeof origin)}>
-          <option value="all">Toutes origines</option>
-          <option value="app">Helm</option>
-          <option value="mcp">IA (MCP)</option>
-        </select>
-        <span className="ml-auto text-xs text-muted">{rows.length} entrée(s)</span>
+      <p className="text-xs text-muted">Fichier local, jamais envoyé ailleurs.</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="relative w-64">
+          <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
+          <Input className="pl-8" placeholder="Serveur, action, détail" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </label>
+        <Segmented
+          label="Origine"
+          size="sm"
+          value={origin}
+          onChange={setOrigin}
+          options={[
+            { value: "all", label: "Tout" },
+            { value: "app", label: "Helm" },
+            { value: "mcp", label: "IA" },
+          ]}
+        />
+        <Select className="w-48" aria-label="Période" value={period} onChange={setPeriod} options={PERIODS.map((p) => ({ value: p.value, label: p.label }))} />
+        <Checkbox className="text-xs" checked={failedOnly} onChange={setFailedOnly} label="Échecs seulement" />
+        <span className="ml-auto text-xs text-muted tabular-nums">{rows.length} entrée(s)</span>
+        <IconButton title="Actualiser" onClick={() => void load()}>
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+        </IconButton>
+        <Button size="sm" icon={<Download size={13} />} disabled={!rows.length} onClick={() => void exportCsv()}>
+          Exporter en CSV
+        </Button>
       </div>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
-          <thead className="bg-panel text-left text-xs text-muted">
-            <tr>
-              <th className="px-3 py-2 font-medium">Date</th>
-              <th className="px-3 py-2 font-medium">Origine</th>
-              <th className="px-3 py-2 font-medium">Serveur</th>
-              <th className="px-3 py-2 font-medium">Action</th>
-              <th className="px-3 py-2 font-medium">Détail</th>
-              <th className="px-3 py-2 font-medium">Résultat</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((e, i) => (
-              <tr key={i} className="border-t border-border/50 align-top">
-                <td className="px-3 py-1.5 text-xs whitespace-nowrap text-muted tabular-nums">{new Date(e.t).toLocaleString("fr-FR")}</td>
-                <td className="px-3 py-1.5">{e.origin === "mcp" ? <Badge tone="accent">IA</Badge> : <Badge>Helm</Badge>}</td>
-                <td className="px-3 py-1.5 text-xs">{e.serverName}</td>
-                <td className="px-3 py-1.5 font-mono text-xs">{e.action}</td>
-                <td className="max-w-80 px-3 py-1.5 text-xs break-all text-muted">{e.detail}</td>
-                <td className="px-3 py-1.5 text-xs">
-                  {e.ok ? (
-                    <CheckCircle2 size={14} className="text-ok" />
-                  ) : (
-                    <span className="flex items-start gap-1 text-danger">
-                      <XCircle size={14} className="mt-0.5 shrink-0" /> {e.error}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {entries && rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="p-6 text-center text-sm text-muted">Aucune action enregistrée.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {entries === null ? (
+        <Loading rows={8} />
+      ) : (
+        <Card padded={false} className="h-[min(620px,calc(100vh-300px))] overflow-hidden">
+          <DataTable className="h-full" rows={rows} rowKey={(e) => `${e.t}${e.action}${e.detail}`} columns={columns} rowHeight={34} initialSort={{ key: "t", dir: "desc" }} empty="Aucune action enregistrée." />
+        </Card>
+      )}
     </div>
   );
 }
@@ -175,15 +408,11 @@ function AiAccess() {
   useEffect(() => {
     void api.mcpConfig().then(setConfig);
   }, []);
-  const copy = (text: string) => {
-    void writeClipboard(text);
-    notify("Copié", "success");
-  };
 
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Ce que l'IA peut faire</h2>
+        <h2 className="text-sm font-semibold">Ce que l'IA peut faire</h2>
         <ul className="flex flex-col gap-1 text-sm text-muted">
           <li>• <strong className="text-fg">Lire uniquement</strong> : état, métriques, alertes, conteneurs, logs, sites, configuration nginx, audit, sauvegardes.</li>
           <li>• <strong className="text-fg">Aucune action</strong> : aucun outil ne peut modifier un serveur ni exécuter une commande libre.</li>
@@ -193,159 +422,45 @@ function AiAccess() {
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Serveurs accessibles par l'IA</h2>
+        <h2 className="text-sm font-semibold">Serveurs accessibles par l'IA</h2>
         <p className="text-xs text-muted">Désactivé par défaut. Les données lues sont envoyées au fournisseur du modèle que tu utilises.</p>
-        <div className="flex flex-col gap-1 rounded-lg border border-border bg-panel p-2">
+        <Card padded={false} className="divide-y divide-border">
           {servers.map((s) => (
-            <label key={s.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
-              <input
-                type="checkbox"
+            <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium">{s.name}</span>
+                <span className="block truncate font-mono text-xs text-muted">{s.host}</span>
+              </span>
+              <Switch
+                label={`Accès IA pour ${s.name}`}
                 checked={!!s.aiAccess}
-                onChange={async (e) => {
+                onChange={async (on) => {
                   try {
-                    await api.setAiAccess(s.id, e.target.checked);
+                    await api.setAiAccess(s.id, on);
                     await refreshServers();
                   } catch (err) {
                     notify(errorMessage(err), "error");
                   }
                 }}
               />
-              <span className="text-sm">{s.name}</span>
-              <span className="font-mono text-xs text-muted">{s.host}</span>
-            </label>
+            </div>
           ))}
-          {servers.length === 0 && <p className="p-2 text-sm text-muted">Aucun serveur.</p>}
-        </div>
+          {servers.length === 0 && <p className="p-4 text-sm text-muted">Aucun serveur.</p>}
+        </Card>
       </section>
 
       {config && (
         <section className="flex flex-col gap-3">
-          <h2 className="font-medium">Brancher Claude</h2>
-          <div>
-            <div className="mb-1 flex items-center justify-between text-xs text-muted">
-              Claude Code (dans un terminal)
-              <Button size="sm" variant="ghost" icon={<Copy size={12} />} onClick={() => copy(config.claudeCode)}>
-                Copier
-              </Button>
-            </div>
-            <pre className="overflow-x-auto rounded-md border border-border bg-bg p-3 font-mono text-xs select-text">{config.claudeCode}</pre>
-          </div>
-          <div>
-            <div className="mb-1 flex items-center justify-between text-xs text-muted">
-              Claude Desktop (fichier claude_desktop_config.json)
-              <Button size="sm" variant="ghost" icon={<Copy size={12} />} onClick={() => copy(config.claudeDesktop)}>
-                Copier
-              </Button>
-            </div>
-            <pre className="overflow-x-auto rounded-md border border-border bg-bg p-3 font-mono text-xs select-text">{config.claudeDesktop}</pre>
-          </div>
+          <h2 className="text-sm font-semibold">Brancher Claude</h2>
+          <Field label="Claude Code (dans un terminal)">
+            <CodeBlock code={config.claudeCode} />
+          </Field>
+          <Field label="Claude Desktop (fichier claude_desktop_config.json)">
+            <CodeBlock code={config.claudeDesktop} />
+          </Field>
           <p className="text-xs text-muted">Le serveur MCP est l'app Helm elle-même, lancée avec l'option --mcp (sans fenêtre). Réinstalle la config si tu déplaces Helm.</p>
         </section>
       )}
-    </div>
-  );
-}
-
-function Preferences() {
-  const { settings, setSettings, servers, notify } = useAppPick("settings", "setSettings", "servers", "notify");
-  const declined = Object.keys(settings.tmuxDeclined).filter((id) => settings.tmuxDeclined[id]);
-  const [checking, setChecking] = useState(false);
-  return (
-    <div className="flex flex-col gap-8">
-      <Group title="Terminal" description="Comportement des onglets de terminal et de leur barre.">
-      <Toggle
-        title="Sessions persistantes (tmux)"
-        description="Les nouveaux terminaux tournent dans une session tmux : ils survivent aux coupures réseau et à la fermeture de Helm, et se rattachent automatiquement."
-        checked={settings.persistentSessions}
-        onChange={(persistentSessions) => setSettings({ persistentSessions })}
-      />
-      <Setting title="Clic droit dans le terminal" description="Menu (copier, coller, envoyer des fichiers, ouvrir le dossier…) ou copier/coller immédiat, comme PuTTY.">
-        <select
-          className="h-9 rounded-md border border-border bg-bg px-2 text-sm"
-          value={settings.terminalRightClick}
-          onChange={(e) => setSettings({ terminalRightClick: e.target.value as "menu" | "paste" })}
-        >
-          <option value="menu">Menu contextuel</option>
-          <option value="paste">Copier / coller (PuTTY)</option>
-        </select>
-      </Setting>
-      <Toggle
-        title="Monitoring sous le terminal"
-        description="CPU, mémoire, disque, charge et réseau du serveur du terminal actif, rafraîchis toutes les 3 secondes."
-        checked={settings.terminalStatusBar}
-        onChange={(terminalStatusBar) => setSettings({ terminalStatusBar })}
-      />
-      {declined.length > 0 && (
-        <div className="rounded-lg border border-border bg-panel p-4 text-sm">
-          <p className="text-muted">
-            Installation de tmux refusée pour : {declined.map((id) => servers.find((s) => s.id === id)?.name ?? "serveur supprimé").join(", ")}.
-          </p>
-          <Button size="sm" className="mt-2" onClick={() => setSettings({ tmuxDeclined: {} })}>
-            Reproposer l'installation
-          </Button>
-        </div>
-      )}
-      </Group>
-
-      <Group title="Affichage et rafraîchissement" description="Thème de l'app, fréquence des relevés et notifications.">
-      <Setting title="Thème" description="« Système » suit le thème de Windows.">
-        <select className="h-8 rounded-md border border-border bg-bg px-2 text-sm" value={settings.theme} onChange={(e) => setSettings({ theme: e.target.value as ThemeSetting })}>
-          <option value="dark">Sombre</option>
-          <option value="light">Clair</option>
-          <option value="system">Système</option>
-        </select>
-      </Setting>
-      <Setting title="Actualisation automatique" description="État des conteneurs, sites, services, fichiers… relu régulièrement sur les serveurs déjà connectés. F5 ou le bouton ⟳ de l'en-tête actualisent à tout moment.">
-        <select
-          className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-          value={settings.autoRefreshSecs}
-          onChange={(e) => setSettings({ autoRefreshSecs: Number(e.target.value) })}
-        >
-          <option value={0}>Manuelle</option>
-          <option value={5}>Toutes les 5 s</option>
-          <option value={15}>Toutes les 15 s</option>
-          <option value={30}>Toutes les 30 s</option>
-          <option value={60}>Toutes les minutes</option>
-        </select>
-      </Setting>
-      <Toggle
-        title="Notifications Windows pour les alertes"
-        description="Tant que Helm est ouvert, une notification apparaît dès qu'une alerte se déclenche sur un serveur connecté (CPU, mémoire, disque, site injoignable…). Helm fermé, c'est l'agent qui prévient (Discord, ntfy, webhook)."
-        checked={settings.alertNotifications}
-        onChange={(alertNotifications) => setSettings({ alertNotifications })}
-      />
-      </Group>
-
-      <Group title="Raccourcis clavier" description="Tous modifiables : clique sur un raccourci puis tape la combinaison voulue." wide>
-        <Shortcuts />
-      </Group>
-
-      <Group title="Sécurité de l'app" description="Verrouillage de Helm sur ce PC.">
-        <AppLock />
-      </Group>
-
-      <Group title="Assistant IA" description="Fournisseur, clé, et ce que l'assistant comme le serveur MCP ont le droit de lire." wide>
-        <AiSettingsPanel />
-        <AiAccess />
-      </Group>
-
-      <Group title="Synchronisation et sauvegarde des réglages" description="Retrouver sa configuration sur un autre PC, ou l'exporter dans un fichier chiffré." wide>
-        <SyncSettings />
-        <ExportImport />
-      </Group>
-
-      <Group title="Maintenance de l'app">
-      <Setting title="Mises à jour" description="Helm vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.">
-        <Button size="sm" loading={checking} onClick={() => { setChecking(true); void checkForUpdate(true).finally(() => setChecking(false)); }}>
-          Rechercher
-        </Button>
-      </Setting>
-      <Setting title="Journaux de Helm" description="Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.">
-        <Button size="sm" onClick={() => void api.logsOpenDir().catch((e) => notify(errorMessage(e), "error"))}>
-          Ouvrir le dossier
-        </Button>
-      </Setting>
-      </Group>
     </div>
   );
 }
@@ -393,28 +508,20 @@ function AppLock() {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
+    <Card className="flex flex-col gap-4">
       <div>
-        <span className="flex items-center gap-2 font-medium">
-          <Lock size={14} /> Verrouillage de Helm {configured && <Badge tone="ok">activé</Badge>}
+        <span className="flex items-center gap-2 text-[13px] font-medium">
+          <Lock size={14} /> Verrouillage de Helm {configured ? <Badge tone="ok">activé</Badge> : <Badge>désactivé</Badge>}
         </span>
-        <span className="block text-sm text-muted">
-          Helm ouvert donne accès à tous tes serveurs. Un mot de passe masque l'interface quand tu t'absentes ; connexions et terminaux continuent en arrière-plan. Seule son empreinte est conservée, dans le coffre de Windows.
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+          Helm ouvert donne accès à tous tes serveurs. Un mot de passe masque l'interface quand tu t'absentes ; connexions et terminaux continuent en arrière-plan. Seule son empreinte est conservée, dans le {VAULT}.
         </span>
       </div>
       {configured && !editing && (
         <>
-          <select
-            className="h-8 w-80 rounded-md border border-border bg-bg px-2 text-sm"
-            value={settings.lockMinutes}
-            onChange={(e) => setSettings({ lockMinutes: Number(e.target.value) })}
-          >
-            {LOCK_DELAYS.map((d) => (
-              <option key={d.minutes} value={d.minutes}>
-                {d.label}
-              </option>
-            ))}
-          </select>
+          <Field label="Verrouillage automatique">
+            <Select className="w-80" value={settings.lockMinutes} onChange={(lockMinutes) => setSettings({ lockMinutes })} options={LOCK_DELAYS.map((d) => ({ value: d.minutes, label: d.label }))} />
+          </Field>
           <div className="flex gap-2">
             <Button size="sm" onClick={() => setEditing(true)}>
               Changer le mot de passe
@@ -433,8 +540,14 @@ function AppLock() {
             void save();
           }}
         >
-          <Input className="!w-80" type="password" placeholder="Nouveau mot de passe (6 caractères min.)" value={pw} onChange={(e) => setPw(e.target.value)} />
-          <Input className="!w-80" type="password" placeholder="Confirmation" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          <div className="grid max-w-xl grid-cols-2 gap-3">
+            <Field label="Nouveau mot de passe" hint="6 caractères minimum.">
+              <Input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+            </Field>
+            <Field label="Confirmation">
+              <Input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+            </Field>
+          </div>
           <div className="flex gap-2">
             <Button size="sm" variant="primary" type="submit" loading={busy}>
               {configured ? "Enregistrer" : "Activer le verrouillage"}
@@ -447,7 +560,7 @@ function AppLock() {
           </div>
         </form>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -484,27 +597,31 @@ function ExportImport() {
       }
       const r = await api.settingsImport(path, password);
       await refreshServers();
-      notify(`Importé : ${r.servers} serveur(s), ${r.identities} identifiant(s), ${r.snippets} snippet(s), ${r.tunnels} tunnel(s), ${r.secrets} secret(s)`, "success");
+      notify(importMessage(r), r.duplicated || r.hostKeysKept ? "info" : "success");
     } catch (e) {
       notify(errorMessage(e), "error");
     }
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
+    <Card className="flex flex-col gap-3">
       <div>
-        <span className="font-medium">Exporter / importer mes réglages</span>
-        <span className="block text-sm text-muted">
+        <span className="text-[13px] font-medium">Exporter / importer mes réglages</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted">
           Serveurs, bureaux à distance, identifiants, clés d'hôte approuvées, snippets et tunnels, pour changer de PC ou garder une copie. L'import complète la configuration actuelle sans rien supprimer.
         </span>
       </div>
       {exporting ? (
         <div className="flex flex-col gap-2">
-          <Input className="!w-80" type="password" placeholder="Mot de passe de chiffrement (recommandé)" value={pw} onChange={(e) => setPw(e.target.value)} />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={withSecrets} onChange={(e) => setWithSecrets(e.target.checked)} />
-            Inclure les secrets (mots de passe SSH et sudo, passphrases, mot de passe restic) — fichier chiffré obligatoire
-          </label>
+          <Field label="Mot de passe de chiffrement" hint="Recommandé ; obligatoire avec les secrets (8 caractères minimum).">
+            <Input className="max-w-80" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+          </Field>
+          <Checkbox
+            checked={withSecrets}
+            onChange={setWithSecrets}
+            label="Inclure les secrets"
+            hint="Mots de passe SSH et sudo, passphrases, mot de passe restic."
+          />
           <div className="flex gap-2">
             <Button size="sm" variant="primary" onClick={() => void doExport()}>
               Choisir l'emplacement…
@@ -524,7 +641,7 @@ function ExportImport() {
           </Button>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -552,21 +669,18 @@ function Shortcuts() {
   }, [recording, settings.shortcuts, setSettings, notify]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-panel p-4">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center">
-        <span className="flex-1">
-          <span className="font-medium">Raccourcis clavier</span>
-          <span className="block text-sm text-muted">Clique sur un raccourci puis appuie sur la nouvelle combinaison (Échap pour annuler).</span>
-        </span>
+        <span className="flex-1 text-xs text-muted">Échap pour annuler la saisie. Ctrl ou Alt obligatoire (ou une touche F1–F12), pour ne pas gêner la frappe.</span>
         {settings.shortcuts && Object.keys(settings.shortcuts).length > 0 && (
           <Button size="sm" onClick={() => setSettings({ shortcuts: {} })}>
             Tout réinitialiser
           </Button>
         )}
       </div>
-      <ul className="flex flex-col">
+      <Card padded={false} className="divide-y divide-border">
         {(Object.keys(SHORTCUTS) as ShortcutId[]).map((id) => (
-          <li key={id} className="flex items-center gap-3 py-1 text-sm">
+          <div key={id} className="flex items-center gap-3 px-4 py-2 text-[13px]">
             <span className="flex-1">{SHORTCUTS[id].label}</span>
             <button
               className={`min-w-36 rounded-md border px-2 py-1 font-mono text-xs ${recording === id ? "border-accent text-accent" : "border-border hover:bg-hover"}`}
@@ -574,9 +688,9 @@ function Shortcuts() {
             >
               {recording === id ? "Appuie sur les touches…" : display(shortcutOf(id))}
             </button>
-          </li>
+          </div>
         ))}
-      </ul>
+      </Card>
     </div>
   );
 }

@@ -61,28 +61,81 @@ fn decode_invite(code: &str) -> Result<Invite, String> {
     serde_json::from_slice(&bytes).map_err(|_| "invitation illisible".into())
 }
 
-/// Chiffrement d'un message du canal partagé : `base64(nonce || chiffré)`.
-fn seal(key: &LessSafeKey, plain: &[u8]) -> Result<String, String> {
-    let mut nonce = [0u8; 12];
-    SystemRandom::new().fill(&mut nonce).map_err(|_| "aléa indisponible")?;
-    let mut data = plain.to_vec();
-    key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), &mut data).map_err(|_| "chiffrement impossible")?;
-    let mut out = nonce.to_vec();
-    out.extend_from_slice(&data);
-    Ok(B64.encode(out))
+/// Sens d'un message, lié au chiffrement : un message de l'hôte renvoyé à l'hôte par le relais
+/// (réflexion) ne se déchiffre pas comme une frappe d'invité.
+const TO_GUESTS: &[u8] = b"helm-term/v2/hote->invites";
+const TO_HOST: &[u8] = b"helm-term/v2/invite->hote";
+/// Émetteurs suivis par un récepteur (invités d'un partage) : borne la mémoire face à un relais hostile.
+const MAX_SENDERS: usize = 64;
+
+/// Émetteur d'un canal partagé. Chaque message porte un identifiant d'émetteur tiré au hasard et
+/// un compteur croissant, authentifiés avec le sens du message (AAD d'AES-GCM) : le relais ne peut
+/// ni rejouer une frappe (« rm … » exécuté deux fois), ni renvoyer un message dans l'autre sens.
+/// Format : `base64(nonce[12] || émetteur[8] || compteur[8] || chiffré)`.
+struct Sealer {
+    dir: &'static [u8],
+    sender: [u8; 8],
+    seq: u64,
 }
 
-fn open(key: &LessSafeKey, message: &str) -> Result<Vec<u8>, String> {
-    let raw = B64.decode(message.trim()).map_err(|_| "message illisible".to_string())?;
-    if raw.len() < 13 {
-        return Err("message tronqué".into());
+impl Sealer {
+    fn new(dir: &'static [u8]) -> Result<Self, String> {
+        let mut sender = [0u8; 8];
+        SystemRandom::new().fill(&mut sender).map_err(|_| "aléa indisponible")?;
+        Ok(Self { dir, sender, seq: 0 })
     }
-    let (nonce, rest) = raw.split_at(12);
-    let nonce: [u8; 12] = nonce.try_into().map_err(|_| "message illisible".to_string())?;
-    let mut data = rest.to_vec();
-    let plain =
-        key.open_in_place(Nonce::assume_unique_for_key(nonce), Aad::empty(), &mut data).map_err(|_| "message refusé (clé différente)")?;
-    Ok(plain.to_vec())
+
+    fn seal(&mut self, key: &LessSafeKey, plain: &[u8]) -> Result<String, String> {
+        self.seq += 1;
+        let mut header = [0u8; 16];
+        header[..8].copy_from_slice(&self.sender);
+        header[8..].copy_from_slice(&self.seq.to_be_bytes());
+        let mut nonce = [0u8; 12];
+        SystemRandom::new().fill(&mut nonce).map_err(|_| "aléa indisponible")?;
+        let mut data = plain.to_vec();
+        key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from([self.dir, &header].concat()), &mut data)
+            .map_err(|_| "chiffrement impossible")?;
+        let mut out = Vec::with_capacity(12 + 16 + data.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&header);
+        out.extend_from_slice(&data);
+        Ok(B64.encode(out))
+    }
+}
+
+/// Récepteur : refuse un message d'un autre sens, et tout message dont le compteur n'avance pas.
+struct Opener {
+    dir: &'static [u8],
+    last: HashMap<[u8; 8], u64>,
+}
+
+impl Opener {
+    fn new(dir: &'static [u8]) -> Self {
+        Self { dir, last: HashMap::new() }
+    }
+
+    fn open(&mut self, key: &LessSafeKey, message: &str) -> Result<Vec<u8>, String> {
+        let raw = B64.decode(message.trim()).map_err(|_| "message illisible".to_string())?;
+        if raw.len() < 12 + 16 + 16 {
+            return Err("message tronqué".into());
+        }
+        let (nonce, rest) = raw.split_at(12);
+        let (header, body) = rest.split_at(16);
+        let nonce: [u8; 12] = nonce.try_into().map_err(|_| "message illisible".to_string())?;
+        let sender: [u8; 8] = header[..8].try_into().map_err(|_| "message illisible".to_string())?;
+        let seq = u64::from_be_bytes(header[8..].try_into().map_err(|_| "message illisible".to_string())?);
+        let mut data = body.to_vec();
+        let plain = key
+            .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from([self.dir, header].concat()), &mut data)
+            .map_err(|_| "message refusé (clé ou sens différent)")?;
+        match self.last.get(&sender) {
+            Some(&last) if seq <= last => return Err("message rejoué : ignoré".into()),
+            None if self.last.len() >= MAX_SENDERS => return Err("trop d'émetteurs".into()),
+            _ => {}
+        }
+        self.last.insert(sender, seq);
+        Ok(plain.to_vec())
+    }
 }
 
 fn key_from(b64: &str) -> Result<LessSafeKey, String> {
@@ -105,12 +158,12 @@ fn ws_url(base: &str, session: &str, role: &str) -> String {
 }
 
 /// Envoie un bloc de sortie chiffré aux invités ; `false` si le relais a coupé.
-async fn send_data<S>(tx: &mut S, key: &LessSafeKey, bytes: &[u8]) -> bool
+async fn send_data<S>(tx: &mut S, key: &LessSafeKey, sealer: &mut Sealer, bytes: &[u8]) -> bool
 where
     S: SinkExt<Ws> + Unpin,
 {
     let msg = json!({ "t": "data", "d": B64.encode(bytes) }).to_string();
-    match seal(key, msg.as_bytes()) {
+    match sealer.seal(key, msg.as_bytes()) {
         Ok(sealed) => tx.send(Ws::Text(sealed.into())).await.is_ok(),
         Err(_) => false,
     }
@@ -215,6 +268,7 @@ pub async fn term_share_start(
     let (ws, _) =
         tokio_tungstenite::connect_async(ws_url(&url, &session, "host")).await.map_err(|e| format!("relais injoignable : {e}"))?;
 
+    let (mut sealer, mut opener) = (Sealer::new(TO_GUESTS)?, Opener::new(TO_HOST));
     let task = tauri::async_runtime::spawn(async move {
         let (mut tx, mut rx) = ws.split();
         let reason = loop {
@@ -222,7 +276,7 @@ pub async fn term_share_start(
                 // Sortie du terminal : chiffrée puis diffusée.
                 bytes = mirror.recv() => match bytes {
                     Some(b) => {
-                        if !send_data(&mut tx, &key, &b).await {
+                        if !send_data(&mut tx, &key, &mut sealer, &b).await {
                             break "relais déconnecté".to_string();
                         }
                     }
@@ -231,7 +285,7 @@ pub async fn term_share_start(
                 // Messages de l'interface (écran initial pour un invité qui arrive).
                 extra = outbox_rx.recv() => match extra {
                     Some(b) => {
-                        if !send_data(&mut tx, &key, &b).await {
+                        if !send_data(&mut tx, &key, &mut sealer, &b).await {
                             break "relais déconnecté".to_string();
                         }
                     }
@@ -239,7 +293,7 @@ pub async fn term_share_start(
                 },
                 incoming = rx.next() => match incoming {
                     Some(Ok(Ws::Text(text))) => {
-                        let Ok(plain) = open(&key, &text) else { continue };
+                        let Ok(plain) = opener.open(&key, &text) else { continue };
                         let Ok(v) = serde_json::from_slice::<serde_json::Value>(&plain) else { continue };
                         match v["t"].as_str() {
                             Some("hello") => {
@@ -308,11 +362,12 @@ pub async fn term_join(shares: State<'_, Shares>, code: String, on_event: Channe
         .map_err(|e| format!("session introuvable ou terminée ({e})"))?;
     let (outbox, mut outbox_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let id = shares.next.fetch_add(1, Ordering::Relaxed) + 1;
+    let (mut sealer, mut opener) = (Sealer::new(TO_HOST)?, Opener::new(TO_GUESTS));
 
     let task = tauri::async_runtime::spawn(async move {
         let (mut tx, mut rx) = ws.split();
         // « hello » : l'hôte envoie alors l'écran courant.
-        if let Ok(sealed) = seal(&key, json!({ "t": "hello" }).to_string().as_bytes()) {
+        if let Ok(sealed) = sealer.seal(&key, json!({ "t": "hello" }).to_string().as_bytes()) {
             let _ = tx.send(Ws::Text(sealed.into())).await;
         }
         loop {
@@ -320,7 +375,7 @@ pub async fn term_join(shares: State<'_, Shares>, code: String, on_event: Channe
                 outgoing = outbox_rx.recv() => match outgoing {
                     Some(data) => {
                         let msg = json!({ "t": "input", "d": B64.encode(&data) }).to_string();
-                        let Ok(sealed) = seal(&key, msg.as_bytes()) else { break };
+                        let Ok(sealed) = sealer.seal(&key, msg.as_bytes()) else { break };
                         if tx.send(Ws::Text(sealed.into())).await.is_err() {
                             break;
                         }
@@ -329,7 +384,7 @@ pub async fn term_join(shares: State<'_, Shares>, code: String, on_event: Channe
                 },
                 incoming = rx.next() => match incoming {
                     Some(Ok(Ws::Text(text))) => {
-                        let Ok(plain) = open(&key, &text) else { continue };
+                        let Ok(plain) = opener.open(&key, &text) else { continue };
                         let Ok(v) = serde_json::from_slice::<serde_json::Value>(&plain) else { continue };
                         if v["t"] == "data" {
                             if let Some(d) = v["d"].as_str() {
@@ -392,13 +447,33 @@ mod tests {
     fn messages_are_encrypted() {
         let key_b64 = B64URL.encode([3u8; 32]);
         let key = key_from(&key_b64).unwrap();
-        let sealed = seal(&key, b"ls -la").unwrap();
+        let mut guest = Sealer::new(TO_HOST).unwrap();
+        let mut host = Opener::new(TO_HOST);
+        let sealed = guest.seal(&key, b"ls -la").unwrap();
         assert!(!sealed.contains("ls -la"));
-        assert_eq!(open(&key, &sealed).unwrap(), b"ls -la");
+        assert_eq!(host.open(&key, &sealed).unwrap(), b"ls -la");
         // Deux chiffrements du même texte diffèrent (nonce à chaque message).
-        assert_ne!(sealed, seal(&key, b"ls -la").unwrap());
+        assert_ne!(sealed, guest.seal(&key, b"ls -la").unwrap());
         let other = key_from(&B64URL.encode([4u8; 32])).unwrap();
-        assert!(open(&other, &sealed).is_err(), "clé différente : message refusé");
+        assert!(Opener::new(TO_HOST).open(&other, &sealed).is_err(), "clé différente : message refusé");
+    }
+
+    #[test]
+    fn relay_cannot_replay_or_reflect() {
+        let key = key_from(&B64URL.encode([5u8; 32])).unwrap();
+        let (mut guest, mut host_in) = (Sealer::new(TO_HOST).unwrap(), Opener::new(TO_HOST));
+        let first = guest.seal(&key, b"rm build.log\r").unwrap();
+        let second = guest.seal(&key, b"ls\r").unwrap();
+        assert!(host_in.open(&key, &first).is_ok());
+        assert!(host_in.open(&key, &first).is_err(), "frappe rejouée par le relais : refusée");
+        assert!(host_in.open(&key, &second).is_ok());
+        assert!(host_in.open(&key, &first).is_err(), "ancienne frappe réinjectée plus tard : refusée");
+
+        // La sortie de l'hôte, renvoyée à l'hôte comme si elle venait d'un invité, est refusée.
+        let mut host_out = Sealer::new(TO_GUESTS).unwrap();
+        let screen = host_out.seal(&key, br#"{"t":"input","d":"cm0gLXJmIC8K"}"#).unwrap();
+        assert!(Opener::new(TO_HOST).open(&key, &screen).is_err());
+        assert!(Opener::new(TO_GUESTS).open(&key, &screen).is_ok());
     }
 
     #[test]

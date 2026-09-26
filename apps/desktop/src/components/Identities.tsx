@@ -4,7 +4,7 @@ import { IdCard, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
 import { create } from "zustand";
 import { api, errorMessage, type AuthKind, type Identity, type IdentityView } from "../lib/api";
 import { useApp } from "../lib/store";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, IconButton, Input, Modal, Segmented } from "./ui";
 
 /** Banque d'identifiants, partagée par la liste et les formulaires de serveurs. */
 export const useIdentities = create<{ list: IdentityView[]; reload: () => Promise<void> }>((set) => ({
@@ -29,11 +29,17 @@ function IdentityLine({ i }: { i: IdentityView }) {
   );
 }
 
+/** Identifiants dont le nom ou l'utilisateur contient le texte tapé. */
+export function filterIdentities(list: IdentityView[], filter: string): IdentityView[] {
+  const f = filter.trim().toLowerCase();
+  return list.filter((i) => !f || i.name.toLowerCase().includes(f) || i.username.toLowerCase().includes(f));
+}
+
 /**
  * Menu déroulant des identifiants sous le champ « Utilisateur » d'un serveur : un clic lie le
  * serveur à l'identifiant (utilisateur et secrets pris dans la banque).
  */
-export function IdentitySuggestions({ filter, onPick, onClose }: { filter: string; onPick: (i: IdentityView) => void; onClose: () => void }) {
+export function IdentitySuggestions({ filter, onPick, onClose, index = -1 }: { filter: string; onPick: (i: IdentityView) => void; onClose: () => void; index?: number }) {
   const list = useIdentities((s) => s.list);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -43,16 +49,18 @@ export function IdentitySuggestions({ filter, onPick, onClose }: { filter: strin
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [onClose]);
-  const f = filter.trim().toLowerCase();
-  const shown = list.filter((i) => !f || i.name.toLowerCase().includes(f) || i.username.toLowerCase().includes(f));
+  const shown = filterIdentities(list, filter);
   if (!shown.length) return null;
   return (
-    <div ref={ref} className="absolute top-full right-0 left-0 z-50 mt-1 max-h-64 overflow-auto rounded-lg border border-border-strong bg-panel py-1 shadow-2xl">
-      {shown.map((i) => (
+    <div ref={ref} role="listbox" aria-label="Identifiants enregistrés" className="animate-pop-in absolute top-full right-0 left-0 z-50 mt-1 max-h-64 overflow-auto rounded-xl border border-border-strong bg-raised p-1 shadow-2xl">
+      <div className="px-2.5 pt-1.5 pb-1 text-[10.5px] font-semibold tracking-[0.08em] text-faint uppercase">Identifiants enregistrés</div>
+      {shown.map((i, n) => (
         <button
           type="button"
+          role="option"
+          aria-selected={n === index}
           key={i.id}
-          className="flex w-full items-center px-3 py-1.5 text-left hover:bg-hover-strong"
+          className={`flex w-full items-center rounded-lg px-2.5 py-1.5 text-left hover:bg-hover-strong ${n === index ? "bg-hover-strong" : ""}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onPick(i)}
         >
@@ -64,10 +72,11 @@ export function IdentitySuggestions({ filter, onPick, onClose }: { filter: strin
 }
 
 /** Onglet « Identifiants » de la page Serveurs. */
-export function IdentitiesPanel() {
+export function IdentitiesPanel({ creating, onCreatingChange }: { creating: boolean; onCreatingChange: (v: boolean) => void }) {
   const { list, reload } = useIdentities();
   const { notify, ask } = useApp.getState();
-  const [editing, setEditing] = useState<IdentityView | "new" | null>(null);
+  const [edited, setEditing] = useState<IdentityView | null>(null);
+  const editing: IdentityView | "new" | null = creating ? "new" : edited;
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -85,22 +94,22 @@ export function IdentitiesPanel() {
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between">
-        <p className="max-w-2xl text-sm text-muted">
-          Enregistre une fois un utilisateur et son mot de passe (ou sa clé), puis choisis-le dans le profil de chaque serveur qui l'utilise. Le changer ici le change partout. Les secrets restent dans le coffre-fort du système.
-        </p>
-        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
-          Nouvel identifiant
-        </Button>
-      </div>
       {list.length === 0 ? (
-        <EmptyState icon={<IdCard size={40} />} title="Aucun identifiant">
-          Par exemple « root du VPS », « admin Unraid »… Ils apparaîtront sous le champ Utilisateur des serveurs.
+        <EmptyState
+          icon={<IdCard />}
+          title="Aucun identifiant"
+          action={
+            <Button variant="primary" icon={<Plus size={14} />} onClick={() => onCreatingChange(true)}>
+              Nouvel identifiant
+            </Button>
+          }
+        >
+          Enregistre une fois un utilisateur et son secret (« root du VPS », « admin Unraid »…), puis choisis-le dans chaque serveur qui l'utilise. Le changer ici le change partout.
         </EmptyState>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
           {list.map((i) => (
-            <div key={i.id} className="group flex items-center gap-3 rounded-lg border border-border bg-panel p-3">
+            <Card key={i.id} className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
                 <IdentityLine i={i} />
                 <div className="mt-2 flex flex-wrap gap-1">
@@ -108,7 +117,7 @@ export function IdentitiesPanel() {
                   {i.usedBy.length > 0 ? <Badge tone="accent">{i.usedBy.length} serveur(s)</Badge> : <Badge>inutilisé</Badge>}
                 </div>
               </div>
-              <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="flex">
                 <IconButton title="Modifier" onClick={() => setEditing(i)}>
                   <Pencil size={14} />
                 </IconButton>
@@ -116,16 +125,20 @@ export function IdentitiesPanel() {
                   <Trash2 size={14} />
                 </IconButton>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}
       {editing && (
         <IdentityForm
           identity={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            onCreatingChange(false);
+          }}
           onSaved={() => {
             setEditing(null);
+            onCreatingChange(false);
             void reload();
             void useApp.getState().refreshServers();
           }}
@@ -135,7 +148,7 @@ export function IdentitiesPanel() {
   );
 }
 
-export function IdentityForm({ identity, onClose, onSaved }: { identity: IdentityView | null; onClose: () => void; onSaved: (id: string) => void }) {
+function IdentityForm({ identity, onClose, onSaved }: { identity: IdentityView | null; onClose: () => void; onSaved: (id: string) => void }) {
   const notify = useApp((s) => s.notify);
   const [p, setP] = useState<Identity>(identity ? { id: identity.id, name: identity.name, username: identity.username, authKind: identity.authKind, keyPath: identity.keyPath } : { id: "", name: "", username: "root", authKind: "password", keyPath: null });
   const [password, setPassword] = useState("");
@@ -186,18 +199,19 @@ export function IdentityForm({ identity, onClose, onSaved }: { identity: Identit
             <Input value={p.username} onChange={(e) => set("username", e.target.value)} />
           </Field>
         </div>
-        <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
-          {(Object.keys(AUTH_LABELS) as AuthKind[]).map((k) => (
-            <button
-              type="button"
-              key={k}
-              onClick={() => set("authKind", k)}
-              className={`flex-1 rounded px-2 py-1 text-xs capitalize transition-colors ${p.authKind === k ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
-            >
-              {AUTH_LABELS[k]}
-            </button>
-          ))}
-        </div>
+        <Field label="Authentification">
+          <Segmented
+            label="Authentification"
+            value={p.authKind}
+            onChange={(k) => set("authKind", k)}
+            className="self-start"
+            options={[
+              { value: "password", label: "Mot de passe" },
+              { value: "key", label: "Clé privée" },
+              { value: "agent", label: "Agent SSH / Pageant" },
+            ]}
+          />
+        </Field>
         {p.authKind === "password" && (
           <Field label="Mot de passe" hint={kept(identity?.hasPassword) ?? "Laisse vide pour qu'il soit demandé à la première connexion."}>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />

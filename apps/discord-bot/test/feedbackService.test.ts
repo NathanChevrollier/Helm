@@ -24,3 +24,11 @@ describe("feedbackService", () => {
     );
   });
 });
+
+describe("neutralize", () => {
+  it("désamorce les mentions et références GitHub", async () => {
+    const { neutralize } = await import("../src/services/feedbackService.js");
+    expect(neutralize("merci @octocat et @org/team, voir #12")).toBe("merci @\u200boctocat et @\u200borg/team, voir #\u200b12");
+    expect(neutralize("mail a@b.fr, couleur #fff, C#")).toBe("mail a@\u200bb.fr, couleur #fff, C#");
+  });
+});

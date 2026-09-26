@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
 import { api, ENGINE_LABELS, errorMessage, type AppSpec, type NewSitePlan, type WebEngine } from "../lib/api";
 import { useApp } from "../lib/store";
-import { Button, Field, Input, Modal } from "./ui";
+import { Button, Checkbox, Field, Input, Modal, Segmented, Textarea } from "./ui";
 
 type StepState = "pending" | "running" | "done" | "error" | "skipped" | "warn";
 interface Step {
@@ -149,7 +149,7 @@ export default function NewSiteWizard({
       } catch (e) {
         update(2, {
           state: "warn",
-          detail: `Le site fonctionne en HTTP, mais le certificat n'a pas pu être obtenu. Vérifie que le DNS de ${domain} pointe vers ce serveur, puis relance certbot depuis la carte du site.\n${errorMessage(e)}`,
+          detail: `Le site fonctionne en HTTP, mais le certificat n'a pas pu être obtenu. Vérifie que le DNS de ${domain} pointe vers ce serveur, puis utilise « Activer HTTPS » sur la carte du site (page Sites).\n${errorMessage(e)}`,
         });
       }
     }
@@ -223,24 +223,16 @@ export default function NewSiteWizard({
 
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-muted">Application</span>
-              <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
-                {(
-                  [
-                    ["docker", "Nouveau conteneur Docker"],
-                    ["port", "Déjà lancée sur un port"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    disabled={id === "docker" && !plan?.docker}
-                    onClick={() => setSource(id)}
-                    className={`flex-1 rounded px-2 py-1 text-xs disabled:opacity-40 ${source === id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                label="Application"
+                value={source}
+                onChange={setSource}
+                className="self-start"
+                options={[
+                  { value: "docker", label: "Nouveau conteneur Docker", disabled: !plan?.docker, title: plan?.docker ? undefined : "Docker n'est pas disponible sur ce serveur" },
+                  { value: "port", label: "Déjà lancée sur un port" },
+                ]}
+              />
             </div>
 
             {source === "docker" && (
@@ -257,8 +249,8 @@ export default function NewSiteWizard({
                   </Field>
                 </div>
                 <Field label="Variables d'environnement (une par ligne, CLE=valeur)">
-                  <textarea
-                    className="h-20 w-full rounded-md border border-border bg-bg p-2 font-mono text-xs outline-none focus:border-accent"
+                  <Textarea
+                    className="h-20 font-mono text-xs"
                     value={env}
                     onChange={(e) => setEnv(e.target.value)}
                     placeholder={"NODE_ENV=production"}
@@ -272,15 +264,13 @@ export default function NewSiteWizard({
               </Field>
             )}
 
-            <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" className="mt-1" checked={https} disabled={!plan?.certbot} onChange={(e) => setHttps(e.target.checked)} />
-              <span>
-                Activer HTTPS avec Let's Encrypt
-                <span className="block text-xs text-muted">
-                  {plan?.certbot ? "Certificat gratuit, redirection automatique de HTTP vers HTTPS, renouvelé tout seul." : `certbot n'est pas installé sur ce serveur (apt install certbot python3-certbot-${engine}).`}
-                </span>
-              </span>
-            </label>
+            <Checkbox
+              checked={https}
+              disabled={!plan?.certbot}
+              onChange={setHttps}
+              label="Activer HTTPS avec Let's Encrypt"
+              hint={plan?.certbot ? "Certificat gratuit, redirection automatique de HTTP vers HTTPS, renouvelé tout seul." : `certbot n'est pas installé sur ce serveur (apt install certbot python3-certbot-${engine}).`}
+            />
             {https && (
               <Field label="E-mail pour Let's Encrypt" hint="Utilisé uniquement pour les avertissements d'expiration.">
                 <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="toi@exemple.fr" />

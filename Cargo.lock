@@ -2233,7 +2233,6 @@ dependencies = [
 name = "helm-core"
 version = "1.0.1"
 dependencies = [
- "async-trait",
  "base64 0.23.1",
  "futures",
  "helm-protocol",
@@ -2244,7 +2243,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
- "tracing",
  "ureq",
 ]
 

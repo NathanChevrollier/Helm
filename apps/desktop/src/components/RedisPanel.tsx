@@ -5,8 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Clock, Database, KeyRound, RefreshCw, Search, Send, Trash2 } from "lucide-react";
 import { api, errorMessage, formatBytes, type RedisKeyInfo, type RedisKeyValue, type RedisOverview, type RedisServer } from "../lib/api";
 import { ensureConnected, useAppPick } from "../lib/store";
-import { Badge, Button, EmptyState, IconButton, Input, Modal } from "./ui";
-import PageLayout from "./PageLayout";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Input, Modal, Select, Textarea, ToolbarSep } from "./ui";
 
 /** Durée de vie affichée en clair. */
 function ttlLabel(ttl: number | null): string {
@@ -26,7 +25,7 @@ const TONS: Record<string, "accent" | "ok" | "warn" | "muted"> = {
   stream: "muted",
 };
 
-export default function RedisPanel({ serverId, onBackToSql }: { serverId: string; onBackToSql: () => void }) {
+export default function RedisPanel({ serverId }: { serverId: string }) {
   const { notify, ask } = useAppPick("notify", "ask");
   const [servers, setServers] = useState<RedisServer[] | null>(null);
   const [serverKey, setServerKey] = useState<string | null>(null);
@@ -71,6 +70,8 @@ export default function RedisPanel({ serverId, onBackToSql }: { serverId: string
     };
   }, [serverId]);
 
+  /** Incrémenté par « Actualiser » : relit aussi le résumé du serveur, pas seulement les clés. */
+  const [overviewTick, setOverviewTick] = useState(0);
   // Résumé du serveur choisi (version, mémoire, clés par base).
   useEffect(() => {
     setOverview(null);
@@ -83,7 +84,7 @@ export default function RedisPanel({ serverId, onBackToSql }: { serverId: string
     return () => {
       cancelled = true;
     };
-  }, [serverId, serverKey]);
+  }, [serverId, serverKey, overviewTick]);
 
   /** Première page de clés (curseur remis à zéro). */
   const search = useCallback(
@@ -208,62 +209,54 @@ export default function RedisPanel({ serverId, onBackToSql }: { serverId: string
 
   if (servers && servers.length === 0) {
     return (
-      <EmptyState icon={<Database size={40} />} title="Aucun serveur Redis trouvé">
+      <EmptyState icon={<Database />} title="Aucun serveur Redis trouvé">
         Helm cherche les conteneurs Redis, Valkey et KeyDB en cours, ainsi que le service installé sur la machine.
-        <div className="mt-3 flex justify-center gap-2">
-          <Button size="sm" onClick={onBackToSql}>
-            Revenir au SQL
-          </Button>
-        </div>
       </EmptyState>
     );
   }
 
   return (
-    <PageLayout
-      title="Redis / Valkey"
-      guide="databases"
-      scroll={false}
-      subtitle="Les clés sont parcourues par pages avec SCAN : l'explorateur reste utilisable sur une base de plusieurs millions de clés."
-      actions={
-        <>
-          <select className="h-9 max-w-72 rounded-md border border-border bg-bg px-2 text-sm" aria-label="Serveur Redis" value={serverKey ?? ""} onChange={(e) => setServerKey(e.target.value)}>
-            {(servers ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <select className="h-9 rounded-md border border-border bg-bg px-2 text-sm" aria-label="Base" value={database} onChange={(e) => setDatabase(Number(e.target.value))}>
-            {Array.from({ length: 16 }, (_, i) => {
-              const count = overview?.databases.find(([n]) => n === i)?.[1];
-              return (
-                <option key={i} value={i}>
-                  base {i}
-                  {count ? ` (${count.toLocaleString("fr-FR")} clés)` : ""}
-                </option>
-              );
-            })}
-          </select>
-          <Button size="sm" onClick={() => setConsoleOpen((o) => !o)}>
-            Console
-          </Button>
-          <Button size="sm" onClick={onBackToSql}>
-            SQL
-          </Button>
-          <IconButton title="Actualiser" onClick={() => void search()}>
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </IconButton>
-        </>
-      }
-    >
-      {overview && (
-        <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-1.5 text-xs text-muted">
-          <span>Version {overview.version || "?"}</span>
-          <span>Mémoire {formatBytes(overview.memory)}</span>
-          <span>{overview.uptimeDays} jour(s) d'activité</span>
-        </div>
-      )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2.5">
+        <Select
+          className="w-64"
+          aria-label="Serveur Redis"
+          value={serverKey ?? ""}
+          onChange={(v) => setServerKey(v)}
+          options={(servers ?? []).map((s) => ({ value: s.id, label: s.label }))}
+        />
+        <Select
+          className="w-48"
+          aria-label="Base"
+          value={database}
+          onChange={setDatabase}
+          options={Array.from({ length: 16 }, (_, i) => {
+            const count = overview?.databases.find(([n]) => n === i)?.[1];
+            return { value: i, label: `base ${i}${count ? ` · ${count.toLocaleString("fr-FR")} clés` : ""}` };
+          })}
+        />
+        {overview && (
+          <span className="flex items-center gap-3 text-xs text-muted">
+            <ToolbarSep />
+            <span>Redis {overview.version || "?"}</span>
+            <span>{formatBytes(overview.memory)} utilisés</span>
+            <span>{overview.uptimeDays} j d'activité</span>
+          </span>
+        )}
+        <span className="flex-1" />
+        <Button size="sm" variant={consoleOpen ? "subtle" : "outline"} aria-pressed={consoleOpen} onClick={() => setConsoleOpen((o) => !o)}>
+          Console
+        </Button>
+        <IconButton
+          title="Actualiser"
+          onClick={() => {
+            setOverviewTick((t) => t + 1);
+            void search();
+          }}
+        >
+          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+        </IconButton>
+      </div>
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-96 shrink-0 flex-col border-r border-border">
           <form
@@ -273,13 +266,13 @@ export default function RedisPanel({ serverId, onBackToSql }: { serverId: string
               void search();
             }}
           >
-            <Input className="h-7 font-mono text-xs" placeholder="Motif : user:* " value={pattern} onChange={(e) => setPattern(e.target.value)} />
+            <Input className="font-mono text-xs" placeholder="Motif : user:*" value={pattern} onChange={(e) => setPattern(e.target.value)} />
             <IconButton title="Chercher">
               <Search size={14} />
             </IconButton>
           </form>
           <div className="min-h-0 flex-1 overflow-auto">
-            {error && <p className="m-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger select-text">{error}</p>}
+            {error && <div className="m-2"><ErrorState message={error} /></div>}
             {keys.length === 0 && !loading && !error && <p className="p-3 text-xs text-muted">Aucune clé pour ce motif.</p>}
             {keys.map((k) => (
               <button
@@ -406,13 +399,13 @@ export default function RedisPanel({ serverId, onBackToSql }: { serverId: string
           }
         >
           <p className="mb-2 text-xs text-muted">La durée de vie de la clé est conservée.</p>
-          <textarea
-            className="h-64 w-full resize-none rounded-md border border-border bg-bg p-2 font-mono text-xs outline-none focus:border-accent"
+          <Textarea
+            className="h-64 resize-none font-mono text-xs"
             value={editing.value}
             onChange={(e) => setEditing({ ...editing, value: e.target.value })}
           />
         </Modal>
       )}
-    </PageLayout>
+    </div>
   );
 }

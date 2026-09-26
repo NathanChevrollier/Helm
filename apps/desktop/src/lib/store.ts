@@ -23,6 +23,15 @@ export interface Toast {
   message: string;
 }
 
+export interface NotificationEntry extends Toast {
+  /** Horodatage (ms). */
+  at: number;
+  /** Serveur actif au moment de la notification, pour le contexte. */
+  serverId: string | null;
+}
+
+const MAX_NOTIFICATIONS = 60;
+
 export interface TermTab {
   /** Identifiant stable (survit au redémarrage de l'app). */
   key: string;
@@ -110,7 +119,8 @@ const NO_FOLDERS: Folders = { servers: [], containers: {}, containerFolders: {},
 
 interface State {
   hydrated: boolean;
-  hydrate: () => Promise<void>;
+  /** `saved` : lecture de l'état déjà lancée (en parallèle de la liste des serveurs, au démarrage). */
+  hydrate: (saved?: Promise<unknown>) => Promise<void>;
 
   section: SectionId;
   setSection: (s: SectionId) => void;
@@ -134,6 +144,12 @@ interface State {
 
   toasts: Toast[];
   notify: (message: string, kind?: Toast["kind"]) => void;
+  dismissToast: (id: number) => void;
+  /** Historique des notifications de la session (centre de notifications), les plus récentes d'abord. */
+  notifications: NotificationEntry[];
+  unreadNotifications: number;
+  markNotificationsRead: () => void;
+  clearNotifications: () => void;
 
   settings: Settings;
   setSettings: (patch: Partial<Settings>) => void;
@@ -170,7 +186,7 @@ interface State {
 const ACTIVE_SERVER_KEY = "helm.activeServer";
 let toastSeq = 0;
 
-export function newId(): string {
+function newId(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
@@ -188,9 +204,9 @@ function readActiveServer(): string | null {
 
 export const useApp = create<State>((set, get) => ({
   hydrated: false,
-  hydrate: async () => {
+  hydrate: async (saved) => {
     try {
-      const raw = (await api.uiStateGet()) as Partial<Persisted> | null;
+      const raw = (await (saved ?? api.uiStateGet())) as Partial<Persisted> | null;
       if (raw && raw.v === 1) {
         set({
           section: raw.section ?? "servers",
@@ -256,9 +272,19 @@ export const useApp = create<State>((set, get) => ({
   },
 
   toasts: [],
+  notifications: [],
+  unreadNotifications: 0,
+  markNotificationsRead: () => set({ unreadNotifications: 0 }),
+  clearNotifications: () => set({ notifications: [], unreadNotifications: 0 }),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   notify: (message, kind = "info") => {
     const id = ++toastSeq;
-    set((s) => ({ toasts: [...s.toasts, { id, kind, message }] }));
+    set((s) => ({
+      // Au plus 4 notifications à l'écran : une rafale d'erreurs ne doit pas couvrir la fenêtre.
+      toasts: [...s.toasts, { id, kind, message }].slice(-4),
+      notifications: [{ id, kind, message, at: Date.now(), serverId: s.activeServerId }, ...s.notifications].slice(0, MAX_NOTIFICATIONS),
+      unreadNotifications: s.unreadNotifications + 1,
+    }));
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
@@ -327,8 +353,14 @@ export const useApp = create<State>((set, get) => ({
 // Sauvegarde de l'espace de travail, regroupée pour ne pas écrire à chaque frappe.
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let lastSaved = "";
+let lastRefs: unknown[] = [];
 useApp.subscribe((s) => {
   if (!s.hydrated) return;
+  // Le store change sans cesse (notifications, état des serveurs, transferts…) : on ne sérialise
+  // que si l'une des parties sauvegardées a changé de référence.
+  const refs = [s.section, s.tabs, s.activeTab, s.filesPaths, s.settings, s.recent, s.bookmarks, s.folders];
+  if (refs.length === lastRefs.length && refs.every((r, i) => r === lastRefs[i])) return;
+  lastRefs = refs;
   const snapshot: Persisted = {
     v: 1,
     section: s.section,

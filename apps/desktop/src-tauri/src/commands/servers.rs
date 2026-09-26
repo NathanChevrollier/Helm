@@ -37,9 +37,9 @@ pub async fn servers_list(store: State<'_, Store>, sessions: State<'_, Sessions>
     for profile in servers {
         let id = profile.id.clone();
         out.push(ServerView {
-            has_password: secrets::get(&id, "password").is_some(),
-            has_passphrase: secrets::get(&id, "passphrase").is_some(),
-            has_sudo_password: secrets::get(&id, "sudo").is_some(),
+            has_password: secrets::has(&id, "password"),
+            has_passphrase: secrets::has(&id, "passphrase"),
+            has_sudo_password: secrets::has(&id, "sudo"),
             connected: sessions.is_connected(&id).await,
             profile,
         });

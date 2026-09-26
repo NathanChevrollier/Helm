@@ -108,7 +108,7 @@ export const GUIDES: Guide[] = [
     ],
     troubleshooting: [
       { symptom: "« Permission denied » alors que le mot de passe est bon", answer: "sshd refuse peut-être l'authentification par mot de passe, ou le compte est limité. Vérifier :", command: "grep -E 'PasswordAuthentication|PermitRootLogin|AllowUsers' /etc/ssh/sshd_config", sudo: true },
-      { symptom: "Connexion qui échoue depuis peu, sans rien avoir changé", answer: "Ton IP est peut-être bannie par fail2ban. Le diagnostic de connexion de Helm (palette Ctrl+K → « Diagnostiquer ») le détecte ; côté serveur :", command: "fail2ban-client status sshd", sudo: true },
+      { symptom: "Connexion qui échoue depuis peu, sans rien avoir changé", answer: "Ton IP est peut-être bannie par fail2ban. Le diagnostic de connexion de Helm (fiche du serveur → Diagnostiquer, ou palette Ctrl+K) le détecte ; côté serveur :", command: "fail2ban-client status sshd", sudo: true },
       { symptom: "« L'empreinte de l'hôte a changé »", answer: "Le serveur a été réinstallé, ou quelqu'un s'interpose. Ne valider qu'après avoir comparé l'empreinte affichée avec celle lue sur la console du serveur." },
     ],
   },
@@ -147,10 +147,10 @@ export const GUIDES: Guide[] = [
     topic: "prise-en-main",
     section: "terminal",
     summary: "Un terminal qui survit à une coupure réseau, à la veille du PC et à la fermeture de Helm : le programme continue de tourner sur le serveur et l'onglet se rebranche dessus.",
-    automatic: "Helm installe tmux lui-même : Terminal → Sessions → Installer tmux. Les commandes ci-dessous ne servent que si l'installation automatique échoue.",
+    automatic: "Helm installe tmux lui-même : Terminal → bouton « Sessions tmux » de la barre d'outils → Installer tmux. Les commandes ci-dessous ne servent que si l'installation automatique échoue.",
     how: [
       "Chaque onglet persistant correspond à une session tmux nommée « helm-… » sur le serveur.",
-      "Terminal → Sessions liste les sessions existantes : les reprendre dans un onglet, ou les fermer.",
+      "Terminal → « Sessions tmux » liste les sessions existantes : les reprendre dans un onglet, ou les fermer.",
       "Les onglets et la division de l'écran sont restaurés au démarrage de Helm.",
     ],
     requirements: ["tmux sur le serveur", "un compte capable d'installer des paquets, seulement pour l'installation"],
@@ -162,7 +162,7 @@ export const GUIDES: Guide[] = [
     ],
     troubleshooting: [
       { symptom: "Le bouton d'installation dit qu'aucun gestionnaire de paquets n'est reconnu", answer: "Installer tmux à la main avec l'outil de ta distribution. Sans tmux, les terminaux fonctionnent : ils ne survivent simplement pas aux coupures." },
-      { symptom: "Une session laissée ouverte consomme des ressources", answer: "Un programme lancé dans une session continue de tourner. La reprendre puis l'arrêter, ou la fermer depuis Terminal → Sessions." },
+      { symptom: "Une session laissée ouverte consomme des ressources", answer: "Un programme lancé dans une session continue de tourner. La reprendre puis l'arrêter, ou la fermer depuis Terminal → « Sessions tmux »." },
     ],
   },
   {
@@ -246,7 +246,7 @@ export const GUIDES: Guide[] = [
       "« Shell » ouvre un onglet de terminal dans le conteneur (bash s'il existe, sinon sh).",
       "« Logs » ouvre un onglet qui suit la sortie en direct.",
       "« Restreindre les ports » réécrit les ports publiés en 127.0.0.1 : le service n'est plus joignable depuis Internet, on y accède ensuite par un tunnel.",
-      "L'onglet « Images, volumes & nettoyage » mesure la taille réelle de chaque volume et signale ceux qu'aucun conteneur, même arrêté, n'utilise : le gain en octets est annoncé avant toute suppression.",
+      "L'onglet « Images, volumes et nettoyage » mesure la taille réelle de chaque volume et signale ceux qu'aucun conteneur, même arrêté, n'utilise : le gain en octets est annoncé avant toute suppression.",
       "L'onglet « Registres » range les identifiants de Docker Hub, GitHub Packages, GitLab, AWS ECR ou d'un registre privé dans le coffre du système, et connecte un serveur en un clic : le jeton part sur l'entrée standard de docker login, jamais dans une ligne de commande.",
     ],
     requirements: ["Docker ou Podman installé", "l'utilisateur dans le groupe docker, ou un mot de passe sudo dans le profil"],
@@ -258,7 +258,7 @@ export const GUIDES: Guide[] = [
     ],
     troubleshooting: [
       { symptom: "« permission denied » sur /var/run/docker.sock", answer: "L'utilisateur n'est pas dans le groupe docker et aucun mot de passe sudo n'est enregistré. Ajouter l'un ou l'autre." },
-      { symptom: "Le disque se remplit sans raison apparente", answer: "Images, volumes et caches de construction s'accumulent. Docker → Stockage montre ce qui est récupérable ; en ligne de commande :", command: "docker system df" },
+      { symptom: "Le disque se remplit sans raison apparente", answer: "Images, volumes et caches de construction s'accumulent. Docker → Images, volumes et nettoyage montre ce qui est récupérable ; en ligne de commande :", command: "docker system df" },
     ],
     notes: [
       "Mettre un utilisateur dans le groupe docker revient à lui donner les droits root : à réserver à un compte d'administration.",
@@ -276,7 +276,7 @@ export const GUIDES: Guide[] = [
       "Un projet, c'est un dossier avec son compose.yml : Helm y lance « docker compose » à ta place.",
       "« Catalogue » propose des applications prêtes à déployer (Nextcloud, Vaultwarden, Uptime Kuma, Gitea, n8n…) : Helm remplit les mots de passe avec de l'aléa du système et n'ouvre les ports que sur 127.0.0.1.",
       "Le catalogue est intégré à Helm : aucun dépôt tiers n'est interrogé, et tu relis le docker-compose.yml et le .env avant qu'ils ne soient écrits sur le serveur.",
-      "Pour publier l'application sur un sous-domaine, enchaîne avec l'onglet Sites : il crée le vhost nginx et le certificat HTTPS vers le port local choisi.",
+      "Pour publier l'application sur un sous-domaine, enchaîne avec la page Sites : il crée le vhost nginx et le certificat HTTPS vers le port local choisi.",
       "Déployer enchaîne pull → up → vérification que les conteneurs tiennent ; si l'un d'eux retombe, l'état précédent est remis.",
       "Le déploiement GitHub génère une clé de déploiement restreinte à un dépôt : rien d'autre n'est accessible avec elle.",
     ],
@@ -371,7 +371,7 @@ export const GUIDES: Guide[] = [
     topic: "exploitation",
     section: "monitoring",
     summary: "Sans agent, Helm montre l'état en direct quand il est ouvert. Avec l'agent, le serveur garde 30 jours d'historique et envoie les alertes même PC éteint.",
-    automatic: "Installation en un clic : Supervision → Agent & alertes → Installer. Helm envoie le binaire par SSH et crée le service.",
+    automatic: "Installation en un clic : Supervision → Alertes et agent → Installer. Helm envoie le binaire par SSH et crée le service.",
     how: [
       "L'agent n'ouvre aucun port : il écoute sur un socket unix et Helm l'interroge à travers SSH.",
       "Il tourne sous un utilisateur dédié, avec un service systemd durci et 64 Mo de mémoire au maximum.",
@@ -387,7 +387,7 @@ export const GUIDES: Guide[] = [
     ],
     troubleshooting: [
       { symptom: "Le service ne démarre pas", answer: "Regarder la raison exacte dans le journal :", command: "journalctl -u helmd -n 30 --no-pager", sudo: true },
-      { symptom: "Aucune alerte ne part", answer: "Vérifier la destination (webhook, ntfy, Discord) depuis Supervision → Agent & alertes : un bouton envoie un message de test." },
+      { symptom: "Aucune alerte ne part", answer: "Vérifier la destination (webhook, ntfy, Discord) depuis Supervision → Alertes et agent : un bouton envoie un message de test." },
     ],
   },
   {
@@ -411,7 +411,7 @@ export const GUIDES: Guide[] = [
       { text: "Vérifier la planification", command: "systemctl list-timers 'helm-backup*' --no-pager" },
     ],
     troubleshooting: [
-      { symptom: "La sauvegarde échoue depuis un changement de mot de passe de base", answer: "Le script utilise les identifiants enregistrés à la configuration : refaire Sauvegardes → Modifier la configuration." },
+      { symptom: "La sauvegarde échoue depuis un changement de mot de passe de base", answer: "Le script utilise les identifiants enregistrés à la configuration : refaire Sauvegardes → ⋯ → Modifier la configuration." },
     ],
     notes: [
       "La phrase de passe du dépôt est indispensable pour restaurer : Helm la garde dans le coffre-fort, garde-la aussi ailleurs.",
@@ -550,7 +550,7 @@ export const GUIDES: Guide[] = [
       { text: "Sur le VPS : lancer le relais depuis le dossier sync-server du dépôt", command: "docker compose up -d" },
       { text: "Le publier derrière nginx avec HTTPS (le dépôt fournit nginx.conf.example, qui gère la montée en WebSocket)" },
       { text: "Dans Helm : Réglages → Synchronisation, renseigner l'adresse et la phrase de passe" },
-      { text: "Terminal → Partager : transmettre l'invitation « helm-term:… ». Le destinataire la colle dans Terminal → Rejoindre." },
+      { text: "Terminal → Partage → Partager ce terminal : transmettre l'invitation « helm-term:… ». Le destinataire la colle dans Terminal → Partage → Rejoindre un terminal partagé." },
     ],
   },
   {
@@ -606,5 +606,3 @@ export const GUIDES: Guide[] = [
 
 export const guideOf = (id: GuideId): Guide | undefined => GUIDES.find((g) => g.id === id);
 
-/** Fiche correspondant à une section, pour le « ? » du bandeau de page. */
-export const guideForSection = (section: SectionId): Guide | undefined => GUIDES.find((g) => g.section === section);

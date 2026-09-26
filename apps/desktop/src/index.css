@@ -20,6 +20,11 @@
   --color-hover-soft: rgb(255 255 255 / 0.03);
   --color-scrollbar: #2e323a;
   --color-term: #0b0c0e;
+  /* Refonte 2026-09 : surfaces intermédiaires et texte tertiaire, dérivés de la même palette. */
+  --color-subtle: #121417;
+  --color-raised: #1c1f24;
+  --color-faint: #6b717c;
+  --color-line: #1c1f24;
   --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
 }
@@ -43,6 +48,10 @@
   --color-hover-soft: rgb(0 0 0 / 0.03);
   --color-scrollbar: #c3c9d1;
   --color-term: #ffffff;
+  --color-subtle: #f1f3f6;
+  --color-raised: #e9ecf1;
+  --color-faint: #7a808a;
+  --color-line: #e6e9ee;
   color-scheme: light;
 }
 
@@ -83,6 +92,37 @@ body {
   padding: 6px 0 0 8px;
   height: 100%;
   background: var(--color-term);
+}
+
+/* Barre de défilement plus discrète dans les panneaux latéraux. */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+@keyframes helm-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+@keyframes helm-pop-in {
+  from {
+    transform: translateY(-4px) scale(0.98);
+    opacity: 0;
+  }
+}
+.animate-drawer-in {
+  animation: helm-drawer-in 160ms ease-out;
+}
+.animate-pop-in {
+  animation: helm-pop-in 120ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-drawer-in,
+  .animate-pop-in {
+    animation: none;
+  }
 }
 
 /* Cible d'un glisser-déposer interne (lib/drag.ts). */

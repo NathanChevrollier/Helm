@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { BellRing, CheckCircle2, Download, OctagonAlert, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { api, errorMessage, type AgentConfig, type AgentInfo, type AlertMetric } from "../../lib/api";
 import { useAppPick } from "../../lib/store";
-import { Badge, Button, Field, IconButton, Input } from "../../components/ui";
+import { Badge, Button, Card, Checkbox, ErrorState, Field, IconButton, Input, Loading, Select } from "../../components/ui";
 
 const METRICS: { id: AlertMetric; label: string; unit: string }[] = [
   { id: "cpu", label: "CPU", unit: "%" },
@@ -49,11 +49,11 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
     if (ok) await run("uninstall", () => api.agentUninstall(serverId), "Agent désinstallé");
   };
 
-  if (!agent) return <p className="text-sm text-muted">Vérification de l'agent…</p>;
+  if (!agent) return <Loading label="Vérification de l'agent…" />;
 
   if (!agent.installed || !agent.running) {
     return (
-      <div className="mx-auto flex max-w-2xl flex-col gap-4 rounded-lg border border-border bg-panel p-6">
+      <Card className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
         <div className="flex items-center gap-3">
           <ShieldCheck size={28} className="text-accent" />
           <div>
@@ -61,7 +61,7 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
             <p className="text-sm text-muted">Historique sur 30 jours et alertes, même quand ton PC est éteint.</p>
           </div>
         </div>
-        {agent.error && <pre className="rounded-md bg-bg p-3 font-mono text-xs whitespace-pre-wrap text-warn">{agent.error}</pre>}
+        {agent.error && <pre className="rounded-lg border border-warn/35 bg-warn/8 p-3 font-mono text-xs whitespace-pre-wrap text-warn">{agent.error}</pre>}
         <ul className="flex flex-col gap-1.5 text-sm text-muted">
           <li>• Binaire statique d'environ 2 Mo, installé dans /usr/local/bin/helmd.</li>
           <li>• Tourne sous un utilisateur système dédié, avec un service systemd durci et limité à 64 Mo de RAM.</li>
@@ -79,7 +79,7 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
           )}
         </div>
         <p className="text-xs text-muted">Nécessite les droits root : connexion en root ou mot de passe sudo renseigné dans le profil du serveur.</p>
-      </div>
+      </Card>
     );
   }
 
@@ -90,14 +90,14 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-panel px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-panel px-4 py-3 text-[13px]">
         <CheckCircle2 size={16} className="text-ok" />
         <span>
           helmd {st.version} actif sur <span className="font-mono">{st.hostname}</span>
         </span>
         <span className="text-muted">démarré le {new Date(st.startedAt).toLocaleString("fr-FR")}</span>
         <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="ghost" loading={busy === "install"} onClick={() => void install()}>
+          <Button size="sm" loading={busy === "install"} onClick={() => void install()}>
             Mettre à jour
           </Button>
           <Button size="sm" variant="ghost" loading={busy === "uninstall"} onClick={() => void uninstall()}>
@@ -105,26 +105,22 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
           </Button>
         </div>
       </div>
-      {st.configError && <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{st.configError}</div>}
+      {st.configError && <ErrorState message={st.configError} />}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <section className="rounded-lg border border-border bg-panel p-4">
-          <h3 className="mb-1 text-sm font-medium">Règles d'alerte</h3>
+        <section className="rounded-xl border border-border bg-panel p-4">
+          <h3 className="mb-1 text-[13px] font-semibold">Règles d'alerte</h3>
           <p className="mb-3 text-xs text-muted">Une alerte part quand le seuil est dépassé pendant toute la durée indiquée, puis un message « résolu » quand ça redescend.</p>
           <div className="flex flex-col gap-2">
             {cfg.rules.map((r, i) => {
               const upd = (patch: Partial<typeof r>) => set({ rules: cfg.rules.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
               const unit = METRICS.find((m) => m.id === r.metric)?.unit;
               return (
-                <div key={i} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" aria-label="Activer la règle" checked={r.enabled} onChange={(e) => upd({ enabled: e.target.checked })} />
-                  <select
-                    className="h-8 rounded-md border border-border bg-bg px-2 text-sm"
-                    value={r.metric}
-                    onChange={(e) => upd({ metric: e.target.value as AlertMetric })}
-                  >
-                    {METRICS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                  </select>
+                <div key={i} className={`flex flex-wrap items-center gap-2 text-[13px] ${r.enabled ? "" : "opacity-60"}`}>
+                  <span title="Activer la règle">
+                    <Checkbox checked={r.enabled} onChange={(v) => upd({ enabled: v })} />
+                  </span>
+                  <Select<AlertMetric> className="w-40" value={r.metric} onChange={(v) => upd({ metric: v })} options={METRICS.map((m) => ({ value: m.id, label: m.label }))} aria-label="Mesure" />
                   <span className="text-muted">&gt;</span>
                   <Input className="!w-20" type="number" value={r.threshold} onChange={(e) => upd({ threshold: Number(e.target.value) })} />
                   <span className="w-3 text-muted">{unit}</span>
@@ -143,8 +139,8 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
           </div>
         </section>
 
-        <section className="rounded-lg border border-border bg-panel p-4">
-          <h3 className="mb-1 text-sm font-medium">Sites surveillés</h3>
+        <section className="rounded-xl border border-border bg-panel p-4">
+          <h3 className="mb-1 text-[13px] font-semibold">Sites surveillés</h3>
           <p className="mb-3 text-xs text-muted">
             L'agent appelle chaque URL toutes les {cfg.httpCheckIntervalSecs} s et alerte après 2 échecs consécutifs (erreur réseau ou code HTTP ≥ 400).
           </p>
@@ -152,8 +148,10 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
             {cfg.httpChecks.map((c, i) => {
               const upd = (patch: Partial<typeof c>) => set({ httpChecks: cfg.httpChecks.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
               return (
-                <div key={i} className="flex items-center gap-2">
-                  <input type="checkbox" aria-label="Activer la vérification" checked={c.enabled} onChange={(e) => upd({ enabled: e.target.checked })} />
+                <div key={i} className={`flex items-center gap-2 ${c.enabled ? "" : "opacity-60"}`}>
+                  <span title="Activer la vérification">
+                    <Checkbox checked={c.enabled} onChange={(v) => upd({ enabled: v })} />
+                  </span>
                   <Input className="!w-36" placeholder="Nom" value={c.name} onChange={(e) => upd({ name: e.target.value })} />
                   <Input className="font-mono text-xs" placeholder="https://monsite.fr" value={c.url} onChange={(e) => upd({ url: e.target.value })} />
                   <IconButton title="Retirer" onClick={() => set({ httpChecks: cfg.httpChecks.filter((_, j) => j !== i) })}>
@@ -168,8 +166,8 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
           </div>
         </section>
 
-        <section className="rounded-lg border border-border bg-panel p-4">
-          <h3 className="mb-3 text-sm font-medium">Canaux de notification</h3>
+        <section className="rounded-xl border border-border bg-panel p-4">
+          <h3 className="mb-3 text-[13px] font-semibold">Canaux de notification</h3>
           <div className="flex flex-col gap-3">
             <Field label="Nom du serveur dans les messages" hint={`Par défaut : ${st.hostname}`}>
               <Input value={cfg.serverName ?? ""} onChange={(e) => set({ serverName: e.target.value || null })} />
@@ -197,8 +195,8 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
           </div>
         </section>
 
-        <section className="rounded-lg border border-border bg-panel p-4">
-          <h3 className="mb-3 text-sm font-medium">Journal des alertes</h3>
+        <section className="rounded-xl border border-border bg-panel p-4">
+          <h3 className="mb-3 text-[13px] font-semibold">Journal des alertes</h3>
           {st.recentEvents.length === 0 ? (
             <p className="text-sm text-muted">Aucune alerte pour l'instant.</p>
           ) : (
@@ -221,7 +219,7 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
       </div>
 
       {dirty && (
-        <div className="sticky bottom-0 flex items-center justify-end gap-2 rounded-lg border border-accent/40 bg-panel px-4 py-3 shadow-xl">
+        <div className="animate-pop-in sticky bottom-3 flex items-center justify-end gap-2 rounded-xl border border-accent/40 bg-raised px-4 py-3 shadow-2xl">
           <span className="mr-auto text-sm text-muted">Modifications non enregistrées. L'agent les appliquera dans les secondes qui suivent.</span>
           <Button variant="ghost" onClick={() => setCfg(structuredClone(st.config))}>
             Annuler

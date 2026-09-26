@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Database, Download, FileSearch, Play, Plus, RefreshCw, Rows3, Table2, TriangleAlert } from "lucide-react";
+import { ChevronDown, Database, Download, FileSearch, History, Play, Plus, RefreshCw, Rows3, Search, Table2, TriangleAlert, X } from "lucide-react";
 import {
   api,
   errorMessage,
@@ -12,12 +12,15 @@ import {
   type DbNamed,
   type DbQueryResult,
 } from "../lib/api";
-import { ensureConnected, useApp, useAppPick } from "../lib/store";
+import { useApp, useAppPick } from "../lib/store";
+import { useTabIntent } from "../lib/shell";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
+import { Badge, Button, Drawer, EmptyState, ErrorState, Eyebrow, Field, FOCUS_RING, IconButton, Input, Loading, MenuButton, Modal, Select, ToolbarSep } from "../components/ui";
+import { isReadOnly } from "../lib/sql";
 import PageLayout from "../components/PageLayout";
+import ServerGate, { ServerContext } from "../components/ServerGate";
 import DataGrid, { type Sort } from "../components/DataGrid";
 
 // Monaco reste hors du morceau de code de cet onglet : il ne retarde plus son ouverture.
@@ -28,9 +31,58 @@ const RedisPanel = lazy(() => import("../components/RedisPanel"));
 const LIMITS = [100, 500, 1000, 5000];
 
 export default function DatabasesView() {
-  const serverId = useApp((s) => s.activeServerId);
-  if (!serverId) return <EmptyState icon={<Database size={40} />} title="Aucun serveur sélectionné" />;
-  return <Databases key={serverId} serverId={serverId} />;
+  return <ServerGate title="Bases de données" guide="databases">{(serverId) => <Databases key={serverId} serverId={serverId} />}</ServerGate>;
+}
+
+/** Dernières requêtes exécutées, par serveur (conservées sur ce PC). */
+function readHistory(serverId: string): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(`helm.sqlHistory.${serverId}`) ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function pushHistory(serverId: string, q: string): string[] {
+  const list = [q.trim(), ...readHistory(serverId).filter((x) => x !== q.trim())].slice(0, 25);
+  try {
+    localStorage.setItem(`helm.sqlHistory.${serverId}`, JSON.stringify(list));
+  } catch {
+    /* historique non retenu */
+  }
+  return list;
+}
+
+/** Hauteur de l'éditeur SQL, réglable à la souris et retenue. */
+function useEditorHeight(): [number, (e: React.PointerEvent<HTMLDivElement>) => void] {
+  const [h, setH] = useState(() => {
+    const v = Number(localStorage.getItem("helm.sqlEditorHeight"));
+    return v >= 90 && v <= 700 ? v : 190;
+  });
+  const start = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const y0 = e.clientY;
+    const h0 = h;
+    let last = h0;
+    const move = (ev: PointerEvent) => {
+      last = Math.max(90, Math.min(700, h0 + ev.clientY - y0));
+      setH(last);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+      try {
+        localStorage.setItem("helm.sqlEditorHeight", String(last));
+      } catch {
+        /* non retenu */
+      }
+    };
+    document.body.style.cursor = "row-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return [h, start];
 }
 
 /** Valeur d'une cellule pour un fichier CSV (RFC 4180). */
@@ -49,8 +101,11 @@ interface TableView {
 
 function Databases({ serverId }: { serverId: string }) {
   const { notify, ask } = useAppPick("notify", "ask");
+  const server = useApp((s) => s.servers.find((x) => x.id === serverId));
+  const [tab, setTab] = useTabIntent<"sql" | "redis">("databases", "sql");
+  const [history, setHistory] = useState(() => readHistory(serverId));
+  const [editorHeight, startEditorResize] = useEditorHeight();
   const monacoTheme = useMonacoTheme();
-  const [mode, setMode] = useCachedState<"sql" | "redis">(`dbMode:${serverId}`, "sql");
   const [instances, setInstances] = useCachedState<DbInstance[] | null>(`db:${serverId}`, null);
   const [instanceId, setInstanceId] = useCachedState<string | null>(`dbInstance:${serverId}`, null);
   const [databases, setDatabases] = useState<DbNamed[] | null>(null);
@@ -58,7 +113,18 @@ function Databases({ serverId }: { serverId: string }) {
   const [tables, setTables] = useState<DbNamed[] | null>(null);
   const [filter, setFilter] = useState("");
   const [sql, setSql] = useCachedState(`dbSql:${serverId}`, "SELECT 1;");
-  const [limit, setLimit] = useState(500);
+  const [limit, setLimitState] = useState(() => {
+    const v = Number(localStorage.getItem("helm.sqlLimit"));
+    return LIMITS.includes(v) ? v : 500;
+  });
+  const setLimit = (v: number) => {
+    setLimitState(v);
+    try {
+      localStorage.setItem("helm.sqlLimit", String(v));
+    } catch {
+      /* non retenu */
+    }
+  };
   const [result, setResult] = useState<DbQueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -98,7 +164,6 @@ function Databases({ serverId }: { serverId: string }) {
     async (auto = false) => {
       setLoading(true);
       try {
-        if (!auto && !(await ensureConnected(serverId))) return;
         const list = await api.dbInstances(serverId);
         // Les fichiers SQLite déjà ouverts sont conservés : la découverte ne les renvoie pas.
         setInstances((old) => [...list, ...(old ?? []).filter((i) => i.engine === "sqlite")]);
@@ -115,7 +180,7 @@ function Databases({ serverId }: { serverId: string }) {
   useEffect(() => {
     void loadInstances();
   }, [loadInstances]);
-  useAutoRefresh((auto) => loadInstances(auto), { serverId, enabled: mode === "sql" });
+  useAutoRefresh((auto) => loadInstances(auto), { serverId, enabled: tab === "sql" });
 
   // Bases de l'instance choisie. Les effets suivants dépendent de l'IDENTIFIANT de l'instance, pas
   // de l'objet : l'actualisation automatique recrée la liste, et dépendre de l'objet relançait tout
@@ -217,6 +282,7 @@ function Databases({ serverId }: { serverId: string }) {
     }
     setRunning(true);
     setError(null);
+    if (!fromTable) setHistory(pushHistory(serverId, text));
     try {
       setResult(await api.dbQuery(serverId, instance, database, text, limit));
     } catch (e) {
@@ -336,115 +402,216 @@ function Databases({ serverId }: { serverId: string }) {
 
   const shownTables = useMemo(() => (tables ?? []).filter((t) => !filter || t.name.toLowerCase().includes(filter.toLowerCase())), [tables, filter]);
 
-  if (mode === "redis") {
-    return (
-      <Suspense fallback={<div className="p-4 text-sm text-muted">Chargement…</div>}>
-        <RedisPanel serverId={serverId} onBackToSql={() => setMode("sql")} />
-      </Suspense>
+  const layout = (children: React.ReactNode) => (
+    <PageLayout
+      title="Bases de données"
+      context={server && <ServerContext server={server} />}
+      subtitle="Requêtes via le client du serveur (mysql, psql, sqlite3, redis-cli) : aucun port de base à ouvrir"
+      guide="databases"
+      scroll={false}
+      tabs={[
+        { id: "sql", label: "SQL", count: instances?.filter((i) => i.engine !== "sqlite").length || undefined },
+        { id: "redis", label: "Redis / Valkey" },
+      ]}
+      activeTab={tab}
+      onTab={setTab}
+      actions={
+        tab === "sql" ? (
+          <MenuButton
+            label="Historique"
+            icon={<History size={14} />}
+            title="Dernières requêtes exécutées sur ce serveur"
+            disabled={history.length === 0}
+            items={() => [
+              { heading: "Dernières requêtes" },
+              ...history.slice(0, 15).map((q) => ({ label: q.replace(/\s+/g, " ").slice(0, 70) + (q.length > 70 ? "…" : ""), onClick: () => setSql(q) })),
+              "separator" as const,
+              {
+                label: "Effacer l'historique",
+                icon: <X size={14} />,
+                onClick: () => {
+                  try {
+                    localStorage.removeItem(`helm.sqlHistory.${serverId}`);
+                  } catch {
+                    /* rien */
+                  }
+                  setHistory([]);
+                },
+              },
+            ]}
+          />
+        ) : undefined
+      }
+    >
+      {children}
+    </PageLayout>
+  );
+
+  if (tab === "redis") {
+    return layout(
+      <Suspense fallback={<Loading />}>
+        <RedisPanel serverId={serverId} />
+      </Suspense>,
     );
   }
 
   if (instances && instances.length === 0) {
-    return (
-      <EmptyState icon={<Database size={40} />} title="Aucune base de données trouvée">
+    return layout(
+      <EmptyState
+        icon={<Database />}
+        title="Aucune base de données trouvée"
+        action={
+          <>
+            <Button icon={<RefreshCw size={13} />} onClick={() => void loadInstances()}>
+              Rechercher à nouveau
+            </Button>
+            <Button icon={<FileSearch size={13} />} loading={searchingSqlite} onClick={() => void findSqlite()}>
+              Chercher des fichiers SQLite
+            </Button>
+            <Button variant="ghost" onClick={() => setTab("redis")}>
+              Explorer Redis
+            </Button>
+          </>
+        }
+      >
         Helm cherche les conteneurs MySQL, MariaDB et PostgreSQL en cours, ainsi que les services installés sur le serveur.
-        <div className="mt-3 flex justify-center gap-2">
-          <Button size="sm" icon={<RefreshCw size={13} />} onClick={() => void loadInstances()}>
-            Rechercher à nouveau
-          </Button>
-          <Button size="sm" icon={<FileSearch size={13} />} loading={searchingSqlite} onClick={() => void findSqlite()}>
-            Chercher des fichiers SQLite
-          </Button>
-          <Button size="sm" onClick={() => setMode("redis")}>
-            Explorer Redis
-          </Button>
-        </div>
-      </EmptyState>
+      </EmptyState>,
     );
   }
 
-  return (
-    <PageLayout
-      title="Bases de données"
-      guide="databases"
-      scroll={false}
-      subtitle="Les requêtes passent par le client du serveur (mysql, psql, sqlite3) via SSH : aucun port de base n'a besoin d'être ouvert."
-      actions={
-        <>
-          <select
-            className="h-9 max-w-72 rounded-md border border-border bg-bg px-2 text-sm"
-            aria-label="Instance"
-            value={instanceId ?? ""}
-            onChange={(e) => setInstanceId(e.target.value)}
-          >
+  const engineColor = (e: string) => (e === "postgres" ? "text-accent" : e === "sqlite" ? "text-muted" : "text-warn");
+
+  return layout(
+    <>
+      <div className="flex min-h-0 flex-1">
+        <aside className="flex w-[270px] shrink-0 flex-col border-r border-border bg-subtle" aria-label="Explorateur">
+          <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
+            <Eyebrow>Instances</Eyebrow>
+            <IconButton size="sm" title="Rechercher à nouveau" onClick={() => void loadInstances()}>
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            </IconButton>
+          </div>
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {instances === null && <Loading rows={3} />}
             {(instances ?? []).map((i) => {
+              const current = i.id === instanceId;
               const v = versions[i.id] || i.version;
               return (
-                <option key={i.id} value={i.id}>
-                  {i.label}
-                  {v && ` — ${v}`}
-                </option>
+                <div key={i.id} className="mb-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setInstanceId(i.id)}
+                    aria-expanded={current}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left ${FOCUS_RING} ${current ? "bg-raised" : "hover:bg-hover"}`}
+                  >
+                    <ChevronDown size={13} className={`shrink-0 text-faint transition-transform ${current ? "" : "-rotate-90"}`} />
+                    <Database size={14} className={`shrink-0 ${engineColor(i.engine)}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium">{i.label}</span>
+                      {v && <span className="block truncate text-[10.5px] text-faint">{v}</span>}
+                    </span>
+                  </button>
+                  {current && (
+                    <div className="mt-0.5 ml-4 border-l border-border pl-1.5">
+                      {databases === null && <p className="px-2 py-1 text-xs text-faint">Lecture des bases…</p>}
+                      {(databases ?? []).map((d) => {
+                        const on = d.name === database;
+                        return (
+                          <div key={d.name}>
+                            <button
+                              type="button"
+                              onClick={() => setDatabase(d.name)}
+                              className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px] ${FOCUS_RING} ${on ? "font-medium text-fg" : "text-muted hover:bg-hover hover:text-fg"} ${SYSTEM_DBS.includes(d.name) ? "opacity-70" : ""}`}
+                            >
+                              <ChevronDown size={12} className={`shrink-0 text-faint transition-transform ${on ? "" : "-rotate-90"}`} />
+                              <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                              {d.size ? <span className="text-[10.5px] text-faint">{formatBytes(d.size)}</span> : null}
+                            </button>
+                            {on && (
+                              <div className="mb-1 ml-3.5">
+                                <label className="relative my-1 block">
+                                  <Search size={12} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
+                                  <Input size_="sm" className="pl-6" placeholder="Filtrer les tables" value={filter} onChange={(e) => setFilter(e.target.value)} />
+                                </label>
+                                {tables === null ? (
+                                  <p className="px-2 py-1 text-xs text-faint">Lecture des tables…</p>
+                                ) : shownTables.length === 0 ? (
+                                  <p className="px-2 py-1 text-xs text-faint">Aucune table.</p>
+                                ) : (
+                                  shownTables.map((t) => (
+                                    <button
+                                      key={t.name}
+                                      type="button"
+                                      className={`flex w-full items-center gap-2 rounded-md px-2 py-[3px] text-left text-[12.5px] ${FOCUS_RING} ${
+                                        view?.table === t.name ? "bg-accent/12 text-fg" : "text-fg/85 hover:bg-hover"
+                                      }`}
+                                      title={`${t.count.toLocaleString("fr-FR")} lignes (estimation) · ${formatBytes(t.size)}`}
+                                      onClick={() => void openTable(t.name)}
+                                    >
+                                      <Table2 size={12} className="shrink-0 text-faint" />
+                                      <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                                      <span className="text-[10.5px] text-faint tabular-nums">{t.count > 0 ? t.count.toLocaleString("fr-FR") : ""}</span>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
-          </select>
-          <select
-            className="h-9 max-w-56 rounded-md border border-border bg-bg px-2 text-sm"
-            aria-label="Base de données"
-            value={database ?? ""}
-            onChange={(e) => setDatabase(e.target.value)}
-          >
-            {databases === null && <option value="">Chargement…</option>}
-            {(databases ?? []).map((d) => (
-              <option key={d.name} value={d.name}>
-                {d.name} {d.size ? `(${formatBytes(d.size)})` : ""}
-              </option>
-            ))}
-          </select>
-          <Button size="sm" icon={<Plus size={13} />} disabled={!instance || instance.engine === "sqlite"} onClick={() => void createDatabase()}>
-            Nouvelle base
-          </Button>
-          <Button size="sm" icon={<FileSearch size={13} />} loading={searchingSqlite} onClick={() => void findSqlite()} title="Chercher les fichiers .db / .sqlite du serveur">
-            SQLite
-          </Button>
-          <Button size="sm" onClick={() => setMode("redis")} title="Explorer les clés Redis / Valkey">
-            Redis
-          </Button>
-          <IconButton title="Actualiser" onClick={() => void loadInstances()}>
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </IconButton>
-        </>
-      }
-    >
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-border">
-          <div className="border-b border-border p-2">
-            <Input className="h-7 text-xs" placeholder="Filtrer les tables…" value={filter} onChange={(e) => setFilter(e.target.value)} />
           </div>
-          <div className="min-h-0 flex-1 overflow-auto py-1">
-            {tables === null ? (
-              <p className="p-3 text-xs text-muted">Chargement…</p>
-            ) : shownTables.length === 0 ? (
-              <p className="p-3 text-xs text-muted">Aucune table.</p>
-            ) : (
-              shownTables.map((t) => (
-                <button
-                  key={t.name}
-                  className={`flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] hover:bg-hover ${view?.table === t.name ? "bg-hover-soft font-medium" : ""}`}
-                  title={`${t.count.toLocaleString("fr-FR")} lignes (estimation) · ${formatBytes(t.size)}`}
-                  onClick={() => void openTable(t.name)}
-                >
-                  <Table2 size={13} className="shrink-0 text-muted" />
-                  <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                  <span className="text-[11px] text-muted tabular-nums">{t.count > 0 ? t.count.toLocaleString("fr-FR") : ""}</span>
-                </button>
-              ))
-            )}
+          <div className="flex gap-1.5 border-t border-border p-2">
+            <Button size="sm" className="flex-1" icon={<Plus size={13} />} disabled={!instance || instance.engine === "sqlite"} onClick={() => void createDatabase()}>
+              Nouvelle base
+            </Button>
+            <Button size="sm" icon={<FileSearch size={13} />} loading={searchingSqlite} onClick={() => void findSqlite()} title="Chercher les fichiers .db / .sqlite du serveur">
+              SQLite
+            </Button>
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="h-52 border-b border-border">
-            <Suspense fallback={<div className="p-3 text-xs text-muted">Chargement de l'éditeur…</div>}>
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+            <Button size="sm" variant="primary" loading={running} icon={<Play size={13} />} disabled={!instance} onClick={() => void run()}>
+              Exécuter
+            </Button>
+            <span className="font-mono text-[11px] text-faint">Ctrl+Entrée</span>
+            <ToolbarSep />
+            <Select size="sm" className="w-36" value={limit} onChange={setLimit} aria-label="Nombre de lignes" options={LIMITS.map((n) => ({ value: n, label: `${n} lignes max` }))} />
+            {sql.trim().length > 0 && !isReadOnly(sql) && (
+              <Badge tone="warn">
+                <TriangleAlert size={11} /> requête qui modifie
+              </Badge>
+            )}
+            {view && (
+              <Badge tone={primary ? "accent" : "muted"}>
+                {view.table}
+                {primary ? " · éditable" : " · lecture seule (pas de clé primaire)"}
+              </Badge>
+            )}
+            {view && view.filters.length > 0 && (
+              <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => void runTable({ ...view, filters: [] })}>
+                Retirer les filtres ({view.filters.length})
+              </Button>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {view && primary && (
+                <Button size="sm" icon={<Rows3 size={13} />} onClick={() => setInserting(Object.fromEntries(view.columns.map((c) => [c.name, ""])))}>
+                  Ajouter une ligne
+                </Button>
+              )}
+              <Button size="sm" icon={<Download size={13} />} disabled={!result || result.rows.length === 0} onClick={() => void exportCsv()}>
+                Exporter CSV
+              </Button>
+            </div>
+          </div>
+          <div className="shrink-0 bg-term" style={{ height: editorHeight }}>
+            <Suspense fallback={<Loading label="Chargement de l'éditeur…" />}>
               <SqlEditor
                 value={sql}
                 onChange={setSql}
@@ -458,59 +625,27 @@ function Databases({ serverId }: { serverId: string }) {
               />
             </Suspense>
           </div>
-          <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-            <Button size="sm" variant="primary" loading={running} icon={<Play size={13} />} onClick={() => void run()}>
-              Exécuter (Ctrl+Entrée)
-            </Button>
-            <select className="h-7 rounded-md border border-border bg-bg px-2 text-xs" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
-              {LIMITS.map((n) => (
-                <option key={n} value={n}>
-                  {n} lignes max
-                </option>
-              ))}
-            </select>
-            {sql.trim().length > 0 && !isReadOnly(sql) && (
-              <Badge tone="warn">
-                <TriangleAlert size={11} className="mr-1" /> requête qui modifie
-              </Badge>
-            )}
-            {view && (
-              <Badge tone={primary ? "accent" : "muted"}>
-                {view.table}
-                {primary ? " · éditable" : " · lecture seule (pas de clé primaire)"}
-              </Badge>
-            )}
-            {view && view.filters.length > 0 && (
-              <Button size="sm" onClick={() => void runTable({ ...view, filters: [] })}>
-                Retirer les filtres ({view.filters.length})
-              </Button>
-            )}
-            {result && (
-              <span className="text-xs text-muted">
-                {result.rows.length} ligne(s) · {result.durationMs} ms{result.truncated && " · tronqué"}
-              </span>
-            )}
-            <div className="ml-auto flex items-center gap-2">
-              {view && primary && (
-                <Button
-                  size="sm"
-                  icon={<Rows3 size={13} />}
-                  onClick={() => setInserting(Object.fromEntries(view.columns.map((c) => [c.name, ""])))}
-                >
-                  Ajouter une ligne
-                </Button>
-              )}
-              {result && result.rows.length > 0 && (
-                <Button size="sm" icon={<Download size={13} />} onClick={() => void exportCsv()}>
-                  Exporter en CSV
-                </Button>
-              )}
-            </div>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            title="Glisser pour agrandir l'éditeur ou les résultats"
+            onPointerDown={startEditorResize}
+            className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-border bg-subtle hover:bg-accent/20"
+          >
+            <span className="h-0.5 w-9 rounded bg-border-strong group-hover:bg-accent" />
           </div>
-          {/* Le tableau garde ses colonnes à leur largeur naturelle et défile horizontalement ;
-              un clic ouvre la ligne entière, seule façon de lire une valeur longue. */}
+          {/* Le tableau garde ses colonnes à leur largeur naturelle et défile horizontalement. */}
           <div className="min-h-0 flex-1 overflow-auto">
-            {error && <pre className="m-3 rounded-md border border-danger/40 bg-danger/10 p-3 font-mono text-xs whitespace-pre-wrap text-danger select-text">{error}</pre>}
+            {error && (
+              <div className="m-4">
+                <ErrorState message={<pre className="font-mono text-xs whitespace-pre-wrap">{error}</pre>} />
+              </div>
+            )}
+            {!result && !error && !running && (
+              <EmptyState icon={<Table2 />} title="Choisis une table ou écris une requête">
+                Un clic sur une table l'ouvre ici : tri et filtres depuis l'en-tête des colonnes, double-clic pour modifier une cellule (si la table a une clé primaire). Chaque modification montre sa requête avant d'être appliquée.
+              </EmptyState>
+            )}
             {result && result.columns.length > 0 && (
               <DataGrid
                 result={result}
@@ -525,64 +660,67 @@ function Databases({ serverId }: { serverId: string }) {
                 onOpenRow={(values) => setRowDetail({ columns: result.columns, values })}
               />
             )}
-            {result && result.columns.length === 0 && !error && <p className="p-4 text-sm text-muted">Requête exécutée (aucun résultat à afficher).</p>}
+            {result && result.columns.length === 0 && !error && <p className="p-4 text-[13px] text-muted">Requête exécutée (aucun résultat à afficher).</p>}
           </div>
+          <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-rail px-4 text-[11.5px] text-muted">
+            {result ? (
+              <span>
+                {result.rows.length.toLocaleString("fr-FR")} ligne{result.rows.length > 1 ? "s" : ""} · {result.durationMs} ms{result.truncated && " · tronqué à la limite"}
+              </span>
+            ) : (
+              <span>{instance ? `${instance.label}${database ? ` · ${database}` : ""}` : "Aucune instance choisie"}</span>
+            )}
+            <span className="truncate text-faint">Clic sur ⤢ : fiche de la ligne · double-clic : modifier la cellule · menu de colonne : tri et filtres</span>
+          </footer>
         </div>
       </div>
 
       {rowDetail && (
-        <Modal title="Ligne complète" width="max-w-4xl" onClose={() => setRowDetail(null)}>
-          <dl className="flex flex-col divide-y divide-border">
+        <Drawer title="Fiche de la ligne" subtitle={view ? `Table ${view.table}` : "Résultat de requête"} width={560} modal={false} onClose={() => setRowDetail(null)}>
+          <dl className="flex flex-col divide-y divide-line rounded-xl border border-border">
             {rowDetail.columns.map((c, i) => (
-              <div key={i} className="grid grid-cols-[minmax(120px,200px)_minmax(0,1fr)] gap-4 py-2">
-                <dt className="font-mono text-xs text-muted">{c}</dt>
+              <div key={i} className="grid grid-cols-[minmax(110px,170px)_minmax(0,1fr)] gap-4 px-3 py-2">
+                <dt className="truncate font-mono text-xs text-muted" title={c}>
+                  {c}
+                </dt>
                 <dd className="font-mono text-xs break-all whitespace-pre-wrap select-text">
-                  {rowDetail.values[i] === null ? <span className="text-muted italic">NULL</span> : rowDetail.values[i]}
+                  {rowDetail.values[i] === null ? <span className="text-faint italic">NULL</span> : rowDetail.values[i]}
                 </dd>
               </div>
             ))}
           </dl>
-        </Modal>
+        </Drawer>
       )}
 
       {inserting && view && (
         <Modal
           title={`Ajouter une ligne dans ${view.table}`}
+          description="Les colonnes laissées vides prennent leur valeur par défaut (auto-incrément, date du jour…)."
           width="max-w-2xl"
           onClose={() => setInserting(null)}
           footer={
-            <Button variant="primary" onClick={() => void insertRow()}>
-              Voir la requête
-            </Button>
+            <>
+              <Button variant="ghost" onClick={() => setInserting(null)}>
+                Annuler
+              </Button>
+              <Button variant="primary" onClick={() => void insertRow()}>
+                Vérifier la requête
+              </Button>
+            </>
           }
         >
-          <p className="mb-3 text-xs text-muted">Les colonnes laissées vides prennent leur valeur par défaut (auto-incrément, date du jour…).</p>
-          <div className="flex flex-col gap-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             {view.columns.map((c) => (
-              <Field key={c.name} label={`${c.name} — ${c.dataType}${c.nullable ? "" : " (obligatoire)"}`}>
-                <Input
-                  className="h-8 font-mono text-xs"
-                  value={inserting[c.name] ?? ""}
-                  placeholder={c.primary ? "clé primaire" : ""}
-                  onChange={(e) => setInserting({ ...inserting, [c.name]: e.target.value })}
-                />
+              <Field key={c.name} label={`${c.name}${c.nullable ? "" : " *"}`} hint={`${c.dataType}${c.primary ? " · clé primaire" : ""}`}>
+                <Input className="font-mono text-xs" value={inserting[c.name] ?? ""} placeholder={c.primary ? "auto" : ""} onChange={(e) => setInserting({ ...inserting, [c.name]: e.target.value })} />
               </Field>
             ))}
           </div>
         </Modal>
       )}
-    </PageLayout>
+    </>,
   );
 }
 
 const SYSTEM_DBS = ["information_schema", "performance_schema", "mysql", "sys", "postgres", "template0", "template1"];
 
-/** Même règle que côté Rust : seules ces requêtes s'exécutent sans confirmation. */
-function isReadOnly(sql: string): boolean {
-  const text = sql
-    .replace(/--[^\n]*\n/g, " ")
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .trim();
-  const first = text.split(/[\s(;]+/).find(Boolean)?.toUpperCase() ?? "";
-  return ["SELECT", "SHOW", "EXPLAIN", "DESCRIBE", "DESC", "WITH", "TABLE", "VALUES", "ANALYZE"].includes(first);
-}

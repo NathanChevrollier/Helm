@@ -1,24 +1,30 @@
-import { useEffect, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { Download, FolderInput, FolderPlus, IdCard, KeyRound, Link2Off, Pencil, Plug, PlugZap, Plus, Server, Share2, SquareTerminal, Trash2, Unplug } from "lucide-react";
-import { api, errorMessage, type AuthKind, type ServerProfile, type ServerView } from "../lib/api";
+// Serveurs : liste rangée par dossiers à gauche, fiche du serveur choisi à droite. Choisir un
+// serveur dans la liste en fait le serveur actif (celui des sections du groupe « Serveur »).
+import { useEffect, useMemo, useState } from "react";
+import {
+  Activity, ChevronDown, Container, Database, Download, FolderInput, FolderPlus, FolderTree, Globe, Pencil, Plug, Plus, Search, Server, Share2, ShieldCheck,
+  SquareTerminal, Stethoscope, Trash2, Unplug,
+} from "lucide-react";
+import { api, errorMessage, formatDuration, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
-import PageLayout from "../components/PageLayout";
+import { navigate, useShell, useTabIntent } from "../lib/shell";
+import { fetchHealth, useHealth } from "../lib/health";
 import { forgetCached } from "../lib/cache";
-import { AUTH_LABELS, IdentitiesPanel, IdentitySuggestions, useIdentities } from "../components/Identities";
-import { DesktopsPanel } from "../components/RemoteDesktops";
-import { ReceiveShareDialog, ShareDialog } from "../components/ShareServers";
-import { askFolderName, FolderSection } from "../components/Folders";
-import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { startDrag } from "../lib/drag";
+import {
+  Avatar, Badge, Button, Card, EmptyState, Eyebrow, FOCUS_RING, IconButton, Input, KeyValue, LabeledMeter, MenuButton, StatusDot, useContextMenu, type MenuItem,
+} from "../components/ui";
+import PageLayout from "../components/PageLayout";
+import { AUTH_LABELS, IdentitiesPanel, useIdentities } from "../components/Identities";
+import { DesktopsPanel, useDesktops } from "../components/RemoteDesktops";
+import { ReceiveShareDialog, ShareDialog } from "../components/ShareServers";
+import { askFolderName, toggleCollapsed } from "../components/Folders";
+import { useDoctor } from "../components/ConnectionDoctor";
+import ServerForm from "./servers/ServerForm";
+import ImportServers from "./servers/ImportServers";
+import type { SectionId } from "../sections";
 
-const SOURCES = [
-  ["putty", "PuTTY"],
-  ["openssh", "OpenSSH (~/.ssh/config)"],
-] as const;
-
-const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6"];
+type Tab = "servers" | "desktops" | "identities";
 
 /** Range des serveurs dans un dossier puis relit la liste. */
 async function moveServers(ids: string[], folder: string | null) {
@@ -35,151 +41,171 @@ async function moveServers(ids: string[], folder: string | null) {
 function useServerFolders(): string[] {
   const servers = useApp((s) => s.servers);
   const created = useApp((s) => s.folders.servers);
-  return [...new Set([...created, ...servers.map((s) => s.group ?? "").filter(Boolean)])].sort((a, b) => a.localeCompare(b, "fr"));
-}
-
-/** Grille des serveurs, rangés par dossier (glisser une carte sur un dossier pour l'y déplacer). */
-function ServerFolders({ onEdit }: { onEdit: (s: ServerView) => void }) {
-  const servers = useApp((s) => s.servers);
-  const setFolders = useApp((s) => s.setFolders);
-  const folders = useServerFolders();
-  const inFolder = (name: string) => servers.filter((s) => (s.group ?? "") === name);
-
-  const rename = async (name: string) => {
-    const next = await askFolderName(`Renommer « ${name} »`, name);
-    if (!next || next === name) return;
-    setFolders((f) => ({ ...f, servers: [...f.servers.filter((x) => x !== name && x !== next), next], collapsed: f.collapsed.map((k) => (k === `servers:${name}` ? `servers:${next}` : k)) }));
-    await moveServers(inFolder(name).map((s) => s.id), next);
-  };
-  const remove = async (name: string) => {
-    setFolders((f) => ({ ...f, servers: f.servers.filter((x) => x !== name) }));
-    const ids = inFolder(name).map((s) => s.id);
-    if (ids.length) await moveServers(ids, null);
-  };
-
-  return (
-    <div className="flex flex-col gap-5">
-      {[...folders, ""].map((name) => {
-        const list = inFolder(name);
-        if (!name && !list.length && folders.length) return null;
-        return (
-          <FolderSection key={name || "-"} collapseKey={`servers:${name}`} name={name} count={list.length} onRename={() => void rename(name)} onDelete={() => void remove(name)}>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
-              {list.map((s) => (
-                <ServerCard key={s.id} server={s} folders={folders} onEdit={() => onEdit(s)} />
-              ))}
-            </div>
-          </FolderSection>
-        );
-      })}
-    </div>
-  );
+  return useMemo(() => [...new Set([...created, ...servers.map((s) => s.group ?? "").filter(Boolean)])].sort((a, b) => a.localeCompare(b, "fr")), [servers, created]);
 }
 
 export default function ServersView() {
   const servers = useApp((s) => s.servers);
+  const activeServerId = useApp((s) => s.activeServerId);
   const refresh = useApp((s) => s.refreshServers);
+  const folders = useServerFolders();
+  const [tab, setTab] = useTabIntent<Tab>("servers", "servers");
   const [editing, setEditing] = useState<ServerView | "new" | null>(null);
   const [importing, setImporting] = useState(false);
   const [sharing, setSharing] = useState<"send" | "receive" | null>(null);
-  const [shareMenu, setShareMenu] = useState<{ x: number; y: number } | null>(null);
-  const [tab, setTab] = useState<"servers" | "identities" | "desktops">("servers");
+  const [newDesktop, setNewDesktop] = useState(false);
+  const [newIdentity, setNewIdentity] = useState(false);
+  const identitiesCount = useIdentities((s) => s.list.length);
+  const desktopsCount = useDesktops((s) => s.list.length);
   const reloadIdentities = useIdentities((s) => s.reload);
+  const reloadDesktops = useDesktops((s) => s.reload);
   useEffect(() => {
     void reloadIdentities();
-  }, [reloadIdentities]);
+    void reloadDesktops();
+  }, [reloadIdentities, reloadDesktops]);
+
+  // « Ajouter un serveur » demandé depuis l'accueil ou le sélecteur de serveur.
+  const newRequested = useShell((s) => s.newServerRequested);
+  useEffect(() => {
+    if (!newRequested) return;
+    setTab("servers");
+    setEditing("new");
+    useShell.getState().requestNewServer(false);
+  }, [newRequested, setTab]);
+
+  const newFolder = async () => {
+    const name = await askFolderName("Nouveau dossier de serveurs");
+    if (name) useApp.getState().setFolders((f) => ({ ...f, servers: [...new Set([...f.servers, name])] }));
+  };
+
+  const actions =
+    tab === "servers" ? (
+      <>
+        <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
+          Importer
+        </Button>
+        <MenuButton
+          label="Partage"
+          icon={<Share2 size={14} />}
+          items={[
+            { label: "Partager des serveurs…", icon: <Share2 size={14} />, disabled: servers.length === 0, onClick: () => setSharing("send") },
+            { label: "Recevoir un partage…", icon: <Download size={14} />, onClick: () => setSharing("receive") },
+            "separator",
+            { label: "Nouveau dossier…", icon: <FolderPlus size={14} />, onClick: () => void newFolder() },
+          ]}
+        />
+        <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing("new")}>
+          Ajouter un serveur
+        </Button>
+      </>
+    ) : tab === "desktops" ? (
+      <Button variant="primary" icon={<Plus size={15} />} onClick={() => setNewDesktop(true)}>
+        Nouveau bureau
+      </Button>
+    ) : (
+      <Button variant="primary" icon={<Plus size={15} />} onClick={() => setNewIdentity(true)}>
+        Nouvel identifiant
+      </Button>
+    );
+
+  const subtitle =
+    tab === "servers"
+      ? "Profils de connexion · secrets dans le coffre-fort du système"
+      : tab === "desktops"
+        ? "RDP et VNC dans Helm, SPICE dans remote-viewer · tunnel SSH le temps de la session"
+        : "Un utilisateur et son secret, réutilisés par plusieurs serveurs";
 
   return (
-    <PageLayout
-      title="Serveurs"
-      subtitle="Profils de connexion SSH. Les secrets sont gardés dans le coffre-fort du système."
-      tabs={[
-        { id: "servers", label: "Serveurs" },
-        { id: "desktops", label: "Bureaux à distance" },
-        { id: "identities", label: "Identifiants" },
-      ]}
-      activeTab={tab}
-      onTab={setTab}
-      actions={
-        tab === "servers" ? (
-          <>
-            <Button
-              icon={<FolderPlus size={14} />}
-              onClick={async () => {
-                const name = await askFolderName("Nouveau dossier de serveurs");
-                if (name) useApp.getState().setFolders((f) => ({ ...f, servers: [...new Set([...f.servers, name])] }));
-              }}
-            >
-              Nouveau dossier
-            </Button>
-            <Button
-              icon={<Share2 size={14} />}
-              onClick={(e) => {
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setShareMenu({ x: r.left, y: r.bottom + 4 });
-              }}
-            >
-              Partage
-            </Button>
-            <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
-              Importer (PuTTY, OpenSSH)
-            </Button>
-            <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
-              Ajouter un serveur
-            </Button>
-          </>
-        ) : undefined
-      }
-    >
-      <div className="p-6">
+    <div className="relative h-full">
+      <PageLayout
+        title="Serveurs"
+        context="Poste"
+        subtitle={subtitle}
+        scroll={tab !== "servers"}
+        tabs={[
+          { id: "servers", label: "Serveurs", count: servers.length },
+          { id: "desktops", label: "Bureaux à distance", count: desktopsCount },
+          { id: "identities", label: "Identifiants", count: identitiesCount },
+        ]}
+        activeTab={tab}
+        onTab={setTab}
+        actions={actions}
+      >
         {tab === "identities" ? (
-          <IdentitiesPanel />
+          <div className="px-7 py-5">
+            <IdentitiesPanel creating={newIdentity} onCreatingChange={setNewIdentity} />
+          </div>
         ) : tab === "desktops" ? (
-          <DesktopsPanel />
+          <div className="px-7 py-5">
+            <DesktopsPanel creating={newDesktop} onCreatingChange={setNewDesktop} />
+          </div>
         ) : servers.length === 0 ? (
-          <EmptyState icon={<Server size={40} />} title="Aucun serveur">
-            Ajoute ton VPS, ou importe directement tes sessions PuTTY existantes.
+          <EmptyState
+            icon={<Server />}
+            title="Aucun serveur"
+            action={
+              <>
+                <Button variant="primary" icon={<Plus size={15} />} onClick={() => setEditing("new")}>
+                  Ajouter un serveur
+                </Button>
+                <Button icon={<Download size={14} />} onClick={() => setImporting(true)}>
+                  Importer PuTTY / OpenSSH
+                </Button>
+              </>
+            }
+          >
+            Ajoute ton VPS, ou importe directement tes sessions PuTTY et les hôtes de ton fichier <span className="font-mono">~/.ssh/config</span>.
           </EmptyState>
         ) : (
-          <ServerFolders onEdit={setEditing} />
+          <ServersMasterDetail folders={folders} activeId={activeServerId} onEdit={setEditing} onNewFolder={() => void newFolder()} />
         )}
-      </div>
+      </PageLayout>
 
       {editing && (
         <ServerForm
           server={editing === "new" ? null : editing}
+          folders={folders}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(id) => {
             setEditing(null);
-            void refresh();
+            void refresh().then(() => useApp.getState().setActiveServer(id));
           }}
         />
       )}
-      {importing && <Import onClose={() => setImporting(false)} onDone={() => void refresh()} />}
-      {shareMenu && (
-        <ContextMenu
-          x={shareMenu.x}
-          y={shareMenu.y}
-          onClose={() => setShareMenu(null)}
-          items={[
-            { label: "Partager des serveurs…", icon: <Share2 size={14} />, disabled: servers.length === 0, onClick: () => setSharing("send") },
-            { label: "Recevoir un partage…", icon: <Download size={14} />, onClick: () => setSharing("receive") },
-          ]}
-        />
-      )}
+      {importing && <ImportServers onClose={() => setImporting(false)} onDone={() => void refresh()} />}
       {sharing === "send" && <ShareDialog onClose={() => setSharing(null)} />}
       {sharing === "receive" && <ReceiveShareDialog onClose={() => setSharing(null)} onDone={() => void refresh()} />}
-    </PageLayout>
+    </div>
   );
 }
 
-function ServerCard({ server, folders, onEdit }: { server: ServerView; folders: string[]; onEdit: () => void }) {
-  const { openTab, setActiveServer, activeServerId, refreshServers, notify, ask } = useAppPick("openTab", "setActiveServer", "activeServerId", "refreshServers", "notify", "ask");
-  const [busy, setBusy] = useState(false);
-  const active = server.id === activeServerId;
-  const identity = useIdentities((s) => s.list.find((i) => i.id === server.identityId));
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const moveItems: MenuItem[] = [
+function ServersMasterDetail({ folders, activeId, onEdit, onNewFolder }: { folders: string[]; activeId: string | null; onEdit: (s: ServerView) => void; onNewFolder: () => void }) {
+  const servers = useApp((s) => s.servers);
+  const setActive = useApp((s) => s.setActiveServer);
+  const setFolders = useApp((s) => s.setFolders);
+  const collapsed = useApp((s) => s.folders.collapsed);
+  const [filter, setFilter] = useState("");
+  const menu = useContextMenu();
+  const selected = servers.find((s) => s.id === activeId) ?? servers[0];
+
+  const q = filter.trim().toLowerCase();
+  const matches = (s: ServerView) => !q || `${s.name} ${s.host} ${s.username} ${s.group ?? ""}`.toLowerCase().includes(q);
+  const inFolder = (name: string) => servers.filter((s) => (s.group ?? "") === name && matches(s));
+
+  const renameFolder = async (name: string) => {
+    const next = await askFolderName(`Renommer « ${name} »`, name);
+    if (!next || next === name) return;
+    setFolders((f) => ({ ...f, servers: [...f.servers.filter((x) => x !== name && x !== next), next], collapsed: f.collapsed.map((k) => (k === `servers:${name}` ? `servers:${next}` : k)) }));
+    await moveServers(servers.filter((s) => s.group === name).map((s) => s.id), next);
+  };
+  const removeFolder = async (name: string) => {
+    setFolders((f) => ({ ...f, servers: f.servers.filter((x) => x !== name) }));
+    const ids = servers.filter((s) => s.group === name).map((s) => s.id);
+    if (ids.length) await moveServers(ids, null);
+  };
+
+  const moveItems = (server: ServerView): MenuItem[] => [
+    { heading: "Déplacer vers" },
     ...folders.filter((f) => f !== (server.group ?? "")).map((f) => ({ label: f, icon: <FolderInput size={14} />, onClick: () => void moveServers([server.id], f) })),
     ...(server.group ? [{ label: "Sortir du dossier", onClick: () => void moveServers([server.id], null) }] : []),
     {
@@ -192,13 +218,125 @@ function ServerCard({ server, folders, onEdit }: { server: ServerView; folders: 
     },
   ];
 
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="flex min-h-0 flex-col gap-2 border-r border-border bg-subtle px-3 py-3.5">
+        <label className="relative">
+          <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
+          <Input className="pl-8" placeholder="Filtrer : nom, hôte, dossier…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </label>
+        <div className="scroll-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+          {[...folders, ""].map((name) => {
+            const list = inFolder(name);
+            if (!name && !list.length) return null;
+            if (q && !list.length) return null;
+            const key = `servers:${name}`;
+            const isCollapsed = collapsed.includes(key) && !q;
+            return (
+              <section key={name || "-"} data-drop={name} className="mb-1.5 rounded-lg">
+                <div className="group/folder flex h-7 items-center gap-1.5 px-1.5 text-xs text-muted">
+                  <button type="button" onClick={() => toggleCollapsed(key)} aria-expanded={!isCollapsed} className={`flex min-w-0 flex-1 items-center gap-1.5 rounded ${FOCUS_RING}`}>
+                    <ChevronDown size={13} className={`shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                    <span className={`truncate font-semibold ${name ? "text-fg/80" : ""}`}>{name || "Sans dossier"}</span>
+                    <span className="text-faint">{list.length}</span>
+                  </button>
+                  {name && (
+                    <MenuButton
+                      size="sm"
+                      title={`Dossier ${name}`}
+                      items={[
+                        { label: "Renommer…", icon: <Pencil size={14} />, onClick: () => void renameFolder(name) },
+                        { label: "Supprimer le dossier", icon: <Trash2 size={14} />, danger: true, onClick: () => void removeFolder(name) },
+                      ]}
+                    />
+                  )}
+                </div>
+                {!isCollapsed && (
+                  <div className="flex flex-col gap-0.5">
+                    {list.map((s) => (
+                      // Élément « bouton » sans balise <button> : le glisser vers un dossier ignore les boutons.
+                      <div
+                        key={s.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setActive(s.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setActive(s.id);
+                          }
+                        }}
+                        onMouseDown={(e) => startDrag(e, s.name, (folder) => folder !== (s.group ?? "") && void moveServers([s.id], folder || null))}
+                        onContextMenu={(e) =>
+                          menu.open(e, [
+                            { label: "Modifier…", icon: <Pencil size={14} />, onClick: () => onEdit(s) },
+                            { label: "Terminal", icon: <SquareTerminal size={14} />, onClick: () => void openTerminal(s) },
+                            "separator",
+                            ...moveItems(s),
+                          ])
+                        }
+                        aria-current={s.id === selected?.id ? "true" : undefined}
+                        className={`flex w-full cursor-default items-center gap-2.5 rounded-lg border px-2 py-1.5 text-left transition-colors ${FOCUS_RING} ${
+                          s.id === selected?.id ? "border-border-strong bg-raised" : "border-transparent hover:bg-hover"
+                        }`}
+                      >
+                        <Avatar name={s.name} color={s.color} size={30} />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-[13px] font-medium">{s.name}</span>
+                          <span className="truncate font-mono text-[10.5px] text-muted">
+                            {s.username}@{s.host}
+                            {s.port !== 22 && `:${s.port}`}
+                          </span>
+                        </span>
+                        <StatusDot tone={s.connected ? "ok" : "muted"} />
+                      </div>
+                    ))}
+                    {list.length === 0 && <p className="mx-1 rounded-lg border border-dashed border-border px-3 py-3 text-center text-xs text-faint">Glisse un serveur ici</p>}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between px-1.5 text-[11.5px] text-faint">
+          <span>Glisser sur un dossier pour ranger · clic droit : plus</span>
+          <IconButton size="sm" title="Nouveau dossier" onClick={onNewFolder}>
+            <FolderPlus size={14} />
+          </IconButton>
+        </div>
+        {menu.menu}
+      </aside>
+      <section className="min-h-0 overflow-auto">{selected ? <ServerDetail key={selected.id} server={selected} onEdit={() => onEdit(selected)} moveItems={moveItems(selected)} /> : null}</section>
+    </div>
+  );
+}
+
+async function openTerminal(s: ServerView) {
+  const { setActiveServer, openTab } = useApp.getState();
+  setActiveServer(s.id);
+  if (await ensureConnected(s.id, { force: true })) openTab(s.id);
+}
+
+function ServerDetail({ server, onEdit, moveItems }: { server: ServerView; onEdit: () => void; moveItems: MenuItem[] }) {
+  const { refreshServers, notify, ask, servers } = useAppPick("refreshServers", "notify", "ask", "servers");
+  const identity = useIdentities((s) => s.list.find((i) => i.id === server.identityId));
+  const summary = useHealth((s) => s.summaries[server.id]);
+  const [busy, setBusy] = useState(false);
+  const jump = servers.find((s) => s.id === server.jumpId);
+
+  useEffect(() => {
+    if (server.connected) void fetchHealth(server.id, 20_000);
+  }, [server.id, server.connected]);
+
   const connect = async () => {
     setBusy(true);
-    setActiveServer(server.id);
     if (await ensureConnected(server.id, { force: true })) notify(`Connecté à ${server.name}`, "success");
     setBusy(false);
   };
-
+  const disconnect = async () => {
+    await api.disconnect(server.id);
+    void refreshServers();
+  };
   const remove = async () => {
     const ok = await ask({
       title: `Supprimer « ${server.name} » ?`,
@@ -209,421 +347,138 @@ function ServerCard({ server, folders, onEdit }: { server: ServerView; folders: 
     if (!ok) return;
     await api.deleteServer(server.id);
     forgetCached(server.id);
+    useHealth.getState().forget(server.id);
     void refreshServers();
   };
 
+  const m = summary?.connected ? summary.metrics : null;
+  const mem = m && m.memTotal ? (m.memUsed / m.memTotal) * 100 : null;
+  const root = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
+  const disk = root && root.total ? (root.used / root.total) * 100 : null;
+  const go = (section: SectionId) => navigate(section, undefined, server.id);
+
+  const jumps: { section: SectionId; label: string; icon: React.ReactNode; hint: string }[] = [
+    { section: "monitoring", label: "Supervision", icon: <Activity size={15} />, hint: summary?.connected ? (summary.alerts.length ? `${summary.alerts.length} alerte(s)` : "aucune alerte") : "métriques, processus" },
+    { section: "files", label: "Fichiers", icon: <FolderTree size={15} />, hint: "explorateur SFTP" },
+    { section: "docker", label: "Docker", icon: <Container size={15} />, hint: summary?.connected && summary.docker ? `${summary.containersRunning} conteneur(s)` : "conteneurs, compose" },
+    { section: "databases", label: "Bases", icon: <Database size={15} />, hint: "SQL et Redis" },
+    { section: "sites", label: "Sites", icon: <Globe size={15} />, hint: summary?.connected ? `${summary.certificates.length} certificat(s)` : "nginx, certificats" },
+    { section: "security", label: "Sécurité", icon: <ShieldCheck size={15} />, hint: "audit, pare-feu" },
+  ];
+
   return (
-    <div
-      className={`group rounded-lg border bg-panel p-4 transition-colors ${active ? "border-accent/60" : "border-border hover:border-muted/40"}`}
-      onClick={() => setActiveServer(server.id)}
-      onMouseDown={(e) => startDrag(e, server.name, (folder) => folder !== (server.group ?? "") && void moveServers([server.id], folder || null))}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenu({ x: e.clientX, y: e.clientY });
-      }}
-    >
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={moveItems} onClose={() => setMenu(null)} />}
-      <div className="mb-3 flex items-start gap-3">
-        <div className="mt-1 size-2.5 shrink-0 rounded-full" style={{ background: server.color ?? COLORS[0] }} />
+    <div className="flex max-w-5xl flex-col gap-5 px-7 py-6">
+      <div className="flex flex-wrap items-center gap-3.5">
+        <Avatar name={server.name} color={server.color} size={52} />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium">{server.name}</div>
-          <div className="truncate font-mono text-xs text-muted">
-            {server.username}@{server.host}
-            {server.port !== 22 && `:${server.port}`}
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="truncate text-[19px] font-semibold">{server.name}</h2>
+            {server.connected ? <Badge tone="ok">connecté</Badge> : <Badge>hors ligne</Badge>}
+            {server.group && <Badge>{server.group}</Badge>}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-xs text-muted">
+            {server.username}@{server.host}:{server.port}
+            {m ? ` · en ligne depuis ${formatDuration(m.uptimeSecs)}` : ""}
           </div>
         </div>
-        <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
-          <IconButton title="Modifier" onClick={onEdit}>
-            <Pencil size={14} />
-          </IconButton>
-          <IconButton title="Supprimer" onClick={remove}>
-            <Trash2 size={14} />
-          </IconButton>
-        </div>
-      </div>
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {server.connected ? <Badge tone="ok">connecté</Badge> : <Badge>hors ligne</Badge>}
-        {identity ? <Badge tone="accent">{identity.name}</Badge> : <Badge>{AUTH_LABELS[server.authKind]}</Badge>}
-        {server.group && <Badge tone="accent">{server.group}</Badge>}
-      </div>
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="primary"
-          icon={<SquareTerminal size={13} />}
-          onClick={async (e) => {
-            e.stopPropagation();
-            setActiveServer(server.id);
-            setBusy(true);
-            const ok = await ensureConnected(server.id, { force: true });
-            setBusy(false);
-            if (ok) openTab(server.id);
-          }}
-        >
+        <Button variant="primary" icon={<SquareTerminal size={14} />} onClick={() => void openTerminal(server)}>
           Terminal
         </Button>
         {server.connected ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Unplug size={13} />}
-            onClick={async () => {
-              await api.disconnect(server.id);
-              void refreshServers();
-            }}
-          >
+          <Button icon={<Unplug size={14} />} onClick={() => void disconnect()}>
             Déconnecter
           </Button>
         ) : (
-          <Button size="sm" variant="ghost" loading={busy} icon={<Plug size={13} />} onClick={connect}>
+          <Button loading={busy} icon={<Plug size={14} />} onClick={() => void connect()}>
             Connecter
           </Button>
         )}
+        <Button icon={<Pencil size={14} />} onClick={onEdit}>
+          Modifier
+        </Button>
+        <MenuButton
+          items={[
+            { label: "Diagnostiquer la connexion", icon: <Stethoscope size={14} />, onClick: () => useDoctor.getState().open(server.id) },
+            "separator",
+            ...moveItems,
+            "separator",
+            { label: "Supprimer le profil…", icon: <Trash2 size={14} />, danger: true, onClick: () => void remove() },
+          ]}
+        />
       </div>
-    </div>
-  );
-}
 
-function emptyProfile(): ServerProfile {
-  return { id: "", name: "", host: "", port: 22, username: "root", authKind: "password", keyPath: null, color: COLORS[0], group: null };
-}
-
-function ServerForm({ server, onClose, onSaved }: { server: ServerView | null; onClose: () => void; onSaved: () => void }) {
-  const notify = useApp((s) => s.notify);
-  const [p, setP] = useState<ServerProfile>(server ? { ...server } : emptyProfile());
-  const [password, setPassword] = useState("");
-  const [passphrase, setPassphrase] = useState("");
-  const [sudo, setSudo] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [suggest, setSuggest] = useState(false);
-  /** Enregistrer aussi l'utilisateur et son secret dans la banque d'identifiants. */
-  const [toBank, setToBank] = useState<string | null>(null);
-  const set = <K extends keyof ServerProfile>(k: K, v: ServerProfile[K]) => setP((prev) => ({ ...prev, [k]: v }));
-  const others = useApp((s) => s.servers).filter((s) => s.id !== server?.id);
-  const identities = useIdentities((s) => s.list);
-  const identity = identities.find((i) => i.id === p.identityId);
-  const folders = useServerFolders();
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      let profile = { ...p, name: p.name.trim() || p.host.trim(), host: p.host.trim(), username: p.username.trim() };
-      let secrets = { password: password || undefined, passphrase: passphrase || undefined, sudoPassword: sudo || undefined };
-      if (!identity && toBank !== null) {
-        // Nouvel identifiant de la banque avec ce qui vient d'être saisi, puis le serveur s'y lie.
-        const id = await api.identitySave(
-          { id: "", name: toBank.trim() || profile.username, username: profile.username, authKind: profile.authKind, keyPath: profile.keyPath },
-          { password: secrets.password, passphrase: secrets.passphrase },
-        );
-        profile = { ...profile, identityId: id };
-        secrets = { password: undefined, passphrase: undefined, sudoPassword: secrets.sudoPassword };
-        void useIdentities.getState().reload();
-      }
-      await api.saveServer(profile, secrets);
-      onSaved();
-    } catch (e) {
-      notify(errorMessage(e), "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const pickKey = async () => {
-    const file = await open({ title: "Choisir une clé privée", multiple: false, directory: false });
-    if (typeof file === "string") set("keyPath", file);
-  };
-
-  const kinds: { id: AuthKind; label: string }[] = [
-    { id: "password", label: "Mot de passe" },
-    { id: "key", label: "Clé privée" },
-    { id: "agent", label: "Agent SSH / Pageant" },
-  ];
-  const keptHint = (has: boolean | undefined) => (has ? "Déjà enregistré : laisse vide pour le conserver." : undefined);
-
-  return (
-    <Modal
-      title={server ? `Modifier ${server.name}` : "Nouveau serveur"}
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button variant="primary" loading={saving} onClick={save} disabled={!p.host || !p.username}>
-            Enregistrer
-          </Button>
-        </>
-      }
-    >
-      <form
-        className="grid grid-cols-6 gap-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        <div className="col-span-6">
-          <Field label="Nom">
-            <Input value={p.name} placeholder="Mon VPS" onChange={(e) => set("name", e.target.value)} autoFocus />
-          </Field>
-        </div>
-        <div className="col-span-4">
-          <Field label="Hôte">
-            <Input value={p.host} placeholder="vps.exemple.fr ou 51.xx.xx.xx" onChange={(e) => set("host", e.target.value)} />
-          </Field>
-        </div>
-        <div className="col-span-2">
-          <Field label="Port">
-            <Input type="number" value={p.port} onChange={(e) => set("port", Number(e.target.value) || 22)} />
-          </Field>
-        </div>
-        <div className="col-span-3">
-          <Field label="Utilisateur" hint={identities.length && !identity ? "Clique dans le champ pour choisir un identifiant enregistré." : undefined}>
-            {identity ? (
-              <div className="flex h-8 items-center gap-2 rounded-md border border-accent/50 bg-accent/10 px-2.5 text-sm">
-                <IdCard size={14} className="shrink-0 text-accent" />
-                <span className="min-w-0 flex-1 truncate" title={`Identifiant « ${identity.name} » de la banque`}>
-                  {identity.name} <span className="font-mono text-xs text-muted">({identity.username})</span>
-                </span>
-                <button type="button" title="Délier : saisir l'utilisateur à la main" className="text-muted hover:text-fg" onClick={() => setP((prev) => ({ ...prev, identityId: null }))}>
-                  <Link2Off size={13} />
-                </button>
-              </div>
-            ) : (
-              <div className="relative">
-                <Input value={p.username} autoComplete="off" onFocus={() => setSuggest(true)} onChange={(e) => set("username", e.target.value)} />
-                {suggest && (
-                  <IdentitySuggestions
-                    filter=""
-                    onClose={() => setSuggest(false)}
-                    onPick={(i) => {
-                      setP((prev) => ({ ...prev, identityId: i.id, username: i.username, authKind: i.authKind, keyPath: i.keyPath ?? null }));
-                      setToBank(null);
-                      setSuggest(false);
-                    }}
-                  />
-                )}
-              </div>
-            )}
-          </Field>
-        </div>
-        <div className="col-span-3">
-          <Field label="Dossier (optionnel)">
-            <Input list="helm-server-folders" value={p.group ?? ""} placeholder="prod, perso…" onChange={(e) => set("group", e.target.value || null)} />
-            <datalist id="helm-server-folders">
-              {folders.map((f) => (
-                <option key={f} value={f} />
-              ))}
-            </datalist>
-          </Field>
-        </div>
-        {others.length > 0 && (
-          <div className="col-span-6">
-            <Field label="Serveur de rebond (optionnel)" hint="Pour un serveur joignable seulement à travers un autre (bastion, réseau privé) : équivalent de ssh -J.">
-              <select
-                className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm"
-                value={p.jumpId ?? ""}
-                onChange={(e) => set("jumpId", e.target.value || null)}
-              >
-                <option value="">Aucun : connexion directe</option>
-                {others.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.username}@{s.host})
-                  </option>
-                ))}
-              </select>
-            </Field>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3.5">
+        <Card className="flex flex-col gap-3">
+          <Eyebrow>Connexion</Eyebrow>
+          <KeyValue
+            items={[
+              ["Hôte", <span className="font-mono">{server.host}</span>],
+              ["Port", <span className="font-mono">{server.port}</span>],
+              ["Utilisateur", <span className="font-mono">{identity ? identity.username : server.username}</span>],
+              ["Rebond", jump ? `via ${jump.name}` : <span className="text-muted">Connexion directe</span>],
+            ]}
+          />
+        </Card>
+        <Card className="flex flex-col gap-3">
+          <Eyebrow>Authentification</Eyebrow>
+          <KeyValue
+            items={[
+              [
+                "Méthode",
+                identity ? (
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    {identity.name} <Badge tone="accent">{AUTH_LABELS[identity.authKind]}</Badge>
+                  </span>
+                ) : (
+                  AUTH_LABELS[server.authKind]
+                ),
+              ],
+              ...((identity ? identity.authKind : server.authKind) === "key"
+                ? ([["Clé", <span className="font-mono text-xs">{(identity ? identity.keyPath : server.keyPath) || "—"}</span>]] as [React.ReactNode, React.ReactNode][])
+                : []),
+              ["Secret enregistré", server.hasPassword || server.hasPassphrase || identity?.hasPassword || identity?.hasPassphrase ? "Oui, dans le coffre du système" : <span className="text-muted">Non</span>],
+              ["Sudo", server.hasSudoPassword ? "Mot de passe enregistré" : <span className="text-muted">Non renseigné</span>],
+              ["Accès IA (MCP)", server.aiAccess ? "Lecture seule autorisée" : <span className="text-muted">Désactivé</span>],
+            ]}
+          />
+        </Card>
+        <Card className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Eyebrow>Santé</Eyebrow>
+            <button type="button" className="text-xs text-accent hover:underline" onClick={() => go("monitoring")}>
+              Supervision
+            </button>
           </div>
-        )}
-
-        {identity ? (
-          <p className="col-span-6 rounded-md border border-border bg-bg p-3 text-xs text-muted">
-            Authentification de l'identifiant « {identity.name} » ({AUTH_LABELS[identity.authKind]}{identity.authKind === "password" && !identity.hasPassword ? ", demandé à la connexion" : ""}). Modifiable dans l'onglet Identifiants.
-          </p>
-        ) : (
-        <>
-        <div className="col-span-6 flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-muted">Authentification</span>
-          <div className="flex gap-1 rounded-md border border-border bg-bg p-1">
-            {kinds.map((k) => (
+          {summary?.connected ? (
+            <div className="flex flex-col gap-3">
+              <LabeledMeter label="CPU" value={m ? m.cpuPercent : null} />
+              <LabeledMeter label="Mémoire" value={mem} />
+              <LabeledMeter label="Disque /" value={disk} />
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted">{server.connected ? "Mesure en cours…" : "Connecte le serveur pour voir sa santé."}</p>
+          )}
+        </Card>
+        <Card className="flex flex-col gap-3">
+          <Eyebrow>Aller à</Eyebrow>
+          <div className="grid grid-cols-3 gap-2">
+            {jumps.map((j) => (
               <button
+                key={j.section}
                 type="button"
-                key={k.id}
-                onClick={() => set("authKind", k.id)}
-                className={`flex-1 rounded px-2 py-1 text-xs transition-colors ${p.authKind === k.id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
+                onClick={() => go(j.section)}
+                className={`flex min-w-0 flex-col items-start gap-1 rounded-lg border border-border bg-subtle px-2.5 py-2 text-left transition-colors hover:border-border-strong ${FOCUS_RING}`}
               >
-                {k.label}
+                <span className="flex items-center gap-1.5 text-[13px] font-medium">
+                  <span className="text-muted">{j.icon}</span>
+                  {j.label}
+                </span>
+                <span className="w-full truncate text-[11px] text-faint">{j.hint}</span>
               </button>
             ))}
           </div>
-        </div>
-
-        {p.authKind === "password" && (
-          <div className="col-span-6">
-            <Field label="Mot de passe" hint={keptHint(server?.hasPassword) ?? "Tu peux aussi le laisser vide : il sera demandé à la connexion."}>
-              <Input type="password" value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
-            </Field>
-          </div>
-        )}
-        {p.authKind === "key" && (
-          <>
-            <div className="col-span-6">
-              <Field label="Clé privée" hint="Formats OpenSSH et PuTTY (.ppk) acceptés.">
-                <div className="flex gap-2">
-                  <Input value={p.keyPath ?? ""} placeholder="~/.ssh/id_ed25519" onChange={(e) => set("keyPath", e.target.value)} />
-                  <Button type="button" icon={<KeyRound size={14} />} onClick={pickKey}>
-                    Parcourir
-                  </Button>
-                </div>
-              </Field>
-            </div>
-            <div className="col-span-6">
-              <Field label="Passphrase (si la clé est chiffrée)" hint={keptHint(server?.hasPassphrase)}>
-                <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
-              </Field>
-            </div>
-          </>
-        )}
-        {p.authKind === "agent" && (
-          <p className="col-span-6 rounded-md border border-border bg-bg p-3 text-xs text-muted">
-            Helm utilisera les clés chargées dans l'agent OpenSSH de Windows ou dans Pageant (PuTTY).
-          </p>
-        )}
-        <label className="col-span-6 flex items-center gap-2 text-xs text-muted">
-          <input type="checkbox" checked={toBank !== null} onChange={(e) => setToBank(e.target.checked ? `${p.username}@${p.name || p.host}` : null)} />
-          Enregistrer aussi dans la banque d'identifiants, sous le nom
-          <Input className="!h-7 !w-56 text-xs" disabled={toBank === null} value={toBank ?? ""} onChange={(e) => setToBank(e.target.value)} />
-        </label>
-        </>
-        )}
-
-        <div className="col-span-6">
-          <Field
-            label="Mot de passe sudo (optionnel)"
-            hint={keptHint(server?.hasSudoPassword) ?? "Utilisé pour les actions d'administration (nginx, services…) si tu ne te connectes pas en root."}
-          >
-            <Input type="password" value={sudo} onChange={(e) => setSudo(e.target.value)} />
-          </Field>
-        </div>
-
-        <div className="col-span-6 flex items-center gap-2">
-          <span className="text-xs font-medium text-muted">Couleur</span>
-          {COLORS.map((c) => (
-            <button
-              type="button"
-              key={c}
-              onClick={() => set("color", c)}
-              className={`size-5 rounded-full ring-offset-2 ring-offset-panel ${p.color === c ? "ring-2 ring-fg" : ""}`}
-              style={{ background: c }}
-              aria-label={`Couleur ${c}`}
-            />
-          ))}
-        </div>
-        <button type="submit" hidden />
-      </form>
-    </Modal>
-  );
-}
-
-/** Import des sessions PuTTY (registre Windows) et des hôtes de ~/.ssh/config (OpenSSH). */
-function Import({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const notify = useApp((s) => s.notify);
-  const [source, setSource] = useState<"putty" | "openssh">("putty");
-  const [sessions, setSessions] = useState<ServerProfile[] | null>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    setSessions(null);
-    (source === "putty" ? api.puttySessions() : api.sshConfigSessions()).then((list) => {
-      setSessions(list);
-      setSelected(new Set(list.map((_, i) => i)));
-    });
-  }, [source]);
-
-  const doImport = async () => {
-    if (!sessions) return;
-    const chosen = sessions.filter((_, i) => selected.has(i));
-    // Les rebonds OpenSSH (ProxyJump) désignent un hôte par son alias : on les relie une fois
-    // tous les profils créés (importés maintenant ou déjà présents, par nom).
-    const ids = new Map<string, string>(useApp.getState().servers.map((s) => [s.name, s.id]));
-    const pending: { id: string; profile: ServerProfile; alias: string }[] = [];
-    for (const s of chosen) {
-      const alias = s.jumpId?.startsWith("alias:") ? s.jumpId.slice("alias:".length) : null;
-      const profile = { ...s, color: COLORS[0], jumpId: null };
-      const id = await api.saveServer(profile, {});
-      ids.set(s.name, id);
-      if (alias) pending.push({ id, profile: { ...profile, id }, alias });
-    }
-    const unresolved: string[] = [];
-    for (const { id, profile, alias } of pending) {
-      const jump = ids.get(alias);
-      if (jump && jump !== id) await api.saveServer({ ...profile, jumpId: jump }, {});
-      else unresolved.push(`${profile.name} → ${alias}`);
-    }
-    notify(
-      `${chosen.length} serveur(s) importé(s).${unresolved.length ? ` Rebond introuvable pour : ${unresolved.join(", ")} (à régler dans le profil).` : ""}`,
-      unresolved.length ? "info" : "success",
-    );
-    onDone();
-    onClose();
-  };
-
-  return (
-    <Modal
-      title="Importer des serveurs"
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button variant="primary" onClick={doImport} disabled={!selected.size} icon={<PlugZap size={14} />}>
-            Importer {selected.size || ""}
-          </Button>
-        </>
-      }
-    >
-      <div className="mb-3 flex gap-1 rounded-md border border-border bg-bg p-1">
-        {SOURCES.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setSource(id)}
-            className={`flex-1 rounded px-2 py-1 text-xs ${source === id ? "bg-accent text-accent-fg" : "text-muted hover:text-fg"}`}
-          >
-            {label}
-          </button>
-        ))}
+        </Card>
       </div>
-      {sessions === null ? (
-        <p className="text-sm text-muted">Lecture…</p>
-      ) : sessions.length === 0 ? (
-        <p className="text-sm text-muted">{source === "putty" ? "Aucune session SSH enregistrée dans PuTTY n'a été trouvée." : "Aucun hôte trouvé dans ~/.ssh/config."}</p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {sessions.map((s, i) => (
-            <li key={i}>
-              <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-hover">
-                <input
-                  type="checkbox"
-                  checked={selected.has(i)}
-                  onChange={(e) => {
-                    const next = new Set(selected);
-                    if (e.target.checked) next.add(i);
-                    else next.delete(i);
-                    setSelected(next);
-                  }}
-                />
-                <span className="flex-1 text-sm">{s.name}</span>
-                <span className="font-mono text-xs text-muted">
-                  {s.username}@{s.host}:{s.port}
-                  {s.jumpId?.startsWith("alias:") && ` via ${s.jumpId.slice(6)}`}
-                </span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Modal>
+    </div>
   );
 }

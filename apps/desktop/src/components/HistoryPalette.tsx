@@ -45,6 +45,15 @@ export default function HistoryPalette({
   /** Commande choisie : envoyée telle quelle au terminal, ou seulement écrite sans être lancée. */
   onPick: (command: string, run: boolean) => void;
 }) {
+  return (
+    <Modal title="Historique du shell" width="max-w-3xl" onClose={onClose}>
+      <HistoryList serverId={serverId} onPick={onPick} autoFocus />
+    </Modal>
+  );
+}
+
+/** Liste de l'historique avec sa recherche : dans la fenêtre Ctrl+R ou dans le dock du terminal. */
+export function HistoryList({ serverId, onPick, autoFocus, compact }: { serverId: string; onPick: (command: string, run: boolean) => void; autoFocus?: boolean; compact?: boolean }) {
   const [entries, setEntries] = useState<ShellHistoryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -75,9 +84,9 @@ export default function HistoryPalette({
   };
 
   return (
-    <Modal title="Historique du shell" width="max-w-3xl" onClose={onClose}>
-      <div
-        onKeyDown={(e) => {
+    <div
+      className={compact ? "flex h-full min-h-0 flex-col" : ""}
+      onKeyDown={(e) => {
           if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
             e.preventDefault();
             setCursor((c) => Math.min(c + 1, results.length - 1));
@@ -99,10 +108,10 @@ export default function HistoryPalette({
           placeholder="Chercher une commande… (dcps trouve docker compose ps)"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          autoFocus
+          autoFocus={autoFocus}
         />
-        <p className="mt-1.5 text-[11px] text-muted">
-          ↑ ↓ pour choisir · Entrée pour lancer · Maj+Entrée ou Tab pour écrire sans lancer
+        <p className="mt-1.5 text-[11px] text-faint">
+          {compact ? "Entrée : lancer · Maj+Entrée : écrire sans lancer" : "↑ ↓ pour choisir · Entrée pour lancer · Maj+Entrée ou Tab pour écrire sans lancer"}
         </p>
 
         {error && <pre className="mt-3 rounded-md border border-danger/40 bg-danger/10 p-2 font-mono text-xs whitespace-pre-wrap text-danger select-text">{error}</pre>}
@@ -114,7 +123,7 @@ export default function HistoryPalette({
           </p>
         )}
 
-        <div ref={listRef} className="mt-2 max-h-[55vh] overflow-auto">
+        <div ref={listRef} className={`mt-2 overflow-auto ${compact ? "min-h-0 flex-1" : "max-h-[55vh]"}`}>
           {results.map((r, i) => (
             <button
               key={r.item.command}
@@ -138,7 +147,7 @@ export default function HistoryPalette({
                   {formatDuration(r.item.duration)}
                 </span>
               )}
-              <span className="w-24 shrink-0 text-right text-[10px] text-muted">{ago(r.item.last)}</span>
+              <span className={`shrink-0 text-right text-[10px] text-muted ${compact ? "w-14" : "w-24"}`}>{ago(r.item.last)}</span>
               {i === cursor && <CornerDownLeft size={11} className="shrink-0 text-accent" />}
             </button>
           ))}
@@ -148,7 +157,6 @@ export default function HistoryPalette({
             </p>
           )}
         </div>
-      </div>
-    </Modal>
+    </div>
   );
 }

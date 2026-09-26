@@ -453,6 +453,17 @@ pub async fn upload(
     }
 }
 
+/// Écrit des octets tenus en mémoire dans un fichier distant (créé ou tronqué), sans fichier
+/// local intermédiaire : rien ne peut être substitué entre la vérification et l'envoi.
+pub async fn write_bytes(sftp: &SftpSession, remote: &str, bytes: &[u8]) -> Result<()> {
+    let mut dst = sftp.open_with_flags(remote, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE).await.map_err(sftp_err)?;
+    for chunk in bytes.chunks(CHUNK) {
+        dst.write_all(chunk).await.map_err(sftp_err)?;
+    }
+    dst.shutdown().await.map_err(sftp_err)?;
+    Ok(())
+}
+
 async fn upload_file(sftp: &SftpSession, local: &Path, remote: &str, on_progress: &(dyn Fn(Progress) -> bool + Send + Sync)) -> Result<()> {
     let mut src = tokio::fs::File::open(local).await.map_err(|e| Error::Other(e.to_string()))?;
     let total = src.metadata().await.map(|m| m.len()).unwrap_or(0);

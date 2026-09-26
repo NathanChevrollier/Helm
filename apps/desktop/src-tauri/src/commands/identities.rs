@@ -35,8 +35,8 @@ pub fn identities_list(store: State<'_, Store>) -> Vec<IdentityView> {
         .map(|identity| {
             let owner = Identity::secret_owner(&identity.id);
             IdentityView {
-                has_password: secrets::get(&owner, "password").is_some(),
-                has_passphrase: secrets::get(&owner, "passphrase").is_some(),
+                has_password: secrets::has(&owner, "password"),
+                has_passphrase: secrets::has(&owner, "passphrase"),
                 used_by: servers.iter().filter(|s| s.identity_id.as_deref() == Some(&identity.id)).map(|s| s.name.clone()).collect(),
                 identity,
             }

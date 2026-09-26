@@ -20,6 +20,21 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Refuse toute commande quand Helm est verrouillé, sauf celles de l'écran de verrouillage.
+/// Le contrôle est fait ici, une fois pour toutes, plutôt que dans chaque commande : une commande
+/// ajoutée plus tard est protégée d'office.
+fn guarded<R: tauri::Runtime>(
+    handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        if workspace::is_locked() && !workspace::ALLOWED_WHILE_LOCKED.contains(&invoke.message.command()) {
+            invoke.resolver.reject("Helm est verrouillé");
+            return true;
+        }
+        handler(invoke)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -78,7 +93,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(guarded(tauri::generate_handler![
             app_version,
             servers::servers_list,
             servers::server_save,
@@ -296,7 +311,7 @@ pub fn run() {
             deploy::deploy_keys,
             deploy::deploy_key_create,
             deploy::deploy_key_revoke,
-        ])
+        ]))
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Tauri");
 }

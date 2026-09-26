@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Copy, FileDown, FileUp, Share2 } from "lucide-react";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, importMessage } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useApp, useAppPick } from "../lib/store";
-import { Button, Field, Input, Modal } from "./ui";
+import { Button, Checkbox, Field, Input, Modal, Textarea } from "./ui";
 
 /**
  * Partage d'une sélection de serveurs avec quelqu'un d'autre : fichier ou code à coller, toujours
@@ -78,31 +78,35 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
       <ul className="mb-3 flex max-h-64 flex-col gap-1 overflow-auto">
         {servers.map((s) => (
           <li key={s.id}>
-            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-hover">
+              <Checkbox
                 checked={selected.includes(s.id)}
-                onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)))}
+                onChange={(v) => setSelected((prev) => (v ? [...prev, s.id] : prev.filter((x) => x !== s.id)))}
+                label={
+                  <span className="flex items-center gap-2">
+                    <span className="size-[7px] rounded-full" style={{ background: s.color ?? "var(--color-accent)" }} />
+                    {s.name}
+                  </span>
+                }
+                className="flex-1"
               />
-              <span className="size-[7px] rounded-full" style={{ background: s.color ?? "var(--color-accent)" }} />
-              <span className="text-sm">{s.name}</span>
-              <span className="ml-auto font-mono text-xs text-muted">
+              <span className="font-mono text-xs text-muted">
                 {s.username}@{s.host}
               </span>
-            </label>
+            </div>
           </li>
         ))}
       </ul>
       <Field label="Mot de passe du partage" hint="8 caractères minimum. Sans lui, le partage est illisible.">
         <Input type="password" value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
       </Field>
-      <label className="mt-3 flex items-start gap-2 text-sm">
-        <input type="checkbox" className="mt-1" checked={withSecrets} onChange={(e) => setWithSecrets(e.target.checked)} />
-        <span>
-          Inclure les secrets (mots de passe SSH et sudo, passphrases)
-          <span className="block text-xs text-muted">À n'utiliser que pour un compte prévu pour être partagé : la personne aura le même accès que toi.</span>
-        </span>
-      </label>
+      <Checkbox
+        className="mt-3"
+        checked={withSecrets}
+        onChange={setWithSecrets}
+        label="Inclure les secrets (mots de passe SSH et sudo, passphrases)"
+        hint="À n'utiliser que pour un compte prévu pour être partagé : la personne aura le même accès que toi."
+      />
     </Modal>
   );
 }
@@ -124,7 +128,7 @@ export function ReceiveShareDialog({ onClose, onDone }: { onClose: () => void; o
         password = v;
       }
       const r = await api.settingsImportText(content, password);
-      notify(`Importé : ${r.servers} serveur(s), ${r.identities} identifiant(s)`, "success");
+      notify(importMessage(r), r.duplicated || r.hostKeysKept ? "info" : "success");
       onDone();
       onClose();
     } catch (e) {
@@ -165,8 +169,8 @@ export function ReceiveShareDialog({ onClose, onDone }: { onClose: () => void; o
       <p className="mb-3 text-sm text-muted">
         Colle ici le code reçu (il commence par <span className="font-mono">helm-share:</span>), ou ouvre le fichier de partage. Les profils existants de même identifiant sont remplacés ; rien n'est supprimé.
       </p>
-      <textarea
-        className="h-40 w-full resize-none rounded-md border border-border bg-bg p-2 font-mono text-xs outline-none focus:border-accent"
+      <Textarea
+        className="h-40 resize-none font-mono text-xs"
         placeholder="helm-share:…"
         value={text}
         onChange={(e) => setText(e.target.value)}

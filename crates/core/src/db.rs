@@ -307,9 +307,141 @@ pub fn first_keyword(sql: &str) -> String {
     text.split(|c: char| c.is_whitespace() || c == '(' || c == ';').find(|w| !w.is_empty()).unwrap_or("").to_ascii_uppercase()
 }
 
-/// Une requête qui ne fait que lire ? Les autres demandent confirmation dans l'interface.
+/// Mots qui, où qu'ils soient dans la requête, peuvent modifier quelque chose : `WITH x AS
+/// (DELETE … RETURNING *) SELECT …`, `SELECT … INTO OUTFILE`, `EXPLAIN ANALYZE UPDATE…`. La liste
+/// est volontairement large : un faux positif coûte une confirmation, un faux négatif une
+/// modification non journalisée.
+const WRITE_WORDS: &[&str] = &[
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "TRUNCATE",
+    "GRANT",
+    "REVOKE",
+    "MERGE",
+    "REPLACE",
+    "UPSERT",
+    "CALL",
+    "DO",
+    "COPY",
+    "LOCK",
+    "RENAME",
+    "VACUUM",
+    "REINDEX",
+    "CLUSTER",
+    "REFRESH",
+    "IMPORT",
+    "LOAD",
+    "HANDLER",
+    "INTO",
+    "OUTFILE",
+    "DUMPFILE",
+    "SET",
+    "RESET",
+    "KILL",
+    "SHUTDOWN",
+    "FLUSH",
+    "PURGE",
+    "INSTALL",
+    "UNINSTALL",
+    "COMMENT",
+    "SECURITY",
+    "DISCARD",
+    "NOTIFY",
+    "PREPARE",
+    "EXECUTE",
+    "EXEC",
+    "DEALLOCATE",
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "START",
+    "ATTACH",
+    "DETACH",
+    "PRAGMA",
+];
+
+/// Requête sans commentaires, chaînes ni identifiants entre guillemets (remplacés par des espaces) :
+/// il ne reste que les mots-clés et les noms nus.
+fn sql_skeleton(sql: &str) -> String {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out = String::with_capacity(sql.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        // `#` n'est pas traité comme un commentaire : c'en est un pour MySQL, mais un opérateur
+        // pour PostgreSQL, où l'ignorer masquerait la suite de la ligne (`SELECT 1 # 2; DROP …`).
+        if c == '-' && next == Some('-') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            i += 2;
+            while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
+                i += 1;
+            }
+            i += 2;
+        } else if matches!(c, '\'' | '"' | '`') {
+            i += 1;
+            // L'antislash n'est pas lu comme un échappement : il l'est pour MySQL, pas pour
+            // PostgreSQL. Le lire ainsi prolongerait la chaîne au-delà de sa vraie fin et y cacherait
+            // une instruction ; l'ignorer ne peut que la raccourcir, donc signaler un mot de trop.
+            while i < chars.len() {
+                if chars[i] == c {
+                    // Guillemet doublé : caractère échappé, la chaîne continue.
+                    if chars.get(i + 1) == Some(&c) {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            i += 1;
+        } else if c == '$' {
+            // Chaîne PostgreSQL `$$…$$` ou `$balise$…$balise$`.
+            let tag_end = chars[i + 1..].iter().position(|&x| !(x.is_alphanumeric() || x == '_')).map(|p| i + 1 + p);
+            match tag_end.filter(|&e| chars[e] == '$') {
+                Some(e) => {
+                    let tag: String = chars[i..=e].iter().collect();
+                    let body: String = chars[e + 1..].iter().collect();
+                    let skip = body.find(&tag).map(|p| body[..p].chars().count() + tag.chars().count()).unwrap_or(body.chars().count());
+                    i = e + 1 + skip;
+                }
+                None => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        out.push(' ');
+    }
+    out
+}
+
+/// Une requête qui ne fait que lire ? Les autres demandent confirmation dans l'interface et sont
+/// inscrites au journal d'actions. Une seule instruction, commençant par un mot de lecture, sans
+/// aucun mot d'écriture nulle part (sous-requêtes et CTE comprises).
 pub fn is_read_only(sql: &str) -> bool {
-    matches!(first_keyword(sql).as_str(), "SELECT" | "SHOW" | "EXPLAIN" | "DESCRIBE" | "DESC" | "WITH" | "TABLE" | "VALUES" | "ANALYZE")
+    let skeleton = sql_skeleton(sql);
+    let statements: Vec<&str> = skeleton.split(';').filter(|s| !s.trim().is_empty()).collect();
+    let [only] = statements.as_slice() else { return false };
+    let words: Vec<String> =
+        only.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_ascii_uppercase).collect();
+    let starts_read = matches!(
+        words.first().map(String::as_str),
+        Some("SELECT" | "SHOW" | "EXPLAIN" | "DESCRIBE" | "DESC" | "WITH" | "TABLE" | "VALUES" | "ANALYZE")
+    );
+    starts_read && !words.iter().any(|w| WRITE_WORDS.contains(&w.as_str()))
 }
 
 /// Exécute une requête libre et renvoie ses lignes (au plus `limit`).
@@ -775,6 +907,19 @@ mod tests {
         assert!(is_read_only("/* x */ with a as (select 1) select * from a"));
         assert!(!is_read_only("DELETE FROM users"));
         assert!(!is_read_only("update t set a=1"));
+        // Écritures cachées derrière un premier mot de lecture.
+        assert!(!is_read_only("SELECT 1; DROP TABLE users"));
+        assert!(!is_read_only("with d as (delete from sessions returning *) select count(*) from d"));
+        assert!(!is_read_only("SELECT * INTO OUTFILE '/tmp/x' FROM users"));
+        assert!(!is_read_only("EXPLAIN ANALYZE UPDATE users SET plan = 'pro'"));
+        assert!(!is_read_only("select 1 /* ; */ ; insert into t values (1)"));
+        // Mots d'écriture dans des chaînes, commentaires ou identifiants : sans effet.
+        assert!(is_read_only("SELECT 'DROP TABLE x; DELETE' AS txt FROM logs -- update\n"));
+        assert!(is_read_only("select \"update\", created_at from \"delete\" where note = 'it''s; drop'"));
+        assert!(is_read_only("SELECT $$ drop table x $$ AS body"));
+        assert!(is_read_only("SELECT 1;"));
+        assert!(!is_read_only("SELECT 'a\\'; DROP TABLE x; --'"), "PostgreSQL : l'antislash ne protège pas le guillemet");
+        assert!(!is_read_only("SELECT 1 # 2; DROP TABLE x"), "PostgreSQL : # est un opérateur");
         assert_eq!(first_keyword("INSERT INTO t VALUES (1)"), "INSERT");
         assert!(preview_query(Engine::Mysql, "users", 100).unwrap().contains("`users`"));
         assert!(preview_query(Engine::Postgres, "users; DROP TABLE x", 10).is_err());

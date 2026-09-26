@@ -1,12 +1,12 @@
-// Gabarit commun à toutes les sections. Avant, chaque vue dessinait son propre en-tête (parfois
-// aucun) et empilait jusqu'à quatre zones de défilement : on ne savait plus où était le titre, où
-// étaient les actions, ni ce que la molette allait faire bouger.
+// Gabarit commun à toutes les sections.
 //
-// Règle unique : un bandeau (titre, contexte, actions, sous-onglets éventuels) qui ne défile pas,
-// puis UNE seule zone de défilement. Les colonnes latérales gardent la leur, jamais plus.
-import type { ReactNode } from "react";
+// Règle unique : un bandeau fixe (contexte, titre, actions, éventuelle ligne d'état, onglets, barre
+// d'outils), puis UNE seule zone de défilement. Les colonnes latérales gardent la leur, jamais plus.
+// Actions : la principale à droite, les rares dans un menu « ⋯ » passé dans `actions`.
+import { useEffect, type ReactNode } from "react";
 import { CircleHelp } from "lucide-react";
 import { useApp } from "../lib/store";
+import { useShell } from "../lib/shell";
 import { FOCUS_RING, IconButton } from "./ui";
 import type { GuideId } from "../lib/guides";
 
@@ -14,7 +14,9 @@ export interface PageTab<T extends string = string> {
   id: T;
   label: string;
   /** Compteur affiché à droite du libellé (alertes, éléments en attente…). */
-  count?: number;
+  count?: number | string;
+  /** Couleur du compteur quand il signale un problème. */
+  tone?: "warn" | "danger";
 }
 
 export default function PageLayout<T extends string>({
@@ -22,22 +24,28 @@ export default function PageLayout<T extends string>({
   subtitle,
   context,
   actions,
+  status,
   tabs,
   activeTab,
   onTab,
+  toolbar,
   guide,
   scroll = true,
   children,
 }: {
   title: string;
-  /** Une ligne qui dit à quoi sert la page ou ce qu'elle montre. */
+  /** Une ligne de texte : à quoi sert la page ou ce qu'elle montre (pas de contrôles ici). */
   subtitle?: ReactNode;
-  /** Rappel du serveur concerné, affiché avant le titre. */
+  /** Contexte affiché au-dessus du titre (serveur, version, badges). */
   context?: ReactNode;
   actions?: ReactNode;
+  /** Ligne d'état sous le titre (moteur, version, bascules) : elle peut contenir des contrôles. */
+  status?: ReactNode;
   tabs?: PageTab<T>[];
   activeTab?: T;
   onTab?: (id: T) => void;
+  /** Filtres et contrôles de la vue courante, sous les onglets. */
+  toolbar?: ReactNode;
   /** Fiche d'aide ouverte par le « ? » du bandeau. */
   guide?: GuideId;
   /** `false` quand la vue gère elle-même ses zones (terminal, explorateur en colonnes). */
@@ -45,46 +53,63 @@ export default function PageLayout<T extends string>({
   children: ReactNode;
 }) {
   const openGuide = useApp((s) => s.openGuide);
+  const setCrumb = useShell((s) => s.setCrumb);
+  const activeLabel = tabs?.find((t) => t.id === activeTab)?.label ?? null;
+  useEffect(() => {
+    setCrumb(activeLabel);
+    return () => setCrumb(null);
+  }, [activeLabel, setCrumb]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-col gap-3 border-b border-border px-6 pt-4 pb-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <div className="min-w-0">
-            {context && <p className="truncate text-xs text-muted">{context}</p>}
-            <h1 className="truncate text-lg font-semibold">{title}</h1>
+      <header className={`flex shrink-0 flex-col gap-3 border-b border-border px-7 pt-[18px] ${tabs?.length ? "" : "pb-4"}`}>
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+          <div className="min-w-0 flex-1">
+            {(context || subtitle) && (
+              <div className="mb-0.5 flex min-w-0 items-center gap-2 text-xs text-muted">
+                {context && <span className="flex shrink-0 items-center gap-2">{context}</span>}
+                {context && subtitle && <span className="text-faint">·</span>}
+                {subtitle && <span className="truncate">{subtitle}</span>}
+              </div>
+            )}
+            <div className="flex items-center gap-1.5">
+              <h1 className="truncate text-[22px] leading-tight font-semibold tracking-tight">{title}</h1>
+              {guide && (
+                <IconButton size="sm" title="Aide sur cette section" onClick={() => openGuide(guide)} className="text-faint">
+                  <CircleHelp size={15} />
+                </IconButton>
+              )}
+            </div>
           </div>
-          {guide && (
-            <IconButton title="Aide sur cette section" onClick={() => openGuide(guide)}>
-              <CircleHelp size={16} />
-            </IconButton>
-          )}
-          {subtitle && <p className="min-w-0 flex-1 truncate text-[13px] text-muted">{subtitle}</p>}
-          {actions && <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+          {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
         </div>
+        {status && <div className="flex min-w-0 flex-wrap items-center gap-2.5 text-xs text-muted">{status}</div>}
         {tabs && tabs.length > 0 && (
-          <nav className="-mb-3 flex flex-wrap items-center gap-1" aria-label="Sous-sections">
+          <nav className="-mb-px flex flex-wrap items-center gap-1" aria-label="Sous-sections">
             {tabs.map((t) => {
               const active = t.id === activeTab;
+              const tone = t.tone === "danger" ? "bg-danger/16 text-danger" : t.tone === "warn" ? "bg-warn/16 text-warn" : "bg-hover-strong text-muted";
               return (
                 <button
                   key={t.id}
+                  type="button"
                   onClick={() => onTab?.(t.id)}
                   aria-current={active ? "page" : undefined}
-                  className={`flex h-9 items-center gap-1.5 rounded-t-md border-b-2 px-3 text-[13px] transition-colors ${FOCUS_RING} ${
+                  className={`flex h-9 items-center gap-1.5 border-b-2 px-3 text-[13px] transition-colors ${FOCUS_RING} ${
                     active ? "border-accent font-medium text-fg" : "border-transparent text-muted hover:text-fg"
                   }`}
                 >
                   {t.label}
-                  {t.count != null && t.count > 0 && (
-                    <span className="rounded-full bg-hover-strong px-1.5 text-[11px] text-muted">{t.count}</span>
-                  )}
+                  {t.count != null && t.count !== 0 && t.count !== "" && <span className={`rounded-full px-1.5 text-[11px] leading-[18px] ${tone}`}>{t.count}</span>}
                 </button>
               );
             })}
           </nav>
         )}
       </header>
-      <div className={`min-h-0 flex-1 ${scroll ? "overflow-auto" : "flex"}`}>{children}</div>
+      {toolbar && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-7 py-2.5">{toolbar}</div>}
+      <div className={`relative min-h-0 flex-1 ${scroll ? "overflow-auto" : "flex"}`}>{children}</div>
     </div>
   );
 }
+

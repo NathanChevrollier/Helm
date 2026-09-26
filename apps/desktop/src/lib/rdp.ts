@@ -4,19 +4,7 @@
 // la machine n'est joignable que depuis un serveur. Le pont local (côté Rust) parle le protocole
 // de passerelle attendu par le client web ; l'interface ne connaît que l'adresse et le jeton.
 import { create } from "zustand";
-import { api, type DesktopView, type VncSessionInfo } from "./api";
-
-export interface RdpSessionInfo {
-  proxyUrl: string;
-  token: string;
-  destination: string;
-  username: string;
-  domain?: string | null;
-  password: string;
-  width: number;
-  height: number;
-  viaTunnel: boolean;
-}
+import { api, type DesktopView, type RdpSessionInfo, type VncSessionInfo } from "./api";
 
 /** Étape de la session, pour l'affichage. */
 export type RdpState = { kind: "ouverture" } | { kind: "connexion" } | { kind: "connecte" } | { kind: "erreur"; message: string } | { kind: "ferme"; message: string };

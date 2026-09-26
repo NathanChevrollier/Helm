@@ -161,7 +161,7 @@ pub async fn desktop_launch(app: AppHandle, store: State<'_, Store>, tunnels: St
     let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("rdp");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = dir.join(format!("{}.rdp", d.id));
-    std::fs::write(&file, rdp_file(&d, &address, &user)).map_err(|e| e.to_string())?;
+    write_private(&file, rdp_file(&d, &address, &user).as_bytes())?;
     log::info!("bureau à distance « {} » ouvert ({address}{})", d.name, if d.via_server_id.is_some() { ", via un tunnel SSH" } else { "" });
     launch(&app, &file, &host, port, &user, password.as_deref(), d.via_server_id.as_ref().map(|_| tid))
 }
@@ -243,6 +243,24 @@ pub async fn desktop_session_open(
     Ok(session)
 }
 
+/// Écrit un fichier réservé à l'utilisateur (0600 dès sa création sous Unix ; sous Windows, le
+/// dossier de cache de l'app est déjà propre au compte). Un fichier existant est remplacé.
+fn write_private(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let _ = std::fs::remove_file(path);
+    let mut opts = std::fs::OpenOptions::new();
+    // Supprimé puis recréé : les droits ci-dessous s'appliquent à la création. Si la suppression
+    // échoue (fichier encore ouvert par le client sous Windows), il est réécrit en place.
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(path).map_err(|e| format!("{} : {e}", path.display()))?;
+    f.write_all(content).map_err(|e| e.to_string())
+}
+
 /// Fichier de connexion de remote-viewer (format `.vv` de virt-viewer). `delete-this-file=1`
 /// demande à remote-viewer d'effacer le fichier dès qu'il l'a lu : le mot de passe SPICE ne reste
 /// pas sur le disque.
@@ -320,14 +338,10 @@ async fn spice_launch(app: &AppHandle, store: &Store, tunnels: &Tunnels, d: &Rem
     let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("spice");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = dir.join(format!("{}.vv", d.id));
-    std::fs::write(&file, vv_file(&d.name, &host, port, password.as_deref(), d.fullscreen)?).map_err(|e| e.to_string())?;
-    // Le fichier peut contenir le mot de passe : lisible par l'utilisateur seul, le temps que
-    // remote-viewer le lise puis l'efface.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
-    }
+    // Le fichier peut contenir le mot de passe : créé d'emblée lisible par l'utilisateur seul (et
+    // non restreint après coup, ce qui laissait un instant où il était lisible par tous), le temps
+    // que remote-viewer le lise puis l'efface.
+    write_private(&file, vv_file(&d.name, &host, port, password.as_deref(), d.fullscreen)?.as_bytes())?;
     let mut child = std::process::Command::new(&viewer).arg(&file).spawn().map_err(|e| format!("remote-viewer : {e}"))?;
     log::info!(
         "console SPICE « {} » ouverte ({host}:{port}{})",

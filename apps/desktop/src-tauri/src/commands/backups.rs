@@ -39,7 +39,7 @@ pub async fn backup_overview(store: State<'_, Store>, sessions: State<'_, Sessio
                     .stdout
                     .lines()
                     .map(str::trim)
-                    .filter(|v| !v.is_empty() && !(v.len() == 64 && v.chars().all(|c| c.is_ascii_hexdigit())))
+                    .filter(|v| !(v.is_empty() || v.len() == 64 && v.chars().all(|c| c.is_ascii_hexdigit())))
                     .map(str::to_string)
                     .collect();
             }

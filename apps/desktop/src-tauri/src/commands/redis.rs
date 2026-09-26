@@ -206,5 +206,9 @@ pub async fn redis_command(
 /// Commandes refusées, pour les afficher dans l'aide de la console.
 #[tauri::command]
 pub fn redis_blocked() -> Vec<String> {
-    redis::BLOCKED.iter().map(|s| s.to_string()).collect()
+    redis::BLOCKED
+        .iter()
+        .map(|s| s.to_string())
+        .chain(redis::BLOCKED_SUBCOMMANDS.iter().flat_map(|(v, subs)| subs.iter().map(move |s| format!("{v} {s}"))))
+        .collect()
 }
