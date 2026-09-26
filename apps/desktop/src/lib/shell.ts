@@ -17,6 +17,9 @@ interface ShellState {
   setNotificationsOpen: (v: boolean) => void;
   shortcutsOpen: boolean;
   setShortcutsOpen: (v: boolean) => void;
+  /** Demande d'ouverture du formulaire « Nouveau serveur » (depuis le sélecteur ou l'accueil). */
+  newServerRequested: boolean;
+  requestNewServer: (v: boolean) => void;
 }
 
 export const useShell = create<ShellState>((set) => ({
@@ -32,4 +35,6 @@ export const useShell = create<ShellState>((set) => ({
   setNotificationsOpen: (notificationsOpen) => set({ notificationsOpen }),
   shortcutsOpen: false,
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  newServerRequested: false,
+  requestNewServer: (newServerRequested) => set({ newServerRequested }),
 }));

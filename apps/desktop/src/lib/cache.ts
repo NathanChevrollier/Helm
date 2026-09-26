@@ -26,3 +26,8 @@ export function useCachedState<T>(key: string, initial: T): [T, Dispatch<SetStat
 export function forgetCached(serverId: string) {
   for (const k of memory.keys()) if (k.endsWith(`:${serverId}`)) memory.delete(k);
 }
+
+/** Dernière valeur connue d'une clé, hors composant (palette, raccourcis). */
+export function peekCached<T>(key: string): T | undefined {
+  return memory.get(key) as T | undefined;
+}
