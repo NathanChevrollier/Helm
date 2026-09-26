@@ -20,7 +20,11 @@ import type { Env } from "../config/env.js";
 import { formatIssueBody, formatIssueTitle } from "../services/feedbackService.js";
 import { GitHubService } from "../services/githubService.js";
 import { RoadmapService } from "../services/roadmapService.js";
+import { Cooldown } from "../services/cooldown.js";
 import type { FeedbackInput, FeedbackKind } from "../types/feedback.js";
+
+/** Un retour par minute et cinq par heure au plus, par personne. */
+const feedbackCooldown = new Cooldown();
 
 export function createInteractionHandler(client: Client, env: Env, github: GitHubService, roadmap: RoadmapService) {
   return async (interaction: Interaction): Promise<void> => {
@@ -166,6 +170,12 @@ async function handleFeedbackModal(kind: FeedbackKind, interaction: ModalSubmitI
     await interaction.reply({ content: "Le titre doit contenir au moins 3 caractères et la description au moins 10 caractères.", ephemeral: true });
     return;
   }
+  const wait = feedbackCooldown.waitSeconds(interaction.user.id);
+  if (wait > 0) {
+    const delay = wait >= 120 ? `${Math.ceil(wait / 60)} minutes` : `${wait} secondes`;
+    await interaction.reply({ content: `Merci ! Pour éviter les doublons, attends encore ${delay} avant d'envoyer un autre retour.`, ephemeral: true });
+    return;
+  }
 
   await interaction.deferReply({ ephemeral: true });
   const issue = await github.createIssue(
@@ -177,6 +187,7 @@ async function handleFeedbackModal(kind: FeedbackKind, interaction: ModalSubmitI
     }),
     kind,
   );
+  feedbackCooldown.record(interaction.user.id);
   await interaction.editReply(`Merci pour ton retour. L'issue GitHub **#${issue.number}** a été créée : ${issue.url}`);
   console.info(`[feedback] issue #${issue.number} créée par ${interaction.user.tag} (${kind})`);
 }
