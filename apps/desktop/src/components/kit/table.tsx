@@ -29,6 +29,7 @@ export function DataTable<T>({
   rowKey,
   onRowClick,
   onRowDoubleClick,
+  onRowMouseDown,
   isSelected,
   rowActions,
   rowMenu,
@@ -42,12 +43,14 @@ export function DataTable<T>({
   stickyHeader = true,
   footer,
   groupBy,
+  onBackgroundClick,
 }: {
   columns: Column<T>[];
   rows: T[];
   rowKey: (row: T) => string;
   onRowClick?: (row: T, e: React.MouseEvent) => void;
   onRowDoubleClick?: (row: T) => void;
+  onRowMouseDown?: (row: T, e: React.MouseEvent) => void;
   isSelected?: (row: T) => boolean;
   /** Actions fréquentes, toujours visibles à droite de la ligne. */
   rowActions?: (row: T) => ReactNode;
@@ -64,6 +67,8 @@ export function DataTable<T>({
   footer?: ReactNode;
   /** Regroupement visuel : titre de groupe pour chaque ligne (les lignes doivent être triées par groupe). */
   groupBy?: { key: (row: T) => string; header: (key: string, rows: T[]) => ReactNode };
+  /** Clic dans la zone vide sous les lignes (désélection). */
+  onBackgroundClick?: () => void;
 }) {
   const [localSort, setLocalSort] = useState<SortState>(initialSort);
   const sort = controlledSort !== undefined ? controlledSort : localSort;
@@ -132,6 +137,7 @@ export function DataTable<T>({
         aria-selected={isSelected ? selected : undefined}
         onClick={onRowClick ? (e) => onRowClick(row, e) : undefined}
         onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
+        onMouseDown={onRowMouseDown ? (e) => onRowMouseDown(row, e) : undefined}
         onContextMenu={rowMenu ? (e) => openMenu(e, row) : undefined}
         style={{ gridTemplateColumns: template, height: rowHeight }}
         className={`grid items-center border-b border-line text-[13px] ${onRowClick ? "cursor-default" : ""} ${
@@ -227,6 +233,7 @@ export function DataTable<T>({
         {hasActions && <div />}
       </div>
       {body}
+      {onBackgroundClick && <div className="min-h-16" onClick={onBackgroundClick} />}
       {footer}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} align={menu.align} onClose={() => setMenu(null)} />}
     </div>
