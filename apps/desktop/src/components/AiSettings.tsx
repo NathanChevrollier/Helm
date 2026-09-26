@@ -3,7 +3,7 @@ import { Sparkles } from "lucide-react";
 import { api, errorMessage, type AiCapabilities, type AiExecMode, type AiSettings as Settings, type AiView } from "../lib/api";
 import { useApp } from "../lib/store";
 import { ask, useAssistant } from "../lib/assistant";
-import { Badge, Button, Field, Input } from "./ui";
+import { Badge, Button, Checkbox, Field, Input } from "./ui";
 
 /** Fournisseurs prêts à l'emploi : le reste (adresse, modèle) se règle à la main. */
 const PRESETS: { id: string; label: string; settings: Partial<Settings>; hint: string }[] = [
@@ -32,7 +32,7 @@ const MODES: { id: AiExecMode; label: string; hint: string }[] = [
 ];
 
 /** Réglages de l'assistant IA (Réglages → Préférences). */
-export default function AiSettingsPanel() {
+export default function AiSettingsPanel({ onOpenAccess }: { onOpenAccess?: () => void } = {}) {
   const notify = useApp((s) => s.notify);
   const [view, setView] = useState<AiView | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -51,6 +51,8 @@ export default function AiSettingsPanel() {
 
   if (!settings) return null;
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings({ ...settings, [k]: v });
+  // Une clé d'API ne doit jamais partir en clair : http:// n'est admis que vers la machine locale.
+  const insecure = settings.provider === "openai" && /^http:\/\//i.test(settings.baseUrl) && !/^http:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(settings.baseUrl);
 
   const save = async () => {
     setSaving(true);
@@ -75,13 +77,13 @@ export default function AiSettingsPanel() {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-panel p-4">
       <div>
-        <span className="flex items-center gap-2 font-medium">
-          <Sparkles size={16} className="text-accent" />
-          Assistant IA
+        <span className="flex items-center gap-2 text-[13px] font-medium">
+          <Sparkles size={15} className="text-accent" />
+          Assistant IA {view?.hasKey && <Badge tone="ok">clé enregistrée</Badge>}
         </span>
-        <span className="block text-sm text-muted">
+        <span className="mt-0.5 block text-xs leading-relaxed text-muted">
           Un panneau de discussion qui peut consulter tes serveurs pour t'aider à comprendre une erreur. Les données lues (journaux, configurations) partent chez le fournisseur choisi : les mots de passe, clés et jetons sont masqués avant l'envoi.
         </span>
       </div>
@@ -90,14 +92,9 @@ export default function AiSettingsPanel() {
         {PRESETS.map((p) => {
           const active = settings.provider === p.settings.provider && settings.baseUrl === (p.settings.baseUrl ?? "");
           return (
-            <button
-              key={p.id}
-              title={p.hint}
-              onClick={() => setSettings({ ...settings, ...p.settings } as Settings)}
-              className={`rounded-md border px-2.5 py-1 text-xs ${active ? "border-accent bg-accent/10 text-fg" : "border-border text-muted hover:text-fg"}`}
-            >
+            <Button key={p.id} size="sm" title={p.hint} variant={active ? "subtle" : "outline"} className={active ? "!border-accent/50" : ""} onClick={() => setSettings({ ...settings, ...p.settings } as Settings)}>
               {p.label}
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -111,7 +108,11 @@ export default function AiSettingsPanel() {
         </Field>
         {settings.provider === "openai" && (
           <div className="col-span-2">
-            <Field label="Adresse de l'API" hint="Doit se terminer par /v1 pour la plupart des fournisseurs.">
+            <Field
+              label="Adresse de l'API"
+              hint="Doit se terminer par /v1 pour la plupart des fournisseurs."
+              error={insecure ? "http:// n'est accepté que pour un modèle local (localhost) : la clé et tes données circuleraient en clair." : null}
+            >
               <Input value={settings.baseUrl} placeholder="https://api.openai.com/v1" onChange={(e) => set("baseUrl", e.target.value)} />
             </Field>
           </div>
@@ -122,46 +123,60 @@ export default function AiSettingsPanel() {
         <span className="text-xs font-medium text-muted">Ce qu'il peut consulter</span>
         <div className="mt-1 grid grid-cols-2 gap-x-4">
           {CAPABILITIES.map((c) => (
-            <label key={c.key} className="flex items-start gap-2 py-1 text-sm" title={c.hint}>
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={settings.capabilities[c.key]}
-                onChange={(e) => set("capabilities", { ...settings.capabilities, [c.key]: e.target.checked })}
-              />
-              <span>
-                {c.label}
-                <span className="block text-xs text-muted">{c.hint}</span>
-              </span>
-            </label>
+            <Checkbox
+              key={c.key}
+              className="py-1"
+              checked={settings.capabilities[c.key]}
+              onChange={(on) => set("capabilities", { ...settings.capabilities, [c.key]: on })}
+              label={c.label}
+              hint={c.hint}
+            />
           ))}
         </div>
         <p className="mt-1 text-xs text-muted">
-          Il ne voit que les serveurs cochés dans l'onglet « Accès IA ». Rien n'est consulté sans que tu poses une question.
+          Il ne voit que les serveurs autorisés dans{" "}
+          {onOpenAccess ? (
+            <button type="button" className="text-accent hover:underline" onClick={onOpenAccess}>
+              Accès IA (MCP)
+            </button>
+          ) : (
+            "Accès IA (MCP)"
+          )}
+          . Rien n'est consulté sans que tu poses une question.
         </p>
       </div>
 
       <div>
         <span className="text-xs font-medium text-muted">Commandes</span>
-        <div className="mt-1 flex flex-col gap-1">
-          {MODES.map((m) => (
-            <label key={m.id} className="flex items-start gap-2 text-sm">
-              <input type="radio" className="mt-1" name="ai-exec" checked={settings.execMode === m.id} onChange={() => set("execMode", m.id)} />
-              <span>
-                {m.label}
-                {m.id === "auto" && <Badge tone="warn">à activer en connaissance de cause</Badge>}
-                <span className="block text-xs text-muted">{m.hint}</span>
-              </span>
-            </label>
-          ))}
+        <div role="radiogroup" aria-label="Commandes" className="mt-1.5 grid gap-2 sm:grid-cols-3">
+          {MODES.map((m) => {
+            const on = settings.execMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => set("execMode", m.id)}
+                className={`flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors ${on ? "border-accent bg-accent/8" : "border-border hover:bg-hover"}`}
+              >
+                <span className="flex items-center gap-1.5 text-[13px] font-medium">
+                  <span className={`size-3 shrink-0 rounded-full border-2 ${on ? "border-accent bg-accent" : "border-border-strong"}`} />
+                  {m.label}
+                </span>
+                <span className="text-xs leading-snug text-muted">{m.hint}</span>
+                {m.id === "auto" && <Badge tone="warn">en connaissance de cause</Badge>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="primary" loading={saving} onClick={() => void save()}>
+        <Button size="sm" variant="primary" loading={saving} disabled={insecure} onClick={() => void save()}>
           Enregistrer
         </Button>
-        <Button size="sm" icon={<Sparkles size={13} />} onClick={() => void test()}>
+        <Button size="sm" icon={<Sparkles size={13} />} disabled={insecure} onClick={() => void test()}>
           Enregistrer et tester
         </Button>
       </div>
