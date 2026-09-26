@@ -18,6 +18,7 @@ import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
 import { Badge, Button, Drawer, EmptyState, ErrorState, Eyebrow, Field, FOCUS_RING, IconButton, Input, Loading, MenuButton, Modal, Select, ToolbarSep } from "../components/ui";
+import { isReadOnly } from "../lib/sql";
 import PageLayout from "../components/PageLayout";
 import ServerGate, { ServerContext } from "../components/ServerGate";
 import DataGrid, { type Sort } from "../components/DataGrid";
@@ -723,12 +724,3 @@ function Databases({ serverId }: { serverId: string }) {
 
 const SYSTEM_DBS = ["information_schema", "performance_schema", "mysql", "sys", "postgres", "template0", "template1"];
 
-/** Même règle que côté Rust : seules ces requêtes s'exécutent sans confirmation. */
-function isReadOnly(sql: string): boolean {
-  const text = sql
-    .replace(/--[^\n]*\n/g, " ")
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .trim();
-  const first = text.split(/[\s(;]+/).find(Boolean)?.toUpperCase() ?? "";
-  return ["SELECT", "SHOW", "EXPLAIN", "DESCRIBE", "DESC", "WITH", "TABLE", "VALUES", "ANALYZE"].includes(first);
-}

@@ -375,7 +375,29 @@ pub async fn expire(conn: &Connection, sudo: Option<&str>, server: &Server, data
 
 /// Commandes refusées par la console : elles bloquent le serveur ou détruisent tout, et rien dans
 /// l'interface de Helm n'en a besoin. La liste est volontairement courte et explicite.
-pub const BLOCKED: &[&str] = &["FLUSHALL", "FLUSHDB", "SHUTDOWN", "DEBUG", "MONITOR", "SUBSCRIBE", "PSUBSCRIBE", "BLPOP", "BRPOP", "WAIT"];
+pub const BLOCKED: &[&str] = &[
+    "FLUSHALL", "FLUSHDB", "SHUTDOWN", "DEBUG", "MONITOR", "SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "BLPOP", "BRPOP", "BLMOVE", "BZPOPMIN",
+    "BZPOPMAX", "WAIT", "WAITAOF",
+    // Écriture de fichiers et exécution sur le serveur (`CONFIG SET dir` + `SAVE` est le chemin
+    // classique vers l'exécution de code), réplication vers une machine tierce, code Lua.
+    "MODULE", "SCRIPT", "EVAL", "EVALSHA", "EVAL_RO", "EVALSHA_RO", "FCALL", "FCALL_RO", "FUNCTION", "REPLICAOF", "SLAVEOF", "MIGRATE",
+    "SYNC", "PSYNC", "FAILOVER", "CLUSTER", "SAVE", "BGSAVE", "BGREWRITEAOF", "RESTORE", "RESTORE-ASKING",
+];
+
+/// Sous-commandes refusées d'une commande par ailleurs utile (`CONFIG GET` reste permis).
+pub const BLOCKED_SUBCOMMANDS: &[(&str, &[&str])] =
+    &[("CONFIG", &["SET", "REWRITE", "RESETSTAT"]), ("ACL", &["SETUSER", "DELUSER", "LOAD", "SAVE", "DRYRUN"]), ("CLIENT", &["KILL", "PAUSE", "NO-EVICT"])];
+
+/// Raison du refus d'une commande de la console, ou `None` si elle est permise.
+pub fn refusal(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace().map(str::to_ascii_uppercase);
+    let verb = words.next()?;
+    if BLOCKED.contains(&verb.as_str()) {
+        return Some(verb);
+    }
+    let sub = words.next().unwrap_or_default();
+    BLOCKED_SUBCOMMANDS.iter().find(|(v, subs)| *v == verb && subs.contains(&sub.as_str())).map(|_| format!("{verb} {sub}"))
+}
 
 /// Exécute une commande écrite par l'utilisateur dans la console et renvoie les lignes de réponse.
 /// Une seule commande à la fois : un retour à la ligne est refusé plutôt que découpé.
@@ -387,9 +409,8 @@ pub async fn command(conn: &Connection, sudo: Option<&str>, server: &Server, dat
     if line.contains('\n') || line.contains('\r') {
         return Err(Error::Other("une seule commande à la fois".into()));
     }
-    let verb = line.split_whitespace().next().unwrap_or("").to_ascii_uppercase();
-    if BLOCKED.contains(&verb.as_str()) {
-        return Err(Error::Other(format!("commande refusée par Helm : {verb}")));
+    if let Some(what) = refusal(line) {
+        return Err(Error::Other(format!("commande refusée par Helm : {what}")));
     }
     let replies = send(conn, sudo, server, database, &[line.to_string()]).await?;
     Ok(replies.iter().map(Reply::text).collect())
@@ -498,5 +519,15 @@ mod tests {
     fn local_services() {
         assert_eq!(parse_local("redis\n").len(), 1);
         assert!(parse_local("").is_empty());
+    }
+
+    #[test]
+    fn console_refuses_dangerous_commands() {
+        for line in ["config set dir /var/www", "CONFIG REWRITE", "module load /tmp/x.so", "eval \"return 1\" 0", "replicaof 1.2.3.4 6379", "acl setuser x on", "flushall", "save"] {
+            assert!(refusal(line).is_some(), "{line}");
+        }
+        for line in ["GET clé", "config get maxmemory", "INFO memory", "acl whoami", "client list", "scan 0 match user:*"] {
+            assert!(refusal(line).is_none(), "{line}");
+        }
     }
 }
