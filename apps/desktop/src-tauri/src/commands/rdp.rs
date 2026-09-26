@@ -1,7 +1,7 @@
 //! Bureaux à distance (RDP) : profils, et ouverture dans le client RDP du système (mstsc sous
 //! Windows), directement ou à travers un tunnel SSH ouvert pour l'occasion.
 
-use helm_profiles::{Identity, RemoteDesktop, TunnelDef};
+use helm_profiles::{DesktopProtocol, Identity, RemoteDesktop, TunnelDef};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -55,7 +55,7 @@ pub fn desktop_save(store: State<'_, Store>, mut desktop: RemoteDesktop, passwor
         store.server(s)?;
     }
     if desktop.port == 0 {
-        desktop.port = 3389;
+        desktop.port = desktop.protocol.default_port();
     }
     if desktop.id.is_empty() {
         desktop.id = uuid::Uuid::new_v4().to_string();
@@ -131,6 +131,12 @@ fn free_port() -> Result<u16, String> {
 #[tauri::command]
 pub async fn desktop_launch(app: AppHandle, store: State<'_, Store>, tunnels: State<'_, Tunnels>, id: String) -> Result<String, String> {
     let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    if d.protocol == DesktopProtocol::Vnc {
+        return Err("les bureaux VNC s'ouvrent dans Helm : utilise « Se connecter »".into());
+    }
+    if d.protocol == DesktopProtocol::Spice {
+        return spice_launch(&app, &store, &tunnels, &d).await;
+    }
     let (user, password) = credentials(&store, &d)?;
     let tid = tunnel_id(&d.id);
     let (host, port) = match &d.via_server_id {
@@ -189,6 +195,9 @@ pub async fn desktop_session_open(
     id: String,
 ) -> Result<RdpSession, String> {
     let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    if d.protocol != DesktopProtocol::Rdp {
+        return Err("ce bureau n'est pas en RDP : il ne s'ouvre pas dans le client RDP intégré".into());
+    }
     let (user, password) = credentials(&store, &d)?;
     let password = password.ok_or("aucun mot de passe enregistré pour ce bureau à distance")?;
     // L'utilisateur est renvoyé sans le domaine : le client RDP les transmet séparément.
@@ -231,6 +240,175 @@ pub async fn desktop_session_open(
     };
     bridges.keep(&id, bridge);
     log::info!("bureau à distance « {} » ouvert dans Helm ({host}:{port})", d.name);
+    Ok(session)
+}
+
+/// Fichier de connexion de remote-viewer (format `.vv` de virt-viewer). `delete-this-file=1`
+/// demande à remote-viewer d'effacer le fichier dès qu'il l'a lu : le mot de passe SPICE ne reste
+/// pas sur le disque.
+fn vv_file(title: &str, host: &str, port: u16, password: Option<&str>, fullscreen: bool) -> Result<String, String> {
+    let title = clean(title, "nom")?;
+    let mut lines = vec![
+        "[virt-viewer]".to_string(),
+        "type=spice".to_string(),
+        format!("host={host}"),
+        format!("port={port}"),
+        format!("title={title}"),
+        "delete-this-file=1".to_string(),
+        format!("fullscreen={}", u8::from(fullscreen)),
+        // Ni carte à puce ni USB redirigés : inutile pour une console, et autant de surface en moins.
+        "enable-smartcard=0".to_string(),
+        "enable-usbredir=0".to_string(),
+    ];
+    if let Some(pw) = password.filter(|p| !p.is_empty()) {
+        // Une seule ligne par valeur : un retour à la ligne ajouterait ses propres clés.
+        if pw.chars().any(char::is_control) {
+            return Err("mot de passe SPICE invalide".into());
+        }
+        lines.push(format!("password={pw}"));
+    }
+    Ok(lines.join("\n") + "\n")
+}
+
+/// Trouve remote-viewer : dans le PATH, puis (Windows) dans le dossier d'installation de virt-viewer.
+fn remote_viewer() -> Result<std::path::PathBuf, String> {
+    let exe = if cfg!(windows) { "remote-viewer.exe" } else { "remote-viewer" };
+    if let Some(p) = std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|d| d.join(exe)).find(|p| p.is_file())) {
+        return Ok(p);
+    }
+    #[cfg(windows)]
+    {
+        for base in ["C:\\Program Files", "C:\\Program Files (x86)"] {
+            if let Ok(entries) = std::fs::read_dir(base) {
+                for e in entries.flatten() {
+                    let candidate = e.path().join("bin").join(exe);
+                    if e.file_name().to_string_lossy().starts_with("VirtViewer") && candidate.is_file() {
+                        return Ok(candidate);
+                    }
+                }
+            }
+        }
+    }
+    Err("remote-viewer (virt-viewer) n'est pas installé : https://virt-manager.org/download — sous macOS « brew install virt-viewer », sous Linux le paquet virt-viewer".into())
+}
+
+/// Ouvre une console SPICE dans remote-viewer, à travers un tunnel SSH si la machine passe par un
+/// serveur (SPICE sans TLS fait circuler l'écran en clair). Le tunnel vit aussi longtemps que la
+/// fenêtre de remote-viewer.
+async fn spice_launch(app: &AppHandle, store: &Store, tunnels: &Tunnels, d: &RemoteDesktop) -> Result<String, String> {
+    let viewer = remote_viewer()?;
+    let (_, password) = credentials(store, d)?;
+    let tid = tunnel_id(&d.id);
+    let (host, port) = match &d.via_server_id {
+        Some(server) => {
+            tunnels.stop(&tid);
+            let local_port = free_port()?;
+            let def = TunnelDef {
+                id: tid.clone(),
+                server_id: server.clone(),
+                name: format!("SPICE {}", d.name),
+                local_port,
+                remote_host: d.host.clone(),
+                remote_port: d.port,
+                auto_start: false,
+            };
+            tunnels.start(app, def).await?;
+            ("127.0.0.1".to_string(), local_port)
+        }
+        None => (d.host.clone(), d.port),
+    };
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("spice");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join(format!("{}.vv", d.id));
+    std::fs::write(&file, vv_file(&d.name, &host, port, password.as_deref(), d.fullscreen)?).map_err(|e| e.to_string())?;
+    // Le fichier peut contenir le mot de passe : lisible par l'utilisateur seul, le temps que
+    // remote-viewer le lise puis l'efface.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+    }
+    let mut child = std::process::Command::new(&viewer).arg(&file).spawn().map_err(|e| format!("remote-viewer : {e}"))?;
+    log::info!(
+        "console SPICE « {} » ouverte ({host}:{port}{})",
+        d.name,
+        if d.via_server_id.is_some() { ", via un tunnel SSH" } else { "" }
+    );
+    let via = d.via_server_id.is_some();
+    let app = app.clone();
+    let file_for_cleanup = file.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = child.wait();
+        // Filet de sécurité si remote-viewer n'a pas effacé le fichier (ancienne version, échec).
+        let _ = std::fs::remove_file(&file_for_cleanup);
+        if via {
+            app.state::<Tunnels>().stop(&tid);
+        }
+    });
+    Ok("Console SPICE ouverte dans remote-viewer".into())
+}
+
+/// Tout ce qu'il faut au client VNC intégré (noVNC) pour ouvrir la session.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VncSession {
+    /// Adresse du pont local (WebSocket), jeton compris.
+    pub url: String,
+    /// Mot de passe VNC, ou vide si le serveur n'en demande pas. Il va du coffre au client, en
+    /// mémoire : il n'est jamais écrit sur le disque ni placé dans l'adresse.
+    pub password: String,
+    /// Utilisateur, pour les serveurs qui en demandent un (macOS, VeNCrypt avec identifiant).
+    pub username: String,
+    pub destination: String,
+    pub via_tunnel: bool,
+}
+
+/// Ouvre une session VNC dans Helm : tunnel SSH si la machine passe par un serveur, puis pont
+/// local WebSocket ↔ TCP. Le port VNC n'a donc jamais besoin d'être exposé à Internet — c'est
+/// d'autant plus important que VNC, sans chiffrement, fait circuler l'écran en clair.
+#[tauri::command]
+pub async fn vnc_session_open(
+    app: AppHandle,
+    store: State<'_, Store>,
+    tunnels: State<'_, Tunnels>,
+    bridges: State<'_, crate::rdp_bridge::Bridges>,
+    id: String,
+) -> Result<VncSession, String> {
+    let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    if d.protocol != DesktopProtocol::Vnc {
+        return Err("ce bureau n'est pas en VNC".into());
+    }
+    let (user, password) = credentials(&store, &d)?;
+    let tid = tunnel_id(&d.id);
+    let (host, port) = match &d.via_server_id {
+        Some(server) => {
+            tunnels.stop(&tid);
+            let local_port = free_port()?;
+            let def = TunnelDef {
+                id: tid.clone(),
+                server_id: server.clone(),
+                name: format!("VNC {}", d.name),
+                local_port,
+                remote_host: d.host.clone(),
+                remote_port: d.port,
+                auto_start: false,
+            };
+            tunnels.start(&app, def).await?;
+            ("127.0.0.1".to_string(), local_port)
+        }
+        None => (d.host.clone(), d.port),
+    };
+    let bridge = crate::vnc_bridge::start(host.clone(), port).await?;
+    let session = VncSession {
+        url: bridge.url.clone(),
+        password: password.unwrap_or_default(),
+        // Le domaine n'a pas de sens en VNC : seul l'utilisateur est transmis.
+        username: user.rsplit('\\').next().unwrap_or(&user).to_string(),
+        destination: format!("{host}:{port}"),
+        via_tunnel: d.via_server_id.is_some(),
+    };
+    bridges.keep(&id, bridge);
+    log::info!("bureau VNC « {} » ouvert dans Helm ({host}:{port})", d.name);
     Ok(session)
 }
 
@@ -344,6 +522,7 @@ mod tests {
         RemoteDesktop {
             id: "a".into(),
             name: "PC".into(),
+            protocol: DesktopProtocol::Rdp,
             host: "pc.lan".into(),
             port: 3389,
             username: "alice".into(),
@@ -369,6 +548,19 @@ mod tests {
         assert!(f.contains("use multimon:i:1") && f.contains("drivestoredirect:s:*"));
         let full = rdp_file(&RemoteDesktop { fullscreen: true, redirect_drives: false, ..desktop() }, "h", "u");
         assert!(full.contains("screen mode id:i:2") && !full.contains("desktopwidth") && !full.contains("drivestoredirect"));
+    }
+
+    #[test]
+    fn spice_file_forgets_its_password() {
+        let vv = vv_file("VM de test", "127.0.0.1", 61000, Some("s3cret"), false).unwrap();
+        assert!(vv.starts_with("[virt-viewer]\ntype=spice\n"));
+        assert!(vv.contains("host=127.0.0.1\nport=61000\n"));
+        assert!(vv.contains("delete-this-file=1"), "remote-viewer doit effacer le fichier après lecture");
+        assert!(vv.contains("password=s3cret\n"));
+        assert!(!vv_file("VM", "h", 1, None, true).unwrap().contains("password="));
+        // Un retour à la ligne dans une valeur ajouterait ses propres clés au fichier.
+        assert!(vv_file("VM\nhost=evil", "h", 1, None, false).is_err());
+        assert!(vv_file("VM", "h", 1, Some("a\nhost=evil"), false).is_err());
     }
 
     #[test]

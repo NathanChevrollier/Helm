@@ -11,24 +11,46 @@ const Editor = lazy(() => import("@monaco-editor/react"));
 
 const validName = (n: string) => /^[a-z0-9][a-z0-9_-]{0,39}$/.test(n);
 
+/** Projet pré-rempli par le catalogue d'applications. */
+export interface ComposePreset {
+  name: string;
+  yaml: string;
+  env?: string;
+  directory?: string;
+  /** Points à savoir avant de lancer, affichés au-dessus du fichier. */
+  notes?: string[];
+}
+
 /**
  * Nouveau projet Docker Compose : dossier + docker-compose.yml (+ .env), vérifiés par
- * `docker compose config` avant tout démarrage.
+ * `docker compose config` avant tout démarrage. Avec `preset`, les fichiers arrivent remplis par le
+ * catalogue et restent modifiables : c'est le dernier point de relecture avant l'écriture.
  */
-export default function NewComposeProject({ serverId, onClose, onDone }: { serverId: string; onClose: () => void; onDone: () => void }) {
+export default function NewComposeProject({
+  serverId,
+  preset,
+  onClose,
+  onDone,
+}: {
+  serverId: string;
+  preset?: ComposePreset | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const notify = useApp((s) => s.notify);
   const monacoTheme = useMonacoTheme();
-  const [name, setName] = useState("");
-  const [directory, setDirectory] = useState("");
-  const [yaml, setYaml] = useState("");
-  const [env, setEnv] = useState("");
-  const [showEnv, setShowEnv] = useState(false);
+  const [name, setName] = useState(preset?.name ?? "");
+  const [directory, setDirectory] = useState(preset?.directory ?? "");
+  const [yaml, setYaml] = useState(preset?.yaml ?? "");
+  const [env, setEnv] = useState(preset?.env ?? "");
+  const [showEnv, setShowEnv] = useState(!!preset?.env?.trim());
   const [start, setStart] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Le modèle suit le nom tant que le fichier n'a pas été modifié à la main. */
-  const [touched, setTouched] = useState(false);
+  /** Le modèle suit le nom tant que le fichier n'a pas été modifié à la main. Un projet venu du
+      catalogue est considéré comme déjà écrit : son fichier ne doit jamais être écrasé par le modèle. */
+  const [touched, setTouched] = useState(!!preset);
 
   useEffect(() => {
     if (touched) return;
@@ -75,7 +97,7 @@ export default function NewComposeProject({ serverId, onClose, onDone }: { serve
 
   return (
     <Modal
-      title="Nouveau projet Docker Compose"
+      title={preset ? `Déployer ${preset.name}` : "Nouveau projet Docker Compose"}
       width="max-w-4xl"
       onClose={onClose}
       footer={
@@ -94,6 +116,13 @@ export default function NewComposeProject({ serverId, onClose, onDone }: { serve
       }
     >
       <div className="flex flex-col gap-3">
+        {preset?.notes && preset.notes.length > 0 && (
+          <ul className="flex list-inside list-disc flex-col gap-1 rounded-md border border-accent/40 bg-accent/5 p-3 text-xs">
+            {preset.notes.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Nom du projet" hint="Sert de nom de projet compose et de dossier.">
             <Input value={name} placeholder="mon-app" onChange={(e) => setName(e.target.value.toLowerCase())} autoFocus />

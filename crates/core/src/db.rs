@@ -1,5 +1,5 @@
-//! Bases de données MySQL/MariaDB et PostgreSQL du serveur : découverte, exploration et
-//! exécution de SQL, en passant par les clients en ligne de commande (`mysql`, `psql`).
+//! Bases de données MySQL/MariaDB, PostgreSQL et SQLite du serveur : découverte, exploration et
+//! exécution de SQL, en passant par les clients en ligne de commande (`mysql`, `psql`, `sqlite3`).
 //!
 //! Le SQL est transmis sur l'entrée standard et les mots de passe ne sont jamais écrits dans une
 //! ligne de commande : pour un conteneur, ils sont lus dans son propre environnement
@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ssh::shell_quote;
 use crate::{Connection, Error, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,6 +17,8 @@ pub enum Engine {
     /// MySQL, MariaDB ou Percona.
     Mysql,
     Postgres,
+    /// Fichier SQLite ouvert sur le serveur avec `sqlite3`.
+    Sqlite,
 }
 
 impl Engine {
@@ -23,6 +26,7 @@ impl Engine {
         match self {
             Engine::Mysql => "MySQL / MariaDB",
             Engine::Postgres => "PostgreSQL",
+            Engine::Sqlite => "SQLite",
         }
     }
 
@@ -57,6 +61,33 @@ pub struct Instance {
     /// Version rapportée par le serveur de base de données.
     #[serde(default)]
     pub version: String,
+    /// Chemin du fichier pour SQLite ; vide pour les autres moteurs.
+    #[serde(default)]
+    pub path: String,
+}
+
+impl Instance {
+    /// Instance d'un moteur serveur (conteneur Docker ou service local).
+    pub fn server(id: impl Into<String>, label: impl Into<String>, engine: Engine, container: Option<String>) -> Instance {
+        Instance { id: id.into(), label: label.into(), engine, container, version: String::new(), path: String::new() }
+    }
+
+    /// Instance SQLite : un fichier sur le serveur, éventuellement dans un conteneur.
+    pub fn sqlite(path: impl Into<String>, container: Option<String>) -> Instance {
+        let path = path.into();
+        let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+        Instance {
+            id: match &container {
+                Some(c) => format!("sqlite:{c}:{path}"),
+                None => format!("sqlite:{path}"),
+            },
+            label: format!("{name} (SQLite)"),
+            engine: Engine::Sqlite,
+            container,
+            version: String::new(),
+            path,
+        }
+    }
 }
 
 /// Nom d'objet SQL acceptable dans une commande (base, table) : pas d'injection possible.
@@ -75,7 +106,17 @@ fn check(instance: &Instance, database: Option<&str>) -> Result<()> {
             return Err(Error::Other(format!("nom de base invalide : {d}")));
         }
     }
+    if instance.engine == Engine::Sqlite && !safe_file_path(&instance.path) {
+        return Err(Error::Other("chemin de fichier SQLite invalide".into()));
+    }
     Ok(())
+}
+
+/// Chemin de fichier acceptable pour SQLite. Le chemin est de toute façon passé entre apostrophes
+/// (`shell_quote`), mais un chemin relatif ou contenant un retour à la ligne n'a aucun sens ici et
+/// signale une erreur d'appel plutôt qu'un fichier réel.
+pub fn safe_file_path(path: &str) -> bool {
+    path.starts_with('/') && path.len() <= 4096 && !path.chars().any(char::is_control)
 }
 
 /// Commande shell qui lit le SQL sur son entrée standard et écrit le résultat sur stdout.
@@ -97,6 +138,13 @@ fn client_command(instance: &Instance, database: Option<&str>, limit: Option<usi
         (Engine::Postgres, None) => {
             format!("su -s /bin/sh postgres -c 'psql -d {} --csv -q -v ON_ERROR_STOP=1'", database.unwrap_or("postgres"))
         }
+        // SQLite n'a ni serveur ni utilisateur : le « nom de base » est le fichier lui-même.
+        // `-bail` arrête au premier message d'erreur, sinon sqlite3 continue et renvoie 0.
+        (Engine::Sqlite, Some(c)) => format!(
+            "docker exec -i {c} sqlite3 -batch -bail -csv -header {}",
+            shell_quote(&instance.path)
+        ),
+        (Engine::Sqlite, None) => format!("sqlite3 -batch -bail -csv -header {}", shell_quote(&instance.path)),
     };
     if let Some(n) = limit {
         // Une ligne de plus que demandé : elle signale un résultat tronqué.
@@ -240,7 +288,7 @@ pub fn parse_csv(out: &str) -> QueryResult {
 fn parse(engine: Engine, out: &str) -> QueryResult {
     match engine {
         Engine::Mysql => parse_mysql(out),
-        Engine::Postgres => parse_csv(out),
+        Engine::Postgres | Engine::Sqlite => parse_csv(out),
     }
 }
 
@@ -300,6 +348,10 @@ const MYSQL_TABLES: &str = "SELECT table_name AS nom, COALESCE(table_rows, 0) AS
      COALESCE(data_length + index_length, 0) AS taille FROM information_schema.tables \
      WHERE table_schema = DATABASE() ORDER BY table_name";
 
+/// SQLite ne tient aucune statistique de taille par table : seuls les noms sont connus.
+const SQLITE_TABLES: &str = "SELECT name AS nom, 0 AS lignes, 0 AS taille FROM sqlite_master \
+     WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+
 const PG_TABLES: &str = "SELECT c.relname AS nom, COALESCE(s.n_live_tup, 0) AS lignes, \
      pg_total_relation_size(c.oid) AS taille \
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -341,6 +393,7 @@ pub async fn create_database(conn: &Connection, sudo: Option<&str>, instance: &I
     let sql = match instance.engine {
         Engine::Mysql => format!("CREATE DATABASE `{name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
         Engine::Postgres => format!("CREATE DATABASE \"{name}\" ENCODING 'UTF8'"),
+        Engine::Sqlite => return Err(Error::Other("un fichier SQLite ne contient qu'une seule base".into())),
     };
     let out = run_sql(conn, sudo, instance, None, &sql, None).await?;
     let lower = out.to_lowercase();
@@ -355,6 +408,8 @@ pub async fn databases(conn: &Connection, sudo: Option<&str>, instance: &Instanc
     let sql = match instance.engine {
         Engine::Mysql => MYSQL_DATABASES,
         Engine::Postgres => PG_DATABASES,
+        // Un fichier SQLite est lui-meme la base : il n'y a rien a lister.
+        Engine::Sqlite => return Ok(vec![Named { name: "main".into(), size: 0, count: 0 }]),
     };
     let out = run_sql(conn, sudo, instance, None, sql, Some(500)).await?;
     Ok(to_named(&parse(instance.engine, &out)))
@@ -365,6 +420,7 @@ pub async fn tables(conn: &Connection, sudo: Option<&str>, instance: &Instance, 
     let sql = match instance.engine {
         Engine::Mysql => MYSQL_TABLES,
         Engine::Postgres => PG_TABLES,
+        Engine::Sqlite => SQLITE_TABLES,
     };
     let out = run_sql(conn, sudo, instance, Some(database), sql, Some(2000)).await?;
     Ok(to_named(&parse(instance.engine, &out)))
@@ -375,10 +431,7 @@ pub fn preview_query(engine: Engine, table: &str, limit: usize) -> Result<String
     if !safe_name(table) {
         return Err(Error::Other("nom de table invalide".into()));
     }
-    Ok(match engine {
-        Engine::Mysql => format!("SELECT * FROM `{table}` LIMIT {limit}"),
-        Engine::Postgres => format!("SELECT * FROM \"{table}\" LIMIT {limit}"),
-    })
+    Ok(format!("SELECT * FROM {} LIMIT {limit}", quote_ident(engine, table)?))
 }
 
 /// Version du serveur de base de données, pour l'affichage.
@@ -386,6 +439,7 @@ pub async fn version(conn: &Connection, sudo: Option<&str>, instance: &Instance)
     let sql = match instance.engine {
         Engine::Mysql => "SELECT VERSION()",
         Engine::Postgres => "SHOW server_version",
+        Engine::Sqlite => "SELECT sqlite_version()",
     };
     match run_sql(conn, sudo, instance, None, sql, Some(2)).await {
         Ok(out) => parse(instance.engine, &out).rows.first().and_then(|r| r.first().cloned()).flatten().unwrap_or_default(),
@@ -401,22 +455,270 @@ pub const LOCAL_PROBE: &str = "if pgrep -x mysqld >/dev/null 2>&1 || pgrep -x ma
 pub fn parse_local(out: &str) -> Vec<Instance> {
     out.lines()
         .filter_map(|l| match l.trim() {
-            "mysql" => Some(Instance {
-                id: "local:mysql".into(),
-                label: "MySQL / MariaDB (serveur)".into(),
-                engine: Engine::Mysql,
-                container: None,
-                version: String::new(),
-            }),
-            "postgres" => Some(Instance {
-                id: "local:postgres".into(),
-                label: "PostgreSQL (serveur)".into(),
-                engine: Engine::Postgres,
-                container: None,
-                version: String::new(),
-            }),
+            "mysql" => Some(Instance::server("local:mysql", "MySQL / MariaDB (serveur)", Engine::Mysql, None)),
+            "postgres" => Some(Instance::server("local:postgres", "PostgreSQL (serveur)", Engine::Postgres, None)),
             _ => None,
         })
+        .collect()
+}
+
+/// Colonne d'une table, telle que la décrit le moteur.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Column {
+    pub name: String,
+    /// Type déclaré (`int(11)`, `character varying(255)`, `TEXT`…).
+    pub data_type: String,
+    pub nullable: bool,
+    /// Fait partie de la clé primaire de la table.
+    pub primary: bool,
+}
+
+const MYSQL_COLUMNS: &str = "SELECT column_name, column_type, is_nullable, column_key \
+     FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ";
+
+const PG_COLUMNS: &str = "SELECT a.attname, format_type(a.atttypid, a.atttypmod), \
+     CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END, \
+     CASE WHEN EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = a.attrelid AND i.indisprimary \
+       AND a.attnum = ANY(i.indkey)) THEN 'PRI' ELSE '' END \
+     FROM pg_attribute a WHERE a.attrelid = ";
+
+/// Colonnes d'une table, avec le repérage de la clé primaire. C'est elle qui rend possible
+/// l'édition d'une cellule : sans clé primaire, aucune ligne n'est identifiable de façon sûre.
+pub async fn columns(
+    conn: &Connection,
+    sudo: Option<&str>,
+    instance: &Instance,
+    database: Option<&str>,
+    table: &str,
+) -> Result<Vec<Column>> {
+    if !safe_name(table) {
+        return Err(Error::Other("nom de table invalide".into()));
+    }
+    let sql = match instance.engine {
+        Engine::Mysql => format!("{MYSQL_COLUMNS}{} ORDER BY ordinal_position", quote_literal(instance.engine, table)),
+        Engine::Postgres => format!(
+            "{PG_COLUMNS}{}::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+            quote_literal(instance.engine, table)
+        ),
+        // `PRAGMA table_info` ne suit pas la même disposition : cid, nom, type, notnull, défaut, pk.
+        Engine::Sqlite => format!("PRAGMA table_info({})", quote_ident(Engine::Sqlite, table)?),
+    };
+    let out = run_sql(conn, sudo, instance, database, &sql, Some(2000)).await?;
+    let r = parse(instance.engine, &out);
+    let get = |row: &Vec<Option<String>>, i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+    Ok(r.rows
+        .iter()
+        .filter_map(|row| {
+            if instance.engine == Engine::Sqlite {
+                let name = get(row, 1);
+                return (!name.is_empty()).then(|| Column {
+                    name,
+                    data_type: get(row, 2),
+                    nullable: get(row, 3) != "1",
+                    primary: get(row, 5) != "0" && !get(row, 5).is_empty(),
+                });
+            }
+            let name = get(row, 0);
+            (!name.is_empty()).then(|| Column {
+                name,
+                data_type: get(row, 1),
+                nullable: get(row, 2).eq_ignore_ascii_case("YES"),
+                primary: get(row, 3) == "PRI",
+            })
+        })
+        .collect())
+}
+
+/// Identifiant SQL cité pour le moteur. Le nom est d'abord validé : un nom refusé n'est jamais
+/// échappé « au mieux », il fait échouer l'opération.
+pub fn quote_ident(engine: Engine, name: &str) -> Result<String> {
+    if !safe_name(name) {
+        return Err(Error::Other(format!("nom d'objet invalide : {name}")));
+    }
+    Ok(match engine {
+        Engine::Mysql => format!("`{name}`"),
+        Engine::Postgres | Engine::Sqlite => format!("\"{name}\""),
+    })
+}
+
+/// Chaîne SQL citée. MySQL traite la barre oblique inverse comme un caractère d'échappement dans
+/// les littéraux (sauf en mode `NO_BACKSLASH_ESCAPES`) : elle doit donc être doublée, alors que
+/// PostgreSQL et SQLite la prennent au pied de la lettre.
+pub fn quote_literal(engine: Engine, value: &str) -> String {
+    let escaped = match engine {
+        Engine::Mysql => value.replace('\\', "\\\\").replace('\'', "''"),
+        Engine::Postgres | Engine::Sqlite => value.replace('\'', "''"),
+    };
+    format!("'{escaped}'")
+}
+
+/// Valeur d'une cellule dans une requête : `NULL` sans guillemets, sinon une chaîne citée. Le
+/// moteur convertit lui-même la chaîne vers le type de la colonne (entier, date…).
+fn value_sql(engine: Engine, value: Option<&str>) -> String {
+    match value {
+        None => "NULL".into(),
+        Some(v) => quote_literal(engine, v),
+    }
+}
+
+/// Sens du tri d'une colonne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortDir {
+    Asc,
+    Desc,
+}
+
+/// Condition posée sur une colonne depuis l'en-tête du tableau.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Filter {
+    pub column: String,
+    /// Opérateur choisi dans la liste fermée de [`filter_operators`].
+    pub op: String,
+    /// Valeur comparée ; ignorée par `IS NULL` et `IS NOT NULL`.
+    #[serde(default)]
+    pub value: String,
+}
+
+/// Opérateurs acceptés dans un filtre de colonne. La liste est fermée : tout autre opérateur est
+/// refusé, ce qui interdit d'injecter du SQL par ce champ.
+pub fn filter_operators() -> &'static [&'static str] {
+    &["=", "!=", "<", "<=", ">", ">=", "LIKE", "NOT LIKE", "IS NULL", "IS NOT NULL"]
+}
+
+fn filter_sql(engine: Engine, f: &Filter) -> Result<String> {
+    let op = f.op.trim().to_ascii_uppercase();
+    let op = filter_operators()
+        .iter()
+        .find(|o| **o == op || **o == f.op.trim())
+        .ok_or_else(|| Error::Other(format!("opérateur refusé : {}", f.op)))?;
+    let col = quote_ident(engine, &f.column)?;
+    Ok(match *op {
+        "IS NULL" => format!("{col} IS NULL"),
+        "IS NOT NULL" => format!("{col} IS NOT NULL"),
+        // LIKE sur une colonne numérique échoue sur PostgreSQL : la colonne est convertie en texte.
+        "LIKE" | "NOT LIKE" if engine == Engine::Postgres => {
+            format!("{col}::text {op} {}", quote_literal(engine, &f.value))
+        }
+        _ => format!("{col} {op} {}", quote_literal(engine, &f.value)),
+    })
+}
+
+/// Requête de consultation d'une table avec tri et filtres posés depuis l'en-tête des colonnes.
+/// Tout identifiant est validé et cité ; aucune partie ne vient telle quelle de l'interface.
+pub fn table_query(
+    engine: Engine,
+    table: &str,
+    filters: &[Filter],
+    sort: Option<(&str, SortDir)>,
+    limit: usize,
+    offset: usize,
+) -> Result<String> {
+    let mut sql = format!("SELECT * FROM {}", quote_ident(engine, table)?);
+    if !filters.is_empty() {
+        let conditions = filters.iter().map(|f| filter_sql(engine, f)).collect::<Result<Vec<_>>>()?;
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
+    if let Some((col, dir)) = sort {
+        sql.push_str(&format!(" ORDER BY {} {}", quote_ident(engine, col)?, if dir == SortDir::Desc { "DESC" } else { "ASC" }));
+    }
+    sql.push_str(&format!(" LIMIT {limit}"));
+    if offset > 0 {
+        sql.push_str(&format!(" OFFSET {offset}"));
+    }
+    Ok(sql)
+}
+
+/// Colonne et valeur qui identifient une ligne : la clé primaire lue dans le résultat affiché.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyPart {
+    pub column: String,
+    /// `None` pour une clé NULL, qui est refusée : elle n'identifie rien.
+    pub value: Option<String>,
+}
+
+/// Clause `WHERE` qui désigne exactement une ligne. Une clé vide ou partiellement NULL est refusée
+/// plutôt que traduite : c'est la seule protection contre un `UPDATE` qui toucherait toute la table.
+fn where_key(engine: Engine, key: &[KeyPart]) -> Result<String> {
+    if key.is_empty() {
+        return Err(Error::Other("aucune clé primaire : cette ligne ne peut pas être modifiée en place".into()));
+    }
+    let mut parts = Vec::with_capacity(key.len());
+    for k in key {
+        let Some(value) = &k.value else {
+            return Err(Error::Other(format!("clé primaire NULL sur « {} » : ligne non identifiable", k.column)));
+        };
+        parts.push(format!("{} = {}", quote_ident(engine, &k.column)?, quote_literal(engine, value)));
+    }
+    Ok(parts.join(" AND "))
+}
+
+/// MySQL accepte `LIMIT 1` sur `UPDATE` et `DELETE` : une borne de plus, au cas où la clé fournie
+/// ne serait pas réellement unique. PostgreSQL ne le permet pas.
+fn limit_one(engine: Engine) -> &'static str {
+    match engine {
+        Engine::Mysql => " LIMIT 1",
+        Engine::Postgres | Engine::Sqlite => "",
+    }
+}
+
+/// `UPDATE` d'une seule cellule, prêt à être montré à l'utilisateur avant exécution.
+pub fn update_cell_sql(engine: Engine, table: &str, column: &str, value: Option<&str>, key: &[KeyPart]) -> Result<String> {
+    Ok(format!(
+        "UPDATE {} SET {} = {} WHERE {}{}",
+        quote_ident(engine, table)?,
+        quote_ident(engine, column)?,
+        value_sql(engine, value),
+        where_key(engine, key)?,
+        limit_one(engine),
+    ))
+}
+
+/// `DELETE` d'une seule ligne, désignée par sa clé primaire.
+pub fn delete_row_sql(engine: Engine, table: &str, key: &[KeyPart]) -> Result<String> {
+    Ok(format!("DELETE FROM {} WHERE {}{}", quote_ident(engine, table)?, where_key(engine, key)?, limit_one(engine)))
+}
+
+/// `INSERT` d'une ligne. Les colonnes laissées de côté prennent la valeur par défaut du moteur.
+pub fn insert_row_sql(engine: Engine, table: &str, values: &[(String, Option<String>)]) -> Result<String> {
+    if values.is_empty() {
+        return Err(Error::Other("aucune valeur à insérer".into()));
+    }
+    let mut cols = Vec::with_capacity(values.len());
+    let mut vals = Vec::with_capacity(values.len());
+    for (c, v) in values {
+        cols.push(quote_ident(engine, c)?);
+        vals.push(value_sql(engine, v.as_deref()));
+    }
+    Ok(format!("INSERT INTO {} ({}) VALUES ({})", quote_ident(engine, table)?, cols.join(", "), vals.join(", ")))
+}
+
+/// Exécute une instruction d'écriture (pas de lignes à lire) et renvoie le message du moteur.
+pub async fn execute(conn: &Connection, sudo: Option<&str>, instance: &Instance, database: Option<&str>, sql: &str) -> Result<String> {
+    let out = crate::ssh::long(run_sql(conn, sudo, instance, database, sql, None)).await?;
+    Ok(out.trim().to_string())
+}
+
+/// Cherche les fichiers SQLite du serveur dans les emplacements habituels. La recherche est bornée
+/// (profondeur et dossiers) : un `find /` sur un serveur chargé peut durer des minutes.
+pub const SQLITE_PROBE: &str = "command -v sqlite3 >/dev/null 2>&1 || exit 0\n\
+     for d in /opt /srv /var/lib /var/www /home /root /data; do [ -d \"$d\" ] && \
+       find \"$d\" -maxdepth 5 -type f \\( -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' \\) \
+       -size -2G 2>/dev/null; done | head -n 60\n\
+     true";
+
+/// Fichiers SQLite retenus : les chemins renvoyés par [`SQLITE_PROBE`], dédoublonnés.
+pub fn parse_sqlite(out: &str) -> Vec<Instance> {
+    let mut seen = std::collections::HashSet::new();
+    out.lines()
+        .map(str::trim)
+        .filter(|l| safe_file_path(l))
+        .filter(|l| seen.insert(l.to_string()))
+        .map(|l| Instance::sqlite(l, None))
         .collect()
 }
 
@@ -425,7 +727,7 @@ mod tests {
     use super::*;
 
     fn container(engine: Engine, name: &str) -> Instance {
-        Instance { id: format!("container:{name}"), label: name.into(), engine, container: Some(name.into()), version: String::new() }
+        Instance::server(format!("container:{name}"), name, engine, Some(name.into()))
     }
 
     #[test]
@@ -502,5 +804,71 @@ mod tests {
         assert_eq!(l.len(), 2);
         assert_eq!(l[0].engine, Engine::Mysql);
         assert!(l[1].container.is_none());
+    }
+
+    fn key(column: &str, value: &str) -> Vec<KeyPart> {
+        vec![KeyPart { column: column.into(), value: Some(value.into()) }]
+    }
+
+    #[test]
+    fn literals_escape_per_engine() {
+        assert_eq!(quote_literal(Engine::Mysql, "l'ete"), "'l''ete'");
+        // MySQL interprete la barre oblique inverse dans un litteral : elle doit etre doublee.
+        assert_eq!(quote_literal(Engine::Mysql, "c:\\x"), "'c:\\\\x'");
+        assert_eq!(quote_literal(Engine::Postgres, "c:\\x"), "'c:\\x'");
+        assert_eq!(quote_ident(Engine::Mysql, "users").unwrap(), "`users`");
+        assert_eq!(quote_ident(Engine::Postgres, "users").unwrap(), "\"users\"");
+        assert!(quote_ident(Engine::Mysql, "users`; DROP TABLE x").is_err());
+    }
+
+    #[test]
+    fn cell_update_needs_a_key() {
+        let sql = update_cell_sql(Engine::Mysql, "users", "email", Some("a@b.c"), &key("id", "7")).unwrap();
+        assert_eq!(sql, "UPDATE `users` SET `email` = 'a@b.c' WHERE `id` = '7' LIMIT 1");
+        // Sans cle primaire, l'operation est refusee : jamais d'UPDATE sur toute la table.
+        assert!(update_cell_sql(Engine::Mysql, "users", "email", None, &[]).is_err());
+        // Une cle NULL n'identifie rien.
+        assert!(update_cell_sql(Engine::Mysql, "users", "email", None, &[KeyPart { column: "id".into(), value: None }]).is_err());
+        assert!(update_cell_sql(Engine::Postgres, "users", "email", None, &key("id", "7")).unwrap().ends_with("WHERE \"id\" = '7'"));
+        assert!(update_cell_sql(Engine::Postgres, "users", "email", None, &key("id", "7")).unwrap().contains("SET \"email\" = NULL"));
+    }
+
+    #[test]
+    fn row_delete_and_insert() {
+        assert_eq!(delete_row_sql(Engine::Postgres, "t", &key("id", "1")).unwrap(), "DELETE FROM \"t\" WHERE \"id\" = '1'");
+        let ins = insert_row_sql(Engine::Mysql, "t", &[("a".into(), Some("1".into())), ("b".into(), None)]).unwrap();
+        assert_eq!(ins, "INSERT INTO `t` (`a`, `b`) VALUES ('1', NULL)");
+        assert!(insert_row_sql(Engine::Mysql, "t", &[]).is_err());
+    }
+
+    #[test]
+    fn header_sort_and_filters() {
+        let filters = vec![
+            Filter { column: "nom".into(), op: "LIKE".into(), value: "a%".into() },
+            Filter { column: "actif".into(), op: "IS NOT NULL".into(), value: String::new() },
+        ];
+        let sql = table_query(Engine::Mysql, "users", &filters, Some(("id", SortDir::Desc)), 100, 200).unwrap();
+        assert_eq!(sql, "SELECT * FROM `users` WHERE `nom` LIKE 'a%' AND `actif` IS NOT NULL ORDER BY `id` DESC LIMIT 100 OFFSET 200");
+        // Sur PostgreSQL, LIKE est applique au texte de la colonne pour accepter les numeriques.
+        let pg = table_query(Engine::Postgres, "users", &filters[..1], None, 10, 0).unwrap();
+        assert!(pg.contains("\"nom\"::text LIKE 'a%'"));
+        // Un operateur hors liste est refuse, pas echappe.
+        let bad = vec![Filter { column: "id".into(), op: "= 1 OR 1".into(), value: String::new() }];
+        assert!(table_query(Engine::Mysql, "users", &bad, None, 10, 0).is_err());
+        assert!(table_query(Engine::Mysql, "users", &[], Some(("id; DROP", SortDir::Asc)), 10, 0).is_err());
+    }
+
+    #[test]
+    fn sqlite_instances_and_commands() {
+        let i = Instance::sqlite("/var/lib/app/data.db", None);
+        assert_eq!(i.engine, Engine::Sqlite);
+        assert_eq!(i.label, "data.db (SQLite)");
+        let cmd = client_command(&i, None, Some(10)).unwrap();
+        assert!(cmd.contains("sqlite3 -batch -bail -csv -header '/var/lib/app/data.db'"), "{cmd}");
+        // Un chemin relatif ou pietine n'atteint jamais le serveur.
+        assert!(client_command(&Instance::sqlite("data.db", None), None, None).is_err());
+        let found = parse_sqlite("/opt/a.db\n/opt/a.db\nrelatif.db\n/srv/b.sqlite\n");
+        assert_eq!(found.len(), 2, "doublons et chemins relatifs ecartes");
+        assert_eq!(found[1].path, "/srv/b.sqlite");
     }
 }

@@ -1,0 +1,35 @@
+# Manifeste winget de Helm (fiche en français, celle par défaut).
+PackageIdentifier: NathanChevrollier.Helm
+PackageVersion: 1.0.0
+PackageLocale: fr-FR
+Publisher: Nathan Chevrollier
+PublisherUrl: https://github.com/NathanChevrollier
+PublisherSupportUrl: https://github.com/NathanChevrollier/Helm/issues
+PackageName: Helm
+PackageUrl: https://github.com/NathanChevrollier/Helm
+License: MIT
+LicenseUrl: https://github.com/NathanChevrollier/Helm/blob/main/LICENSE
+ShortDescription: Gestion, navigation et surveillance de serveurs, dans une seule application.
+Description: |-
+  Helm réunit dans une application de bureau ce qui demande habituellement quatre outils :
+  terminal SSH avec sessions persistantes, explorateur de fichiers SFTP, gestion Docker,
+  bases de données, sites nginx, tunnels, sauvegardes et supervision.
+
+  Tout passe par une connexion SSH ordinaire : aucun agent n'est obligatoire sur le serveur,
+  et les secrets sont conservés dans le gestionnaire d'identifiants du système, jamais en clair.
+Moniker: helm
+Tags:
+  - ssh
+  - sftp
+  - terminal
+  - docker
+  - devops
+  - serveur
+  - vps
+  - supervision
+ReleaseNotesUrl: https://github.com/NathanChevrollier/Helm/releases/tag/v1.0.0
+Documentations:
+  - DocumentLabel: Guide d'utilisation
+    DocumentUrl: https://github.com/NathanChevrollier/Helm#readme
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

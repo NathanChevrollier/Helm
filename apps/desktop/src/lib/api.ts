@@ -37,9 +37,14 @@ export interface IdentityView extends Identity {
 }
 
 /** Bureau à distance (RDP). */
+/** Protocole d'un bureau à distance. */
+export type DesktopProtocol = "rdp" | "vnc" | "spice";
+
 export interface RemoteDesktop {
   id: string;
   name: string;
+  /** Absent des profils créés avant VNC : ce sont des bureaux RDP. */
+  protocol?: DesktopProtocol;
   host: string;
   port: number;
   username: string;
@@ -66,6 +71,17 @@ export interface RdpSessionInfo {
   password: string;
   width: number;
   height: number;
+  viaTunnel: boolean;
+}
+
+/** Session VNC ouverte dans Helm (client noVNC intégré). */
+export interface VncSessionInfo {
+  /** Adresse du pont local (WebSocket), jeton compris. */
+  url: string;
+  /** Mot de passe VNC, ou vide si la machine n'en demande pas. */
+  password: string;
+  username: string;
+  destination: string;
   viaTunnel: boolean;
 }
 
@@ -126,6 +142,32 @@ export interface FsEntry {
   owner: string | null;
   group: string | null;
 }
+
+/** Fichier trouvé par nom sur le serveur. */
+export interface FsHit {
+  path: string;
+  size: number;
+  isDir: boolean;
+}
+
+/** Ligne trouvée par recherche plein texte (grep distant). */
+export interface FsMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+/** Résultat d'une recherche, tronqué au-delà de 500 éléments. */
+export interface FsResults<T> {
+  items: T[];
+  truncated: boolean;
+}
+
+/** Format d'archive proposé côté serveur. */
+export type ArchiveFormat = "targz" | "zip" | "tarzst";
+
+/** Extension du fichier produit, par format. */
+export const ARCHIVE_EXTENSIONS: Record<ArchiveFormat, string> = { targz: "tar.gz", zip: "zip", tarzst: "tar.zst" };
 
 export interface F2bJail {
   name: string;
@@ -656,7 +698,7 @@ export interface AuditEntry {
 }
 
 /** Moteur de base de données. */
-export type DbEngine = "mysql" | "postgres";
+export type DbEngine = "mysql" | "postgres" | "sqlite";
 
 export interface DbInstance {
   id: string;
@@ -665,6 +707,34 @@ export interface DbInstance {
   /** Conteneur Docker, ou null pour le service installé sur le serveur. */
   container?: string | null;
   version: string;
+  /** Chemin du fichier pour SQLite ; chaîne vide pour les autres moteurs. */
+  path?: string;
+}
+
+/** Colonne d'une table, telle que la décrit le moteur. */
+export interface DbColumn {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  /** Fait partie de la clé primaire : c'est ce qui autorise l'édition d'une cellule. */
+  primary: boolean;
+}
+
+/** Opérateurs acceptés dans un filtre de colonne (liste fermée côté Rust). */
+export const DB_FILTER_OPS = ["=", "!=", "<", "<=", ">", ">=", "LIKE", "NOT LIKE", "IS NULL", "IS NOT NULL"] as const;
+export type DbFilterOp = (typeof DB_FILTER_OPS)[number];
+
+/** Condition posée sur une colonne depuis l'en-tête du tableau. */
+export interface DbFilter {
+  column: string;
+  op: DbFilterOp;
+  value: string;
+}
+
+/** Colonne et valeur qui identifient une ligne (sa clé primaire). */
+export interface DbKeyPart {
+  column: string;
+  value: string | null;
 }
 
 /** Base ou table, avec sa taille et son nombre (tables ou lignes), estimés par le moteur. */
@@ -680,6 +750,131 @@ export interface DbQueryResult {
   rows: (string | null)[][];
   truncated: boolean;
   durationMs: number;
+}
+
+/** Commande retenue dans l'historique du shell distant. */
+export interface ShellHistoryEntry {
+  command: string;
+  /** Nombre d'apparitions dans l'historique : ce qui met en avant les habitudes. */
+  count: number;
+  /** Dernière exécution connue (epoch en secondes), si le shell l'enregistre. */
+  last: number | null;
+  /** Durée de la dernière exécution en secondes ; seul zsh en mode étendu la fournit. */
+  duration: number | null;
+}
+
+/** Nature d'un réglage du catalogue : elle décide du contrôle appliqué et de la saisie. */
+export type CatalogVarKind = "text" | "password" | "port" | "domain" | "path" | "email";
+
+export interface CatalogVariable {
+  key: string;
+  label: string;
+  hint: string;
+  kind: CatalogVarKind;
+  default: string;
+}
+
+/** Application du catalogue Docker Compose intégré à Helm. */
+export interface CatalogApp {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  /** Port du conteneur à servir derrière nginx, ou null si l'application n'a pas d'interface web. */
+  httpPort: number | null;
+  docsUrl: string;
+  variables: CatalogVariable[];
+  compose: string;
+  env: string;
+  notes: string[];
+}
+
+/** Fichiers rendus par le catalogue, prêts à être relus avant écriture. */
+export interface CatalogRendered {
+  compose: string;
+  env: string;
+  /** Valeurs finales, mots de passe générés compris : à montrer une fois. */
+  values: [string, string][];
+}
+
+/** Famille de registre d'images privé. */
+export type RegistryKind = "dockerhub" | "ghcr" | "gitlab" | "ecr" | "custom";
+
+/** Registre enregistré dans Helm ; le jeton reste dans le coffre du système. */
+export interface Registry {
+  id: string;
+  name: string;
+  kind: RegistryKind;
+  server: string;
+  /** Utilisateur, ou identifiant de clé d'accès AWS pour ECR. */
+  username: string;
+}
+
+export interface RegistryView extends Registry {
+  hasSecret: boolean;
+  /** Ce qu'il faut demander comme secret, et avec quels droits. */
+  secretHint: string;
+}
+
+/** Registre auquel un serveur est connecté (lu dans le config.json de Docker, sans le jeton). */
+export interface RegistrySession {
+  server: string;
+  /** Jeton rangé par un « credential helper » plutôt qu'en base64 dans config.json. */
+  helper: boolean;
+}
+
+/** Volume Docker, avec ce qui l'utilise et l'espace qu'il occupe. */
+export interface DockerVolume {
+  name: string;
+  driver: string;
+  mountpoint: string;
+  /** Aucun conteneur, même arrêté, ne l'utilise. */
+  orphan: boolean;
+  /** Octets mesurés sur le disque ; 0 si la mesure n'a pas abouti. */
+  size: number;
+  usedBy: string[];
+}
+
+/** Serveur Redis / Valkey joignable sur la machine. */
+export interface RedisServer {
+  id: string;
+  label: string;
+  container?: string | null;
+  version: string;
+}
+
+export interface RedisOverview {
+  version: string;
+  memory: number;
+  /** `[numéro de base, nombre de clés]` pour les bases non vides. */
+  databases: [number, number][];
+  uptimeDays: number;
+}
+
+export type RedisKind = "string" | "hash" | "list" | "set" | "zset" | "stream";
+
+export interface RedisKeyInfo {
+  key: string;
+  kind: RedisKind | string;
+  /** Secondes restantes, ou null si la clé n'expire pas. */
+  ttl: number | null;
+  size: number;
+}
+
+export interface RedisKeyPage {
+  keys: RedisKeyInfo[];
+  /** « 0 » quand le parcours est terminé. */
+  cursor: string;
+}
+
+export interface RedisKeyValue {
+  key: string;
+  kind: RedisKind | string;
+  ttl: number | null;
+  /** `[champ, valeur]` pour un hachage ou un zset ; `[null, valeur]` sinon. */
+  entries: [string | null, string][];
+  total: number;
+  truncated: boolean;
 }
 
 /** Assistant IA : fournisseur, autorisations et mode d'exécution. */
@@ -806,6 +1001,7 @@ export const api = {
   /** Ouvre une session pour le client RDP intégré (pont local, tunnel si nécessaire). */
   desktopSessionOpen: (id: string) => invoke<RdpSessionInfo>("desktop_session_open", { id }),
   desktopSessionClose: (id: string) => invoke<void>("desktop_session_close", { id }),
+  vncSessionOpen: (id: string) => invoke<VncSessionInfo>("vnc_session_open", { id }),
   /** `password` : `undefined` = inchangé, `""` = supprimé. */
   desktopSave: (desktop: RemoteDesktop, password?: string) => invoke<string>("desktop_save", { desktop, password }),
   desktopDelete: (id: string) => invoke<void>("desktop_delete", { id }),
@@ -819,6 +1015,44 @@ export const api = {
   dbQuery: (serverId: string, instance: DbInstance, database: string | null, sql: string, limit = 500) =>
     invoke<DbQueryResult>("db_query", { serverId, instance, database, sql, limit }),
   dbPreviewQuery: (engine: DbEngine, table: string, limit = 200) => invoke<string>("db_preview_query", { engine, table, limit }),
+  dbColumns: (serverId: string, instance: DbInstance, database: string | null, table: string) =>
+    invoke<DbColumn[]>("db_columns", { serverId, instance, database, table }),
+  dbTableQuery: (engine: DbEngine, table: string, filters: DbFilter[], sortColumn: string | null, sortDesc: boolean, limit: number, offset = 0) =>
+    invoke<string>("db_table_query", { engine, table, filters, sortColumn, sortDesc, limit, offset }),
+  dbUpdateCellSql: (engine: DbEngine, table: string, column: string, value: string | null, key: DbKeyPart[]) =>
+    invoke<string>("db_update_cell_sql", { engine, table, column, value, key }),
+  dbDeleteRowSql: (engine: DbEngine, table: string, key: DbKeyPart[]) => invoke<string>("db_delete_row_sql", { engine, table, key }),
+  dbInsertRowSql: (engine: DbEngine, table: string, values: [string, string | null][]) => invoke<string>("db_insert_row_sql", { engine, table, values }),
+  dbSqliteFiles: (serverId: string) => invoke<DbInstance[]>("db_sqlite_files", { serverId }),
+  dbSqliteInstance: (path: string, container: string | null = null) => invoke<DbInstance>("db_sqlite_instance", { path, container }),
+
+  dockerCatalog: () => invoke<CatalogApp[]>("docker_catalog"),
+  dockerCatalogDefaults: (appId: string) => invoke<[string, string][]>("docker_catalog_defaults", { appId }),
+  dockerCatalogRender: (appId: string, values: Record<string, string>) => invoke<CatalogRendered>("docker_catalog_render", { appId, values }),
+  dockerVolumes: (serverId: string) => invoke<DockerVolume[]>("docker_volumes", { serverId }),
+  dockerRemoveVolume: (serverId: string, name: string) => invoke<void>("docker_remove_volume", { serverId, name }),
+  registries: () => invoke<RegistryView[]>("registries_list"),
+  registrySave: (registry: Registry, secret: string | null) => invoke<string>("registry_save", { registry, secret }),
+  registryDelete: (id: string) => invoke<void>("registry_delete", { id }),
+  registrySessions: (serverId: string) => invoke<RegistrySession[]>("registry_sessions", { serverId }),
+  registryLogin: (serverId: string, registryId: string) => invoke<string>("registry_login", { serverId, registryId }),
+  registryLogout: (serverId: string, server: string) => invoke<void>("registry_logout", { serverId, server }),
+
+  redisServers: (serverId: string) => invoke<RedisServer[]>("redis_servers", { serverId }),
+  redisOverview: (serverId: string, server: RedisServer) => invoke<RedisOverview>("redis_overview", { serverId, server }),
+  redisScan: (serverId: string, server: RedisServer, database: number, cursor: string, pattern: string, count = 200) =>
+    invoke<RedisKeyPage>("redis_scan", { serverId, server, database, cursor, pattern, count }),
+  redisKey: (serverId: string, server: RedisServer, database: number, key: string) =>
+    invoke<RedisKeyValue>("redis_key", { serverId, server, database, key }),
+  redisDelete: (serverId: string, server: RedisServer, database: number, keys: string[]) =>
+    invoke<number>("redis_delete", { serverId, server, database, keys }),
+  redisSet: (serverId: string, server: RedisServer, database: number, key: string, value: string, ttl: number | null) =>
+    invoke<void>("redis_set", { serverId, server, database, key, value, ttl }),
+  redisExpire: (serverId: string, server: RedisServer, database: number, key: string, ttl: number | null) =>
+    invoke<void>("redis_expire", { serverId, server, database, key, ttl }),
+  redisCommand: (serverId: string, server: RedisServer, database: number, command: string) =>
+    invoke<string[]>("redis_command", { serverId, server, database, command }),
+  redisBlocked: () => invoke<string[]>("redis_blocked"),
 
   aiGet: () => invoke<AiView>("ai_get"),
   /** `apiKey` : `undefined` = inchangée, `""` = supprimée. */
@@ -878,6 +1112,9 @@ export const api = {
 
   termCwd: (serverId: string, tmuxSession?: string, pid?: number) => invoke<string | null>("term_cwd", { serverId, tmuxSession, pid }),
 
+  /** Historique du shell distant, dédoublonné et classé (le plus récent d'abord). */
+  termHistory: (serverId: string) => invoke<ShellHistoryEntry[]>("term_history", { serverId }),
+
   fsHome: (serverId: string) => invoke<string>("fs_home", { serverId }),
   fsList: (serverId: string, path: string) => invoke<Listing>("fs_list", { serverId, path }),
   fsExec: (serverId: string, cwd: string, command: string) => invoke<{ stdout: string; stderr: string; exitCode: number }>("fs_exec", { serverId, cwd, command }),
@@ -896,6 +1133,16 @@ export const api = {
   fsRename: (serverId: string, from: string, to: string) => invoke<void>("fs_rename", { serverId, from, to }),
   fsRemove: (serverId: string, paths: string[]) => invoke<void>("fs_remove", { serverId, paths }),
   fsChmod: (serverId: string, path: string, mode: number) => invoke<void>("fs_chmod", { serverId, path, mode }),
+  /** Cherche un fichier par son nom dans l'arborescence de `root` (find distant). */
+  fsFind: (serverId: string, root: string, pattern: string, depth = 10) => invoke<FsResults<FsHit>>("fs_find", { serverId, root, pattern, depth }),
+  /** Cherche du texte dans les fichiers de `root`, sans les télécharger (grep distant). */
+  fsGrep: (serverId: string, root: string, needle: string, glob: string | null = null, caseSensitive = false, regex = false) =>
+    invoke<FsResults<FsMatch>>("fs_grep", { serverId, root, needle, glob, caseSensitive, regex }),
+  fsArchiveName: (paths: string[], format: ArchiveFormat) => invoke<string>("fs_archive_name", { paths, format }),
+  /** Compresse une sélection sur le serveur ; renvoie la taille de l'archive en octets. */
+  fsArchive: (serverId: string, paths: string[], dest: string, format: ArchiveFormat) => invoke<number>("fs_archive", { serverId, paths, dest, format }),
+  fsArchiveList: (serverId: string, path: string) => invoke<string[]>("fs_archive_list", { serverId, path }),
+  fsExtract: (serverId: string, path: string, dest: string) => invoke<void>("fs_extract", { serverId, path, dest }),
   fsDownload: (serverId: string, paths: string[], localDir: string | null, transferId: number, onProgress: (p: Progress) => void) =>
     invoke<string>("fs_download", { serverId, paths, localDir, transferId, onProgress: progressChannel(onProgress) }),
   fsUpload: (serverId: string, localPaths: string[], remoteDir: string, transferId: number, onProgress: (p: Progress) => void) =>

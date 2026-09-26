@@ -395,11 +395,95 @@ pub async fn prune(conn: &Connection, access: Access, sudo: Option<&str>, what: 
             "images-all" => "image prune -a -f",
             "build-cache" => "builder prune -f",
             "networks" => "network prune -f",
+            // Supprime les données des volumes que plus aucun conteneur n'utilise : l'interface
+            // montre ce qui va disparaître, et son gain en octets, avant de le demander.
+            "volumes" => "volume prune -f",
             _ => return Err(Error::Other(format!("nettoyage inconnu : {what}"))),
         };
         run_ok(conn, access, sudo, args).await
     })
     .await
+}
+
+// ---------- Volumes ----------
+
+/// Volume Docker, avec l'espace qu'il occupe et l'indication qu'aucun conteneur ne s'en sert.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Volume {
+    pub name: String,
+    pub driver: String,
+    /// Dossier de l'hôte où le volume est stocké.
+    pub mountpoint: String,
+    /// Aucun conteneur, même arrêté, ne l'utilise : c'est lui que `docker volume prune` supprime.
+    pub orphan: bool,
+    /// Taille mesurée sur le disque en octets ; 0 si la mesure n'a pas abouti.
+    pub size: u64,
+    /// Conteneurs qui le montent, à l'arrêt comme en marche.
+    pub used_by: Vec<String>,
+}
+
+/// Sépare la sortie de `volume ls` (nom, pilote, dossier) et celle de `volume ls -q -f dangling`.
+pub fn parse_volumes(listing: &str, dangling: &str, used: &str) -> Vec<Volume> {
+    let orphans: std::collections::HashSet<&str> = dangling.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    // `used` aligne un conteneur et ses volumes : `nom<TAB>vol1,vol2`.
+    let mut by_volume: HashMap<String, Vec<String>> = HashMap::new();
+    for line in used.lines() {
+        let Some((container, volumes)) = line.split_once('\t') else { continue };
+        for v in volumes.split(',').map(str::trim).filter(|v| !v.is_empty()) {
+            by_volume.entry(v.to_string()).or_default().push(container.trim().to_string());
+        }
+    }
+    listing
+        .lines()
+        .filter_map(|l| {
+            let mut parts = l.split('\t');
+            let name = parts.next()?.trim().to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let driver = parts.next().unwrap_or("local").trim().to_string();
+            let mountpoint = parts.next().unwrap_or("").trim().to_string();
+            let used_by = by_volume.get(&name).cloned().unwrap_or_default();
+            Some(Volume { orphan: orphans.contains(name.as_str()) && used_by.is_empty(), name, driver, mountpoint, size: 0, used_by })
+        })
+        .collect()
+}
+
+/// Volumes du serveur. Les tailles sont mesurées avec `du`, borné dans le temps : sur un volume de
+/// plusieurs centaines de gigaoctets, la mesure peut être longue, et une taille inconnue (0) vaut
+/// mieux qu'un onglet qui ne s'ouvre pas.
+pub async fn volumes(conn: &Connection, access: Access, sudo: Option<&str>) -> Result<Vec<Volume>> {
+    let listing = run_ok(conn, access, sudo, "volume ls --format '{{.Name}}\t{{.Driver}}\t{{.Mountpoint}}'").await?;
+    let dangling = run_ok(conn, access, sudo, "volume ls -q -f dangling=true").await?;
+    // Un conteneur arrêté compte aussi : supprimer son volume lui ferait perdre ses données.
+    let used = run_ok(conn, access, sudo, "ps -a --format '{{.Names}}\t{{.Mounts}}'").await?;
+    let mut list = parse_volumes(&listing, &dangling, &used);
+
+    let points: Vec<String> = list.iter().filter(|v| !v.mountpoint.is_empty()).map(|v| shell_quote(&v.mountpoint)).collect();
+    if !points.is_empty() {
+        let cmd = format!("timeout 30 du -sb {} 2>/dev/null", points.join(" "));
+        if let Ok(out) = crate::ssh::long(conn.exec_sudo(&cmd, sudo, None)).await {
+            let sizes: HashMap<&str, u64> = out
+                .stdout
+                .lines()
+                .filter_map(|l| {
+                    let (size, path) = l.split_once('\t')?;
+                    Some((path.trim(), size.trim().parse().ok()?))
+                })
+                .collect();
+            for v in &mut list {
+                v.size = sizes.get(v.mountpoint.as_str()).copied().unwrap_or(0);
+            }
+        }
+    }
+    Ok(list)
+}
+
+/// Supprime un volume. Docker refuse de lui-même si un conteneur l'utilise encore.
+pub async fn remove_volume(conn: &Connection, access: Access, sudo: Option<&str>, name: &str) -> Result<()> {
+    run_ok(conn, access, sudo, &format!("volume rm {}", valid_ref(name)?)).await?;
+    Ok(())
 }
 
 // ---------- Refermer un port exposé ----------
@@ -504,5 +588,29 @@ mod tests {
         assert!(valid_ref("helm-demo-app").is_ok());
         assert!(valid_ref("nginx:alpine").is_ok());
         assert!(valid_ref("x; rm -rf /").is_err());
+    }
+
+    #[test]
+    fn volumes_know_what_uses_them() {
+        let listing = "app_data\tlocal\t/var/lib/docker/volumes/app_data/_data\norphelin\tlocal\t/var/lib/docker/volumes/orphelin/_data\n";
+        let dangling = "orphelin\n";
+        // Un conteneur arrêté compte : supprimer son volume lui ferait perdre ses données.
+        let used = "app\tapp_data,/etc/localtime\narrete\tapp_data\n";
+        let v = parse_volumes(listing, dangling, used);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].name, "app_data");
+        assert!(!v[0].orphan, "un volume monté n'est jamais orphelin");
+        assert_eq!(v[0].used_by, vec!["app".to_string(), "arrete".to_string()]);
+        assert!(v[1].orphan);
+        assert!(v[1].used_by.is_empty());
+        assert_eq!(v[1].mountpoint, "/var/lib/docker/volumes/orphelin/_data");
+    }
+
+    #[test]
+    fn dangling_but_mounted_is_not_an_orphan() {
+        // Docker peut signaler un volume comme « dangling » alors qu'un conteneur arrêté le monte :
+        // Helm ne le propose alors pas à la suppression.
+        let v = parse_volumes("v\tlocal\t/m\n", "v\n", "arrete\tv\n");
+        assert!(!v[0].orphan);
     }
 }

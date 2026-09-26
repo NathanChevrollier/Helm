@@ -182,6 +182,65 @@ pub fn save_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(err)
 }
 
+/// Taille maximale d'un fichier lu sur le PC pour être envoyé dans une session de bureau à
+/// distance : au-delà, il transiterait entièrement en mémoire dans l'interface.
+const MAX_LOCAL_READ: u64 = 512 * 1024 * 1024;
+
+/// Décode un en-tête encodé avec `encodeURIComponent` (les en-têtes HTTP sont en ASCII).
+fn percent_decode(s: &str) -> Result<String, String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).map_err(err)?;
+            out.push(u8::from_str_radix(hex, 16).map_err(|_| "en-tête mal encodé".to_string())?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| "en-tête mal encodé".into())
+}
+
+/// Enregistre sur le PC un fichier reçu d'une session de bureau à distance (octets bruts dans le
+/// corps de la requête, dossier et nom dans les en-têtes). Le nom vient de la machine distante :
+/// il est donc tenu pour hostile — ramené à un simple nom de fichier valide sous Windows, sans
+/// séparateur ni « .. » — et un fichier existant n'est jamais écrasé. Renvoie le chemin écrit.
+#[tauri::command]
+pub fn save_binary_file(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("contenu du fichier attendu en octets bruts".into());
+    };
+    let header = |name: &str| -> Result<String, String> {
+        let v = request.headers().get(name).ok_or_else(|| format!("en-tête {name} manquant"))?;
+        percent_decode(v.to_str().map_err(err)?)
+    };
+    let dir = std::path::PathBuf::from(header("x-helm-dir")?);
+    if !dir.is_absolute() || !dir.is_dir() {
+        return Err("dossier de destination invalide".into());
+    }
+    let name = helm_core::sftp::local_name(&header("x-helm-name")?);
+    let path = helm_core::sftp::unique_local(&dir, &name);
+    std::fs::write(&path, bytes).map_err(err)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Lit un fichier du PC (déposé sur une session de bureau à distance) et le renvoie en octets
+/// bruts, sans passer par du JSON.
+#[tauri::command]
+pub fn read_local_file(path: String) -> Result<tauri::ipc::Response, String> {
+    let meta = std::fs::metadata(&path).map_err(err)?;
+    if !meta.is_file() {
+        return Err("seuls les fichiers peuvent être envoyés (pas les dossiers)".into());
+    }
+    if meta.len() > MAX_LOCAL_READ {
+        return Err(format!("fichier trop volumineux pour un envoi dans la session (plus de {} Mo)", MAX_LOCAL_READ / 1024 / 1024));
+    }
+    Ok(tauri::ipc::Response::new(std::fs::read(&path).map_err(err)?))
+}
+
 /// Exporte les réglages dans un fichier (chiffré si un mot de passe est donné).
 #[tauri::command]
 pub fn settings_export(store: State<'_, Store>, path: String, password: String, include_secrets: bool) -> Result<(), String> {
@@ -253,5 +312,25 @@ mod tests {
         assert!(super::verify_lock_password("secret", &stored));
         assert!(!super::verify_lock_password("Secret", &stored));
         assert!(!super::verify_lock_password("secret", "n'importe quoi"));
+    }
+
+    #[test]
+    fn headers_are_decoded() {
+        // Ce qu'écrit encodeURIComponent pour un nom accentué avec espace.
+        assert_eq!(super::percent_decode("rapport%20d%C3%A9cembre.pdf").unwrap(), "rapport décembre.pdf");
+        assert_eq!(super::percent_decode("C%3A%5CUsers%5Calice").unwrap(), "C:\\Users\\alice");
+        assert_eq!(super::percent_decode("").unwrap(), "");
+        // Un « % » en fin de chaîne n'est pas une séquence : il reste tel quel, sans débordement.
+        assert_eq!(super::percent_decode("100%").unwrap(), "100%");
+        assert!(super::percent_decode("%zz%41").is_err());
+    }
+
+    #[test]
+    fn remote_names_cannot_escape_the_folder() {
+        // Le nom d'un fichier reçu vient de la machine distante : il est ramené à un simple nom.
+        for hostile in ["../../Windows/System32/evil.dll", "..\\..\\evil.exe", "CON", "..", "a/b\\c.txt"] {
+            let n = helm_core::sftp::local_name(hostile);
+            assert!(!n.contains('/') && !n.contains('\\') && n != ".." && !n.is_empty(), "{hostile} -> {n}");
+        }
     }
 }

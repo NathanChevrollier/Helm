@@ -9,6 +9,7 @@ export const SHORTCUTS = {
   nextTab: { label: "Onglet suivant", default: "Ctrl+Tab" },
   prevTab: { label: "Onglet précédent", default: "Ctrl+Shift+Tab" },
   termSearch: { label: "Rechercher dans le terminal", default: "Ctrl+Shift+F" },
+  termHistory: { label: "Historique des commandes du serveur", default: "Ctrl+Shift+R" },
   assistant: { label: "Ouvrir l'assistant IA", default: "Ctrl+I" },
 } as const;
 

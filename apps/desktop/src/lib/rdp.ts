@@ -1,10 +1,10 @@
-// Sessions de bureau à distance ouvertes dans Helm (client RDP intégré).
+// Sessions de bureau à distance ouvertes dans Helm (clients RDP et VNC intégrés).
 //
 // La connexion part toujours du PC : directement, ou à travers un tunnel SSH monté par Helm quand
 // la machine n'est joignable que depuis un serveur. Le pont local (côté Rust) parle le protocole
 // de passerelle attendu par le client web ; l'interface ne connaît que l'adresse et le jeton.
 import { create } from "zustand";
-import { api, type DesktopView } from "./api";
+import { api, type DesktopView, type VncSessionInfo } from "./api";
 
 export interface RdpSessionInfo {
   proxyUrl: string;
@@ -25,6 +25,8 @@ interface RdpStore {
   /** Bureau affiché, `null` quand aucune session n'est ouverte. */
   desktop: DesktopView | null;
   session: RdpSessionInfo | null;
+  /** Session VNC : l'une ou l'autre est remplie, selon le protocole du bureau. */
+  vnc: VncSessionInfo | null;
   state: RdpState;
   open: (desktop: DesktopView) => Promise<void>;
   setState: (state: RdpState) => void;
@@ -34,14 +36,19 @@ interface RdpStore {
 export const useRdp = create<RdpStore>((set, get) => ({
   desktop: null,
   session: null,
+  vnc: null,
   state: { kind: "ouverture" },
 
   open: async (desktop) => {
     // Une seule session à la fois : la précédente est refermée proprement (pont et tunnel).
     const ouvert = get().desktop;
     if (ouvert) await api.desktopSessionClose(ouvert.id).catch(() => {});
-    set({ desktop, session: null, state: { kind: "ouverture" } });
+    set({ desktop, session: null, vnc: null, state: { kind: "ouverture" } });
     try {
+      if (desktop.protocol === "vnc") {
+        set({ vnc: await api.vncSessionOpen(desktop.id), state: { kind: "connexion" } });
+        return;
+      }
       const session = await api.desktopSessionOpen(desktop.id);
       set({ session, state: { kind: "connexion" } });
     } catch (e) {
@@ -54,6 +61,6 @@ export const useRdp = create<RdpStore>((set, get) => ({
   close: () => {
     const ouvert = get().desktop;
     if (ouvert) void api.desktopSessionClose(ouvert.id).catch(() => {});
-    set({ desktop: null, session: null, state: { kind: "ouverture" } });
+    set({ desktop: null, session: null, vnc: null, state: { kind: "ouverture" } });
   },
 }));

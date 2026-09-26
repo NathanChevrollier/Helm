@@ -1,7 +1,8 @@
 name: Release
 
 # Déclenchée par un tag vX.Y.Z (voir `pnpm release`). Étapes : CI complète, release brouillon,
-# compilation et signature des installeurs sur les trois OS, puis publication. Le latest.json joint à
+# compilation et signature des installeurs sur les trois OS, signature de code Windows (SignPath,
+# dès que ses secrets existent), puis publication. Le latest.json joint à
 # la release sert au module de mise à jour de l'app : il est écrit une seule fois, à la fin, car
 # quatre machines qui le mettent à jour en parallèle s'écrasent (et l'une d'elles échoue).
 on:
@@ -111,8 +112,94 @@ jobs:
           # signatures déposées ici : sinon les quatre builds se le disputent.
           includeUpdaterJson: false
 
-  publish:
+  # Signature de code de l'installeur Windows par la SignPath Foundation : elle supprime
+  # l'avertissement SmartScreen « Éditeur inconnu ». Le job ne fait rien tant que les secrets
+  # SignPath n'existent pas : la release fonctionne à l'identique avant l'approbation du projet.
+  #
+  # Piège à ne pas oublier : signer l'installeur change ses octets, donc invalide la signature de
+  # mise à jour de Tauri (.sig). Elle est recalculée ici, puis installeur et .sig sont remplacés
+  # ensemble sur la release. `publish` construit latest.json APRÈS ce job, donc avec la bonne
+  # signature ; dans l'ordre inverse, les mises à jour automatiques échoueraient toutes.
+  sign-windows:
     needs: [draft, build]
+    runs-on: ubuntu-latest
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+    steps:
+      - name: SignPath configuré ?
+        id: gate
+        run: |
+          if [ -n "$SIGNPATH_API_TOKEN" ] && [ -n "$SIGNPATH_ORGANIZATION_ID" ] && [ -n "$SIGNPATH_PROJECT_SLUG" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Secrets SignPath absents : l'installeur Windows reste non signé (voir packaging/README.md)."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Installeur Windows non signé
+        if: steps.gate.outputs.enabled == 'true'
+        id: unsigned
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p unsigned
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p '*-setup.exe' -D unsigned
+          file=$(ls unsigned/*-setup.exe)
+          [ -s "$file" ] || { echo "::error::installeur Windows absent de la release"; exit 1; }
+          echo "name=$(basename "$file")" >> "$GITHUB_OUTPUT"
+
+      - name: Dépôt de l'installeur pour SignPath
+        if: steps.gate.outputs.enabled == 'true'
+        id: artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: unsigned/*-setup.exe
+          if-no-files-found: error
+
+      - name: Signature par SignPath
+        if: steps.gate.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.artifact.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Vérification de la signature Authenticode
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq osslsigncode
+          osslsigncode verify -in "signed/${{ steps.unsigned.outputs.name }}" | tee verify.log
+          grep -q "Signature verification: ok" verify.log || { echo "::error::signature Authenticode invalide"; exit 1; }
+
+      - name: Nouvelle signature de mise à jour Tauri
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # L'ancien .sig portait sur l'installeur non signé : il ne correspond plus à rien.
+          npx --yes @tauri-apps/cli@2 signer sign "signed/${{ steps.unsigned.outputs.name }}"
+          [ -s "signed/${{ steps.unsigned.outputs.name }}.sig" ] || { echo "::error::signature Tauri non produite"; exit 1; }
+
+      - name: Remplacement sur la release
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Installeur et .sig partent ensemble : l'un sans l'autre casserait les mises à jour.
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --clobber \
+            "signed/${{ steps.unsigned.outputs.name }}" \
+            "signed/${{ steps.unsigned.outputs.name }}.sig"
+
+  publish:
+    needs: [draft, build, sign-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

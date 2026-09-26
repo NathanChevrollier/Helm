@@ -1,8 +1,11 @@
-//! Gestion Docker : conteneurs, projets compose, images et nettoyage.
+//! Gestion Docker : conteneurs, projets compose, images, volumes, nettoyage et catalogue
+//! d'applications prêtes à déployer.
 
 use std::collections::HashMap;
 
-use helm_core::docker::{self, Access, ComposeProject, Container, DiskUsage, Image, Stats};
+use helm_core::catalog;
+use helm_core::docker::{self, Access, ComposeProject, Container, DiskUsage, Image, Stats, Volume};
+use helm_core::registry as helm_registry;
 use helm_core::ssh::shell_quote;
 use helm_core::Connection;
 use serde::Serialize;
@@ -12,7 +15,8 @@ use tokio::sync::Mutex;
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
 use crate::store::AuditLog;
-use crate::store::Store;
+use crate::store::{secrets, Store};
+use helm_profiles::Registry;
 
 /// Mode d'accès à Docker mémorisé par serveur.
 #[derive(Default)]
@@ -422,4 +426,185 @@ pub async fn docker_restrict_apply(
     }
     .await;
     track(&audit, &store, &server_id, "docker.restrict_port", &detail, r)
+}
+
+/// Catalogue d'applications prêtes à déployer. La liste est intégrée à Helm : aucun appel réseau,
+/// donc aucun dépôt tiers à faire confiance, et le catalogue fonctionne hors ligne.
+#[tauri::command]
+pub fn docker_catalog() -> Vec<catalog::App> {
+    catalog::apps()
+}
+
+/// Valeurs de départ d'une application du catalogue : les valeurs proposées, et un mot de passe
+/// tiré de l'aléa du système pour chaque réglage secret.
+#[tauri::command]
+pub fn docker_catalog_defaults(app_id: String) -> Result<Vec<(String, String)>, String> {
+    let app = catalog::app(&app_id).ok_or_else(|| format!("application inconnue : {app_id}"))?;
+    catalog::defaults(&app).map_err(err)
+}
+
+/// Rend le `docker-compose.yml` et le `.env` d'une application, pour les montrer avant écriture.
+#[tauri::command]
+pub fn docker_catalog_render(app_id: String, values: HashMap<String, String>) -> Result<catalog::Rendered, String> {
+    let app = catalog::app(&app_id).ok_or_else(|| format!("application inconnue : {app_id}"))?;
+    catalog::render(&app, &values).map_err(err)
+}
+
+/// Volumes du serveur, avec leur taille sur le disque et les conteneurs qui les montent.
+#[tauri::command]
+pub async fn docker_volumes(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+) -> Result<Vec<Volume>, String> {
+    let c = ctx(&store, &sessions, &cache, &server_id).await?;
+    docker::volumes(&c.conn, c.access, c.sudo.as_deref()).await.map_err(err)
+}
+
+/// Supprime un volume. Docker refuse de lui-même si un conteneur l'utilise encore.
+#[tauri::command]
+pub async fn docker_remove_volume(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    name: String,
+) -> Result<(), String> {
+    let detail = name.clone();
+    let r: Result<(), String> = async {
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        docker::remove_volume(&c.conn, c.access, c.sudo.as_deref(), &name).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "docker.volume_rm", &detail, r)
+}
+
+// ---------- Registres privés ----------
+
+/// Registre enregistré, avec l'indication qu'un jeton est bien dans le coffre.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryView {
+    #[serde(flatten)]
+    registry: Registry,
+    has_secret: bool,
+    /// Ce qu'il faut demander comme secret, et avec quels droits.
+    secret_hint: &'static str,
+}
+
+#[tauri::command]
+pub fn registries_list(store: State<'_, Store>) -> Vec<RegistryView> {
+    store
+        .read(|d| d.registries.clone())
+        .into_iter()
+        .map(|r| RegistryView {
+            has_secret: secrets::get(&Registry::secret_owner(&r.id), "password").is_some(),
+            secret_hint: r.kind.secret_hint(),
+            registry: r,
+        })
+        .collect()
+}
+
+/// Enregistre un registre ; le secret, s'il est fourni, va dans le keyring et nulle part ailleurs.
+#[tauri::command]
+pub fn registry_save(store: State<'_, Store>, mut registry: Registry, secret: Option<String>) -> Result<String, String> {
+    registry.server = registry.server.trim().trim_start_matches("https://").trim_end_matches('/').to_string();
+    if registry.server.is_empty() {
+        registry.server = registry.kind.default_server().to_string();
+    }
+    if !helm_registry::valid_server(&registry.server) {
+        return Err(format!("adresse de registre invalide : {}", registry.server));
+    }
+    if registry.kind == helm_registry::Kind::Ecr && helm_registry::ecr_region(&registry.server).is_none() {
+        return Err("adresse ECR attendue : <compte>.dkr.ecr.<région>.amazonaws.com".into());
+    }
+    registry.username = registry.username.trim().to_string();
+    if !helm_registry::valid_word(&registry.username) {
+        return Err("nom d'utilisateur (ou identifiant de clé AWS) invalide".into());
+    }
+    registry.name = registry.name.trim().to_string();
+    if registry.name.is_empty() {
+        registry.name = registry.server.clone();
+    }
+    if registry.id.is_empty() {
+        registry.id = uuid::Uuid::new_v4().to_string();
+    }
+    let id = registry.id.clone();
+    if let Some(s) = secret.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        if s.contains('\n') {
+            return Err("le secret ne doit pas contenir de retour à la ligne".into());
+        }
+        secrets::set(&Registry::secret_owner(&id), "password", &s)?;
+    }
+    store.write(|d| match d.registries.iter_mut().find(|x| x.id == id) {
+        Some(existing) => *existing = registry,
+        None => d.registries.push(registry),
+    })?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn registry_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
+    store.write(|d| d.registries.retain(|r| r.id != id))?;
+    secrets::delete_all(&Registry::secret_owner(&id));
+    Ok(())
+}
+
+/// Registres auxquels un serveur est déjà connecté, lus dans le `config.json` de Docker. Les
+/// jetons eux-mêmes ne sont jamais lus : seules les adresses remontent.
+#[tauri::command]
+pub async fn registry_sessions(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+) -> Result<Vec<helm_registry::Session>, String> {
+    let c = ctx(&store, &sessions, &cache, &server_id).await?;
+    helm_registry::sessions(&c.conn, c.access, c.sudo.as_deref()).await.map_err(err)
+}
+
+/// Connecte un serveur à un registre enregistré. Le secret est lu dans le keyring et transmis sur
+/// l'entrée standard de `docker login` : il n'apparaît dans aucune ligne de commande.
+#[tauri::command]
+pub async fn registry_login(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    registry_id: String,
+) -> Result<String, String> {
+    let registry = store.read(|d| d.registries.iter().find(|r| r.id == registry_id).cloned()).ok_or("registre introuvable")?;
+    let detail = format!("{} ({})", registry.name, registry.server);
+    let r: Result<String, String> = async {
+        let secret = secrets::get(&Registry::secret_owner(&registry.id), "password")
+            .ok_or("aucun jeton enregistré pour ce registre : modifie-le pour en ajouter un")?;
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        helm_registry::login(&c.conn, c.access, c.sudo.as_deref(), registry.kind, &registry.server, &registry.username, &secret)
+            .await
+            .map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "docker.registry_login", &detail, r)
+}
+
+/// Déconnecte un serveur d'un registre : Docker efface le jeton de son `config.json`.
+#[tauri::command]
+pub async fn registry_logout(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    server: String,
+) -> Result<(), String> {
+    let detail = server.clone();
+    let r: Result<(), String> = async {
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        helm_registry::logout(&c.conn, c.access, c.sudo.as_deref(), &server).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "docker.registry_logout", &detail, r)
 }

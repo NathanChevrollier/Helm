@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use helm_core::sftp::{self, Listing, Progress};
 use helm_core::ssh::shell_quote;
+use helm_core::{archive, search};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
@@ -417,4 +418,95 @@ pub async fn fs_copy_between(
     transfers.finish(transfer_id);
     // L'écriture a lieu sur le serveur de destination : c'est lui qui figure au journal.
     track(&audit, &store, &dst_server, "file.copy_between", &detail, r)
+}
+
+/// Cherche un fichier par son nom dans toute l'arborescence d'un dossier. `find` tourne sur le
+/// serveur : rien n'est téléchargé, et les dossiers virtuels ou immenses sont écartés.
+#[tauri::command]
+pub async fn fs_find(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    root: String,
+    pattern: String,
+    depth: Option<u8>,
+) -> Result<search::Results<search::Hit>, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    search::find(&conn, pw.as_deref(), &root, &pattern, depth.unwrap_or(10)).await.map_err(err)
+}
+
+/// Cherche du texte dans les fichiers d'un dossier, sans les télécharger (`grep` distant).
+#[tauri::command]
+pub async fn fs_grep(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    root: String,
+    needle: String,
+    glob: Option<String>,
+    case_sensitive: Option<bool>,
+    regex: Option<bool>,
+) -> Result<search::Results<search::Match>, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    let glob = glob.filter(|g| !g.trim().is_empty());
+    search::grep(&conn, pw.as_deref(), &root, &needle, glob.as_deref(), case_sensitive.unwrap_or(false), regex.unwrap_or(false))
+        .await
+        .map_err(err)
+}
+
+/// Nom d'archive proposé pour une sélection.
+#[tauri::command]
+pub fn fs_archive_name(paths: Vec<String>, format: archive::Format) -> String {
+    archive::suggested_name(&paths, format)
+}
+
+/// Compresse une sélection sur le serveur et renvoie la taille de l'archive, en octets.
+#[tauri::command]
+pub async fn fs_archive(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    paths: Vec<String>,
+    dest: String,
+    format: archive::Format,
+) -> Result<u64, String> {
+    let detail = format!("{dest} ← {}", paths.join(", "));
+    let r: Result<u64, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        archive::create(&conn, pw.as_deref(), &paths, &dest, format).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "file.archive", &detail, r)
+}
+
+/// Contenu d'une archive, sans l'extraire : de quoi montrer ce qu'elle va déposer.
+#[tauri::command]
+pub async fn fs_archive_list(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+) -> Result<Vec<String>, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    archive::list(&conn, pw.as_deref(), &path, 200).await.map_err(err)
+}
+
+/// Extrait une archive dans un dossier du serveur (créé au besoin).
+#[tauri::command]
+pub async fn fs_extract(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    path: String,
+    dest: String,
+) -> Result<(), String> {
+    let detail = format!("{path} → {dest}");
+    let r: Result<(), String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        archive::extract(&conn, pw.as_deref(), &path, &dest).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "file.extract", &detail, r)
 }

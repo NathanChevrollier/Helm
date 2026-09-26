@@ -1,16 +1,29 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Database, Download, Play, Plus, RefreshCw, Table2, TriangleAlert } from "lucide-react";
-import { api, errorMessage, formatBytes, type DbInstance, type DbNamed, type DbQueryResult } from "../lib/api";
+import { Database, Download, FileSearch, Play, Plus, RefreshCw, Rows3, Table2, TriangleAlert } from "lucide-react";
+import {
+  api,
+  errorMessage,
+  formatBytes,
+  type DbColumn,
+  type DbFilter,
+  type DbInstance,
+  type DbKeyPart,
+  type DbNamed,
+  type DbQueryResult,
+} from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
-import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
+import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "../components/ui";
 import PageLayout from "../components/PageLayout";
+import DataGrid, { type Sort } from "../components/DataGrid";
 
 // Monaco reste hors du morceau de code de cet onglet : il ne retarde plus son ouverture.
 const SqlEditor = lazy(() => import("../components/SqlEditor"));
+// La console Redis n'est chargée que si l'onglet Redis est ouvert.
+const RedisPanel = lazy(() => import("../components/RedisPanel"));
 
 const LIMITS = [100, 500, 1000, 5000];
 
@@ -26,9 +39,18 @@ function csvCell(v: string | null): string {
   return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
+/** Table ouverte depuis la liste : son schéma, son tri et ses filtres. */
+interface TableView {
+  table: string;
+  columns: DbColumn[];
+  sort: Sort | null;
+  filters: DbFilter[];
+}
+
 function Databases({ serverId }: { serverId: string }) {
   const { notify, ask } = useAppPick("notify", "ask");
   const monacoTheme = useMonacoTheme();
+  const [mode, setMode] = useCachedState<"sql" | "redis">(`dbMode:${serverId}`, "sql");
   const [instances, setInstances] = useCachedState<DbInstance[] | null>(`db:${serverId}`, null);
   const [instanceId, setInstanceId] = useCachedState<string | null>(`dbInstance:${serverId}`, null);
   const [databases, setDatabases] = useState<DbNamed[] | null>(null);
@@ -41,6 +63,11 @@ function Databases({ serverId }: { serverId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
+  /** Table ouverte depuis la liste, ou null pour une requête libre (tableau en lecture seule). */
+  const [view, setView] = useState<TableView | null>(null);
+  /** Formulaire d'insertion d'une ligne. */
+  const [inserting, setInserting] = useState<Record<string, string | null> | null>(null);
+  const [searchingSqlite, setSearchingSqlite] = useState(false);
 
   const instance = instances?.find((i) => i.id === instanceId) ?? null;
 
@@ -73,7 +100,8 @@ function Databases({ serverId }: { serverId: string }) {
       try {
         if (!auto && !(await ensureConnected(serverId))) return;
         const list = await api.dbInstances(serverId);
-        setInstances(list);
+        // Les fichiers SQLite déjà ouverts sont conservés : la découverte ne les renvoie pas.
+        setInstances((old) => [...list, ...(old ?? []).filter((i) => i.engine === "sqlite")]);
         setInstanceId((id) => (list.some((i) => i.id === id) ? id : (list[0]?.id ?? null)));
       } catch (e) {
         if (!auto) setError(errorMessage(e));
@@ -87,7 +115,7 @@ function Databases({ serverId }: { serverId: string }) {
   useEffect(() => {
     void loadInstances();
   }, [loadInstances]);
-  useAutoRefresh((auto) => loadInstances(auto), { serverId });
+  useAutoRefresh((auto) => loadInstances(auto), { serverId, enabled: mode === "sql" });
 
   // Bases de l'instance choisie. Les effets suivants dépendent de l'IDENTIFIANT de l'instance, pas
   // de l'objet : l'actualisation automatique recrée la liste, et dépendre de l'objet relançait tout
@@ -127,6 +155,9 @@ function Databases({ serverId }: { serverId: string }) {
     };
   }, [serverId, instanceKey, database, refreshKey]);
 
+  // Changer d'instance ou de base rend la table ouverte caduque.
+  useEffect(() => setView(null), [instanceKey, database]);
+
   /** Crée une base vide dans l'instance affichée, puis la sélectionne. */
   const createDatabase = async () => {
     if (!instance) return;
@@ -147,8 +178,32 @@ function Databases({ serverId }: { serverId: string }) {
     }
   };
 
-  const run = async (text = sql) => {
+  /** Cherche les fichiers SQLite du serveur et les ajoute à la liste des instances. */
+  const findSqlite = async () => {
+    setSearchingSqlite(true);
+    try {
+      const found = await api.dbSqliteFiles(serverId);
+      if (found.length === 0) {
+        notify("Aucun fichier SQLite trouvé dans /opt, /srv, /var/lib, /var/www, /home, /root ou /data.", "info");
+        return;
+      }
+      setInstances((old) => {
+        const known = new Set((old ?? []).map((i) => i.id));
+        return [...(old ?? []), ...found.filter((f) => !known.has(f.id))];
+      });
+      notify(`${found.length} fichier(s) SQLite trouvé(s).`, "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    } finally {
+      setSearchingSqlite(false);
+    }
+  };
+
+  const run = async (text = sql, fromTable = false) => {
     if (!instance || running || !text.trim()) return;
+    // Une requête tapée à la main ne correspond plus forcément à la table ouverte : le tableau
+    // repasse en lecture seule plutôt que d'éditer la mauvaise table.
+    if (!fromTable) setView(null);
     // Une requête qui modifie les données demande confirmation : elle n'est pas annulable.
     if (!isReadOnly(text)) {
       const ok = await ask({
@@ -172,12 +227,95 @@ function Databases({ serverId }: { serverId: string }) {
     }
   };
 
+  /** Relit la table ouverte avec son tri et ses filtres, et met l'éditeur SQL en accord. */
+  const runTable = useCallback(
+    async (v: TableView) => {
+      if (!instance) return;
+      try {
+        const q = await api.dbTableQuery(instance.engine, v.table, v.filters, v.sort?.column ?? null, v.sort?.desc ?? false, Math.min(limit, 5000));
+        setSql(q);
+        setView(v);
+        setRunning(true);
+        setError(null);
+        setResult(await api.dbQuery(serverId, instance, database, q, limit));
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        setRunning(false);
+      }
+    },
+    [instance, serverId, database, limit, setSql],
+  );
+
   const openTable = async (name: string) => {
     if (!instance) return;
     try {
-      const q = await api.dbPreviewQuery(instance.engine, name, Math.min(limit, 500));
-      setSql(q);
-      await run(q);
+      // Le schéma sert à deux choses : l'autocomplétion, et savoir si l'édition est possible.
+      const columns = await api.dbColumns(serverId, instance, database, name).catch(() => [] as DbColumn[]);
+      await runTable({ table: name, columns, sort: null, filters: [] });
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  /** Clé primaire de la table ouverte, entièrement présente dans le résultat affiché. */
+  const primary = useMemo(() => {
+    if (!view || !result) return null;
+    const names = view.columns.filter((c) => c.primary).map((c) => c.name);
+    if (names.length === 0 || !names.every((n) => result.columns.includes(n))) return null;
+    return names;
+  }, [view, result]);
+
+  const keyOf = (rowIndex: number): DbKeyPart[] =>
+    (primary ?? []).map((name) => ({ column: name, value: result!.rows[rowIndex][result!.columns.indexOf(name)] ?? null }));
+
+  /** Applique une requête d'écriture après validation, puis relit la table. */
+  const applyWrite = async (title: string, body: string, sqlText: string) => {
+    if (!instance || !view) return;
+    const ok = await ask({ title, body, code: sqlText, confirmLabel: "Appliquer", danger: true });
+    if (!ok) return;
+    try {
+      await api.dbQuery(serverId, instance, database, sqlText, 1);
+      notify("Modification appliquée.", "success");
+      await runTable(view);
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const editCell = async (column: string, rowIndex: number, value: string | null) => {
+    if (!instance || !view || !primary || !result) return;
+    const before = result.rows[rowIndex][result.columns.indexOf(column)];
+    try {
+      const sqlText = await api.dbUpdateCellSql(instance.engine, view.table, column, value, keyOf(rowIndex));
+      await applyWrite(
+        `Modifier ${view.table}.${column}`,
+        `Avant : ${before === null ? "NULL" : `« ${before} »`}\nAprès : ${value === null ? "NULL" : `« ${value} »`}`,
+        sqlText,
+      );
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const deleteRow = async (rowIndex: number) => {
+    if (!instance || !view || !primary) return;
+    try {
+      const sqlText = await api.dbDeleteRowSql(instance.engine, view.table, keyOf(rowIndex));
+      await applyWrite("Supprimer cette ligne", "La suppression est définitive : il n'y a pas d'annulation.", sqlText);
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const insertRow = async () => {
+    if (!instance || !view || !inserting) return;
+    const values = Object.entries(inserting).filter(([, v]) => v !== null && v !== "") as [string, string][];
+    setInserting(null);
+    if (values.length === 0) return notify("Aucune valeur saisie.", "info");
+    try {
+      const sqlText = await api.dbInsertRowSql(instance.engine, view.table, values);
+      await applyWrite(`Ajouter une ligne dans ${view.table}`, "Les colonnes laissées vides prennent leur valeur par défaut.", sqlText);
     } catch (e) {
       notify(errorMessage(e), "error");
     }
@@ -198,13 +336,29 @@ function Databases({ serverId }: { serverId: string }) {
 
   const shownTables = useMemo(() => (tables ?? []).filter((t) => !filter || t.name.toLowerCase().includes(filter.toLowerCase())), [tables, filter]);
 
+  if (mode === "redis") {
+    return (
+      <Suspense fallback={<div className="p-4 text-sm text-muted">Chargement…</div>}>
+        <RedisPanel serverId={serverId} onBackToSql={() => setMode("sql")} />
+      </Suspense>
+    );
+  }
+
   if (instances && instances.length === 0) {
     return (
       <EmptyState icon={<Database size={40} />} title="Aucune base de données trouvée">
         Helm cherche les conteneurs MySQL, MariaDB et PostgreSQL en cours, ainsi que les services installés sur le serveur.
-        <Button className="mt-3" size="sm" icon={<RefreshCw size={13} />} onClick={() => void loadInstances()}>
-          Rechercher à nouveau
-        </Button>
+        <div className="mt-3 flex justify-center gap-2">
+          <Button size="sm" icon={<RefreshCw size={13} />} onClick={() => void loadInstances()}>
+            Rechercher à nouveau
+          </Button>
+          <Button size="sm" icon={<FileSearch size={13} />} loading={searchingSqlite} onClick={() => void findSqlite()}>
+            Chercher des fichiers SQLite
+          </Button>
+          <Button size="sm" onClick={() => setMode("redis")}>
+            Explorer Redis
+          </Button>
+        </div>
       </EmptyState>
     );
   }
@@ -214,7 +368,7 @@ function Databases({ serverId }: { serverId: string }) {
       title="Bases de données"
       guide="databases"
       scroll={false}
-      subtitle="Les requêtes passent par le client du serveur (mysql, psql) via SSH : aucun port de base n'a besoin d'être ouvert."
+      subtitle="Les requêtes passent par le client du serveur (mysql, psql, sqlite3) via SSH : aucun port de base n'a besoin d'être ouvert."
       actions={
         <>
           <select
@@ -246,8 +400,14 @@ function Databases({ serverId }: { serverId: string }) {
               </option>
             ))}
           </select>
-          <Button size="sm" icon={<Plus size={13} />} disabled={!instance} onClick={() => void createDatabase()}>
+          <Button size="sm" icon={<Plus size={13} />} disabled={!instance || instance.engine === "sqlite"} onClick={() => void createDatabase()}>
             Nouvelle base
+          </Button>
+          <Button size="sm" icon={<FileSearch size={13} />} loading={searchingSqlite} onClick={() => void findSqlite()} title="Chercher les fichiers .db / .sqlite du serveur">
+            SQLite
+          </Button>
+          <Button size="sm" onClick={() => setMode("redis")} title="Explorer les clés Redis / Valkey">
+            Redis
           </Button>
           <IconButton title="Actualiser" onClick={() => void loadInstances()}>
             <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
@@ -269,7 +429,7 @@ function Databases({ serverId }: { serverId: string }) {
               shownTables.map((t) => (
                 <button
                   key={t.name}
-                  className="flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] hover:bg-hover"
+                  className={`flex w-full items-center gap-2 px-3 py-1 text-left text-[13px] hover:bg-hover ${view?.table === t.name ? "bg-hover-soft font-medium" : ""}`}
                   title={`${t.count.toLocaleString("fr-FR")} lignes (estimation) · ${formatBytes(t.size)}`}
                   onClick={() => void openTable(t.name)}
                 >
@@ -290,6 +450,7 @@ function Databases({ serverId }: { serverId: string }) {
                 onChange={setSql}
                 theme={monacoTheme}
                 tables={(tables ?? []).map((t) => t.name)}
+                columns={view?.columns.map((c) => ({ name: c.name, table: view.table, dataType: c.dataType })) ?? []}
                 onMount={(editor, monaco) => {
                   // Ctrl+Entrée exécute, comme dans les clients SQL habituels.
                   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void run(editor.getValue()));
@@ -297,7 +458,7 @@ function Databases({ serverId }: { serverId: string }) {
               />
             </Suspense>
           </div>
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <Button size="sm" variant="primary" loading={running} icon={<Play size={13} />} onClick={() => void run()}>
               Exécuter (Ctrl+Entrée)
             </Button>
@@ -313,49 +474,56 @@ function Databases({ serverId }: { serverId: string }) {
                 <TriangleAlert size={11} className="mr-1" /> requête qui modifie
               </Badge>
             )}
+            {view && (
+              <Badge tone={primary ? "accent" : "muted"}>
+                {view.table}
+                {primary ? " · éditable" : " · lecture seule (pas de clé primaire)"}
+              </Badge>
+            )}
+            {view && view.filters.length > 0 && (
+              <Button size="sm" onClick={() => void runTable({ ...view, filters: [] })}>
+                Retirer les filtres ({view.filters.length})
+              </Button>
+            )}
             {result && (
               <span className="text-xs text-muted">
                 {result.rows.length} ligne(s) · {result.durationMs} ms{result.truncated && " · tronqué"}
               </span>
             )}
-            {result && result.rows.length > 0 && (
-              <Button size="sm" className="ml-auto" icon={<Download size={13} />} onClick={() => void exportCsv()}>
-                Exporter en CSV
-              </Button>
-            )}
+            <div className="ml-auto flex items-center gap-2">
+              {view && primary && (
+                <Button
+                  size="sm"
+                  icon={<Rows3 size={13} />}
+                  onClick={() => setInserting(Object.fromEntries(view.columns.map((c) => [c.name, ""])))}
+                >
+                  Ajouter une ligne
+                </Button>
+              )}
+              {result && result.rows.length > 0 && (
+                <Button size="sm" icon={<Download size={13} />} onClick={() => void exportCsv()}>
+                  Exporter en CSV
+                </Button>
+              )}
+            </div>
           </div>
           {/* Le tableau garde ses colonnes à leur largeur naturelle et défile horizontalement ;
               un clic ouvre la ligne entière, seule façon de lire une valeur longue. */}
           <div className="min-h-0 flex-1 overflow-auto">
             {error && <pre className="m-3 rounded-md border border-danger/40 bg-danger/10 p-3 font-mono text-xs whitespace-pre-wrap text-danger select-text">{error}</pre>}
             {result && result.columns.length > 0 && (
-              <table className="min-w-full text-xs">
-                <thead className="sticky top-0 bg-panel text-left text-muted">
-                  <tr>
-                    {result.columns.map((c, i) => (
-                      <th key={i} className="border-b border-border px-3 py-1.5 font-medium whitespace-nowrap">
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.rows.map((row, i) => (
-                    <tr
-                      key={i}
-                      className="cursor-pointer border-b border-border/40 hover:bg-hover-soft"
-                      onClick={() => setRowDetail({ columns: result.columns, values: row })}
-                      title="Cliquer pour lire la ligne entière"
-                    >
-                      {row.map((v, j) => (
-                        <td key={j} className="max-w-80 truncate px-3 py-1 font-mono select-text">
-                          {v === null ? <span className="text-muted italic">NULL</span> : v}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataGrid
+                result={result}
+                columns={view?.columns ?? null}
+                editable={!!primary}
+                sort={view?.sort ?? null}
+                onSort={(s) => view && void runTable({ ...view, sort: s })}
+                filters={view?.filters ?? []}
+                onFilters={(f) => view && void runTable({ ...view, filters: f })}
+                onEditCell={(c, i, v) => void editCell(c, i, v)}
+                onDeleteRow={(i) => void deleteRow(i)}
+                onOpenRow={(values) => setRowDetail({ columns: result.columns, values })}
+              />
             )}
             {result && result.columns.length === 0 && !error && <p className="p-4 text-sm text-muted">Requête exécutée (aucun résultat à afficher).</p>}
           </div>
@@ -374,6 +542,33 @@ function Databases({ serverId }: { serverId: string }) {
               </div>
             ))}
           </dl>
+        </Modal>
+      )}
+
+      {inserting && view && (
+        <Modal
+          title={`Ajouter une ligne dans ${view.table}`}
+          width="max-w-2xl"
+          onClose={() => setInserting(null)}
+          footer={
+            <Button variant="primary" onClick={() => void insertRow()}>
+              Voir la requête
+            </Button>
+          }
+        >
+          <p className="mb-3 text-xs text-muted">Les colonnes laissées vides prennent leur valeur par défaut (auto-incrément, date du jour…).</p>
+          <div className="flex flex-col gap-2">
+            {view.columns.map((c) => (
+              <Field key={c.name} label={`${c.name} — ${c.dataType}${c.nullable ? "" : " (obligatoire)"}`}>
+                <Input
+                  className="h-8 font-mono text-xs"
+                  value={inserting[c.name] ?? ""}
+                  placeholder={c.primary ? "clé primaire" : ""}
+                  onChange={(e) => setInserting({ ...inserting, [c.name]: e.target.value })}
+                />
+              </Field>
+            ))}
+          </div>
         </Modal>
       )}
     </PageLayout>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fiche AppStream de Helm : c'est elle que Flathub et les logithèques (GNOME Logiciels,
+     Discover) affichent. Les <release> sont ajoutées par scripts/packaging.py à chaque version. -->
+<component type="desktop-application">
+  <id>dev.helm.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Helm</name>
+  <summary>Manage, browse and monitor your servers over SSH</summary>
+  <summary xml:lang="fr">Gérer, parcourir et surveiller ses serveurs par SSH</summary>
+  <developer id="io.github.nathanchevrollier">
+    <name>Nathan Chevrollier</name>
+  </developer>
+  <description>
+    <p>
+      Helm brings together what usually takes four separate tools: an SSH terminal with persistent
+      sessions, an SFTP file browser, Docker management, databases, nginx sites, tunnels, backups and
+      monitoring.
+    </p>
+    <p xml:lang="fr">
+      Helm réunit dans une seule application ce qui demande habituellement quatre outils : terminal
+      SSH avec sessions persistantes, explorateur SFTP, gestion Docker, bases de données, sites nginx,
+      tunnels, sauvegardes et supervision.
+    </p>
+    <ul>
+      <li>Persistent terminals backed by tmux, with multi-server command broadcast</li>
+      <li>SFTP browser with remote search, server-side archives and file comparison</li>
+      <li>Docker containers, Compose projects and a one-click application catalogue</li>
+      <li>MySQL, PostgreSQL, SQLite and Redis explorers with in-place editing</li>
+      <li>Secrets kept in the system keyring, never in plain text</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">dev.helm.desktop.desktop</launchable>
+  <url type="homepage">https://github.com/NathanChevrollier/Helm</url>
+  <url type="bugtracker">https://github.com/NathanChevrollier/Helm/issues</url>
+  <url type="vcs-browser">https://github.com/NathanChevrollier/Helm</url>
+  <categories>
+    <category>Development</category>
+    <category>Network</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <requires>
+    <internet>always</internet>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <releases>
+    <release version="1.0.0" date="2026-09-22" />
+  </releases>
+</component>

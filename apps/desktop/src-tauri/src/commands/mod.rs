@@ -9,6 +9,7 @@ pub mod identities;
 pub mod logs;
 pub mod monitoring;
 pub mod rdp;
+pub mod redis;
 pub mod security;
 pub mod servers;
 pub mod share;

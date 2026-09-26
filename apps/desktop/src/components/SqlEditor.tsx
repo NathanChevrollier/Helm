@@ -13,12 +13,25 @@ const MOTS_CLES = [
   "SET", "DELETE FROM", "CREATE TABLE", "ALTER TABLE", "DROP TABLE", "BEGIN", "COMMIT", "ROLLBACK",
 ];
 
+/** Colonne proposée à la saisie, avec la table dont elle vient. */
+export interface ColumnHint {
+  name: string;
+  table: string;
+  dataType: string;
+}
+
+/** Un nom qui sort de l'ordinaire (majuscule, tiret, espace) doit être cité. */
+function insertName(name: string): string {
+  return /^[a-z_][a-z0-9_]*$/.test(name) ? name : `"${name}"`;
+}
+
 export default function SqlEditor({
   value,
   onChange,
   theme,
   onMount,
   tables = [],
+  columns = [],
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -26,10 +39,14 @@ export default function SqlEditor({
   onMount: OnMount;
   /** Tables de la base sélectionnée, proposées à la saisie. */
   tables?: string[];
+  /** Colonnes connues (table ouverte), proposées avant les tables et les mots-clés. */
+  columns?: ColumnHint[];
 }) {
-  // Les tables changent avec la base : la complétion lit toujours la dernière liste connue.
+  // Les tables et colonnes changent avec la base : la complétion lit toujours la dernière liste connue.
   const tablesRef = useRef(tables);
   tablesRef.current = tables;
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
   const fournisseurRef = useRef<{ dispose: () => void } | null>(null);
   useEffect(() => () => fournisseurRef.current?.dispose(), []);
 
@@ -37,19 +54,52 @@ export default function SqlEditor({
   const enregistrerCompletion = (monaco: Parameters<OnMount>[1]) => {
     fournisseurRef.current?.dispose();
     fournisseurRef.current = monaco.languages.registerCompletionItemProvider("sql", {
+      // Le point déclenche la complétion pour proposer les colonnes après « table. ».
+      triggerCharacters: ["."],
       provideCompletionItems: (model: editor.ITextModel, position: Position) => {
         const mot = model.getWordUntilPosition(position);
         const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: mot.startColumn, endColumn: mot.endColumn };
+        // Texte qui précède : après « t. », seules les colonnes de `t` ont un sens.
+        const avant = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: 1,
+          endColumn: mot.startColumn,
+        });
+        const prefixe = /([A-Za-z_][\w$]*)\.\s*$/.exec(avant)?.[1] ?? null;
+
+        // `sortText` force l'ordre : colonnes, puis tables, puis mots-clés. Monaco trie sinon par
+        // pertinence alphabétique, et les mots-clés noyaient les noms réels du schéma.
+        const colonnes = columnsRef.current
+          .filter((c) => !prefixe || c.table.toLowerCase() === prefixe.toLowerCase())
+          .map((c) => ({
+            label: c.name,
+            kind: monaco.languages.CompletionItemKind.Field,
+            detail: `${c.dataType} · ${c.table}`,
+            insertText: insertName(c.name),
+            sortText: `0${c.name}`,
+            range,
+          }));
+        // Après « t. », proposer une table ou un mot-clé n'aurait aucun sens.
+        if (prefixe) return { suggestions: colonnes };
+
         const suggestions: languages.CompletionItem[] = [
+          ...colonnes,
           ...tablesRef.current.map((t) => ({
             label: t,
             kind: monaco.languages.CompletionItemKind.Struct,
             detail: "table",
-            // Un nom qui sort de l'ordinaire (majuscule, tiret, espace) doit être cité.
-            insertText: /^[a-z_][a-z0-9_]*$/.test(t) ? t : `"${t}"`,
+            insertText: insertName(t),
+            sortText: `1${t}`,
             range,
           })),
-          ...MOTS_CLES.map((k) => ({ label: k, kind: monaco.languages.CompletionItemKind.Keyword, insertText: k, range })),
+          ...MOTS_CLES.map((k) => ({
+            label: k,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: k,
+            sortText: `2${k}`,
+            range,
+          })),
         ];
         return { suggestions };
       },

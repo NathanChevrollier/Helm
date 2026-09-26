@@ -1,0 +1,39 @@
+# Maintainer: Nathan Chevrollier <https://github.com/NathanChevrollier>
+#
+# Paquet AUR « -bin » : il reprend le .deb de la release GitHub plutôt que de recompiler Helm.
+# Recompiler demanderait Rust, Node, pnpm et la chaîne de compilation croisée de l'agent helmd —
+# plusieurs gigaoctets et vingt minutes pour obtenir le même binaire.
+#
+# Régénéré par `python3 scripts/packaging.py vX.Y.Z` (version et empreinte). Après modification :
+#     makepkg --printsrcinfo > .SRCINFO
+
+pkgname=helm-desktop-bin
+_pkgname=Helm
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Manage, browse and monitor your servers over SSH (terminal, SFTP, Docker, databases, nginx)"
+arch=('x86_64')
+url="https://github.com/NathanChevrollier/Helm"
+license=('MIT')
+# Dépendances d'exécution de Tauri 2 sous Linux.
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'openssl')
+optdepends=(
+  'gnome-keyring: conservation des secrets sous GNOME'
+  'kwallet: conservation des secrets sous KDE'
+)
+provides=('helm-desktop')
+conflicts=('helm-desktop')
+source_x86_64=("${url}/releases/download/v${pkgver}/${_pkgname}_${pkgver}_amd64.deb")
+sha256sums_x86_64=('0000000000000000000000000000000000000000000000000000000000000000')
+
+package() {
+  # Le .deb contient une archive data.tar.* avec l'arborescence /usr à installer.
+  bsdtar -xf data.tar.* -C "${pkgdir}"
+
+  # L'exécutable s'appelle « helm-desktop » (nom du paquet Cargo) : il cohabite sans conflit avec
+  # « helm », le gestionnaire de paquets Kubernetes, que beaucoup d'administrateurs ont déjà.
+
+  install -Dm644 /dev/stdin "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE" <<'EOF'
+Licence MIT — texte complet : https://github.com/NathanChevrollier/Helm/blob/main/LICENSE
+EOF
+}

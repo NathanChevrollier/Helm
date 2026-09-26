@@ -15,7 +15,7 @@ const WINDOW = 8 * 1024 * 1024;
 const isLog = (path: string) => /\.log(\.\d+)?$|\/log\//.test(path);
 
 /** Éditeur de fichier distant en fenêtre modale, avec aperçu des modifications avant enregistrement. */
-export default function FileEditor({ serverId, path, onClose }: { serverId: string; path: string; onClose: () => void }) {
+export default function FileEditor({ serverId, path, line, onClose }: { serverId: string; path: string; /** Ligne a montrer a l'ouverture (resultat de recherche). */ line?: number; onClose: () => void }) {
   const notify = useApp((s) => s.notify);
   const monacoTheme = useMonacoTheme();
   const ask = useApp((s) => s.ask);
@@ -159,6 +159,11 @@ export default function FileEditor({ serverId, path, onClose }: { serverId: stri
       setTimeout(() => setDirty((model?.getAlternativeVersionId() ?? 0) !== savedVersion.current)),
     );
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveRef.current());
+    // Ouvert depuis un resultat de recherche : la ligne trouvee est centree et le curseur pose dessus.
+    if (line && line > 0) {
+      editor.revealLineInCenter(line);
+      editor.setPosition({ lineNumber: line, column: 1 });
+    }
     editor.focus();
   };
 

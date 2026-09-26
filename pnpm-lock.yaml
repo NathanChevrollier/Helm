@@ -186,6 +186,9 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.56.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@novnc/novnc':
+        specifier: ^1.7.0
+        version: 1.7.0
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -533,6 +536,9 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+
+  '@novnc/novnc@1.7.0':
+    resolution: {integrity: sha512-ucEJOx4T2avIRCleodk7YobZj5O2Ga2AeLfQ69A/yjG9HHba2+PDgwSkN3FttrmG+70ZGx21sElNFouK13RzyA==}
 
   '@octokit/auth-token@5.1.2':
     resolution: {integrity: sha512-JcQDsBdg49Yky2w2ld20IHAlwr8d/d8N6NiOXbtuoPCqzbsiJgF633mVUw3x4mo0H5ypataQIX7SFu3yy44Mpw==}
@@ -1865,6 +1871,8 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@novnc/novnc@1.7.0': {}
 
   '@octokit/auth-token@5.1.2': {}
 

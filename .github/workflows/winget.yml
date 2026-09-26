@@ -1,0 +1,45 @@
+name: winget
+
+# Soumet la nouvelle version à microsoft/winget-pkgs dès qu'une release est publiée.
+# Elle part après `publish` : l'installeur soumis est donc déjà signé par SignPath quand la
+# signature est en place, et son empreinte est celle de l'asset définitif.
+#
+# Demande le secret WINGET_TOKEN (jeton personnel, portée `public_repo`) et un fork de
+# microsoft/winget-pkgs sur le compte du jeton. Sans ce secret, le workflow ne fait rien.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag à soumettre (ex. v1.0.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: windows-latest
+    # Les préversions (v1.2.0-rc.1) restent hors de winget : un `winget upgrade` ne doit jamais
+    # installer une version de test.
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Jeton winget présent ?
+        id: gate
+        shell: bash
+        run: |
+          if [ -n "$WINGET_TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::WINGET_TOKEN absent : soumission winget ignorée (voir packaging/README.md)."; echo "enabled=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Soumission à microsoft/winget-pkgs
+        if: steps.gate.outputs.enabled == 'true'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: NathanChevrollier.Helm
+          # Seul l'installeur NSIS est concerné ; les .sig et latest.json ne sont pas des installeurs.
+          installers-regex: '_x64-setup\.exe$'
+          release-tag: ${{ inputs.tag || github.event.release.tag_name }}
+          token: ${{ secrets.WINGET_TOKEN }}

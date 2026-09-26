@@ -32,6 +32,11 @@ impl Bridge {
     pub fn stop(self) {
         self.handle.abort();
     }
+
+    /// Pont construit par un autre protocole (VNC) : même cycle de vie, même rangement.
+    pub(crate) fn from_parts(url: String, token: String, handle: tauri::async_runtime::JoinHandle<()>) -> Bridge {
+        Bridge { url, token, handle }
+    }
 }
 
 /// Ponts ouverts, par bureau à distance : fermer l'onglet ferme le pont.

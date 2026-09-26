@@ -4,6 +4,8 @@
 [![Dernière version](https://img.shields.io/github/v/release/NathanChevrollier/Helm?label=version)](https://github.com/NathanChevrollier/Helm/releases/latest)
 [![Licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
+*[English version](README.en.md)*
+
 Application de bureau (Windows, macOS, Linux) pour administrer ses serveurs Linux : terminal SSH,
 fichiers, supervision, Docker, bases de données, sites web, sauvegardes et audit de sécurité dans
 une seule fenêtre.
@@ -31,8 +33,17 @@ d'exploitation, et tout ce qui transite par un serveur de relais est chiffré de
 
 ## Installation
 
-Les installeurs sont publiés sur la page
-[Releases](https://github.com/NathanChevrollier/Helm/releases/latest).
+Par le gestionnaire de paquets de ton système :
+
+```sh
+winget install NathanChevrollier.Helm                              # Windows
+brew tap NathanChevrollier/tap && brew install --cask helm-desktop # macOS
+yay -S helm-desktop-bin                                            # Arch Linux (AUR)
+flatpak install flathub dev.helm.desktop                           # Linux (Flatpak)
+```
+
+Les manifestes de chaque canal sont dans [`packaging/`](packaging/). Sinon, les installeurs sont
+publiés sur la page [Releases](https://github.com/NathanChevrollier/Helm/releases/latest).
 
 | Système | Fichier |
 | --- | --- |
@@ -44,8 +55,10 @@ Les installeurs sont publiés sur la page
 Helm vérifie au démarrage si une nouvelle version existe et propose de l'installer
 (Réglages → Préférences → Mises à jour). Les paquets sont signés : une version altérée est refusée.
 
-> **Windows** — l'installeur n'est pas signé par un certificat commercial. SmartScreen affiche
+> **Windows** — tant que la signature de code SignPath n'est pas active, SmartScreen affiche
 > « Windows a protégé votre ordinateur » → *Informations complémentaires* → *Exécuter quand même*.
+> La chaîne de publication signe l'installeur dès que les secrets SignPath sont en place
+> (voir [`packaging/README.md`](packaging/README.md#signature-de-code-windows-signpath)).
 >
 > **macOS** — l'app n'est pas notariée par Apple. Au premier lancement :
 > *Réglages Système* → *Confidentialité et sécurité* → *Ouvrir quand même*. Si macOS indique que
@@ -70,17 +83,17 @@ du système (Windows Credential Manager, Trousseau macOS, Secret Service sous Li
 | Section | Ce qu'elle fait |
 |---|---|
 | **Accueil** | Santé de tous les serveurs d'un coup d'œil : CPU, mémoire, disque, alertes, conteneurs arrêtés, certificats proches de l'expiration. |
-| **Serveurs** | Profils SSH, dossiers de rangement, banque d'identifiants réutilisables, serveurs de rebond, import PuTTY et `ssh_config`, vérification de la clé d'hôte, **bureau à distance (RDP) ouvert dans l'app** : client intégré, sans fenêtre externe, à travers un tunnel SSH quand la machine n'est joignable que depuis un serveur. |
-| **Terminal** | Sessions **tmux persistantes** qui survivent aux coupures et à la fermeture de l'app. Onglets, division horizontale ou verticale réglable, panneau de fichiers qui suit le dossier courant, dépôt de fichiers Windows directement dans le dossier courant, **diffusion de la saisie** à plusieurs serveurs avec confirmation des commandes sensibles, snippets, enregistrement de session (asciicast). |
-| **Fichiers** | Explorateur SFTP, **double panneau** pour copier d'un serveur à l'autre, glisser-déposer, transferts annulables, édition distante dans Monaco, repli sudo. |
+| **Serveurs** | Profils SSH, dossiers de rangement, banque d'identifiants réutilisables, serveurs de rebond, import PuTTY et `ssh_config`, vérification de la clé d'hôte, **bureaux à distance ouverts dans l'app** : RDP (avec transfert de fichiers par le presse-papiers) et **VNC** (qualité d'image réglable, lecture seule) dans des clients intégrés, consoles de VM **SPICE** dans remote-viewer — le tout à travers un tunnel SSH quand la machine n'est joignable que depuis un serveur. |
+| **Terminal** | Sessions **tmux persistantes** qui survivent aux coupures et à la fermeture de l'app. Onglets, division horizontale ou verticale réglable, panneau de fichiers qui suit le dossier courant, dépôt de fichiers Windows directement dans le dossier courant, **diffusion de la saisie** à plusieurs serveurs avec confirmation des commandes sensibles, **bouton « Pourquoi cette commande a échoué ? »** qui ouvre l'assistant sur l'erreur, **historique du serveur** en recherche approximative (Ctrl+Maj+R), fragments **à paramètres** (`{{conteneur}}`, `{{lignes:100}}`), enregistrement de session (asciicast). |
+| **Fichiers** | Explorateur SFTP, **recherche par nom et grep distants** (Ctrl+P, rien n'est téléchargé), **compression et extraction côté serveur** (tar.gz, zip, tar.zst), **comparaison de deux fichiers**, **double panneau** pour copier d'un serveur à l'autre, glisser-déposer, transferts annulables, édition distante dans Monaco, repli sudo. |
 | **Supervision** | CPU, mémoire, disques, réseau, processus, services systemd. Avec l'agent `helmd` : 30 jours d'historique et alertes (seuils, sites injoignables, sauvegardes en échec) vers Discord, ntfy ou webhook, même PC éteint. |
-| **Docker** | Conteneurs, statistiques, logs en direct, shell dans un conteneur, projets compose (création assistée depuis l'interface), images et nettoyage. **Déploiement** (pull → up → vérification → retour arrière automatique), **déploiement depuis GitHub** par clé restreinte, **restriction des ports publiés** à 127.0.0.1, accès local par tunnel. |
-| **Bases de données** | MySQL/MariaDB et PostgreSQL, en conteneur ou installés sur l'hôte : bases, tables, éditeur SQL avec exécution (Ctrl+Entrée) et export CSV. |
+| **Docker** | Conteneurs, statistiques, logs en direct, shell dans un conteneur, projets compose (création assistée depuis l'interface), **catalogue d'applications en un clic** (Nextcloud, Vaultwarden, Uptime Kuma, Gitea, n8n, Plausible…, mots de passe générés, ports sur 127.0.0.1 seulement), images, **volumes avec leur taille réelle et détection des orphelins**, nettoyage chiffré en octets avant suppression, **registres privés** (Docker Hub, GitHub Packages, GitLab, AWS ECR, registre auto-hébergé) avec identifiants dans le coffre du système. **Déploiement** (pull → up → vérification → retour arrière automatique), **déploiement depuis GitHub** par clé restreinte, **restriction des ports publiés** à 127.0.0.1, accès local par tunnel. |
+| **Bases de données** | MySQL/MariaDB, PostgreSQL et **SQLite**, en conteneur ou installés sur l'hôte : bases, tables, éditeur SQL avec **autocomplétion des tables et colonnes**, exécution (Ctrl+Entrée), **tri et filtres depuis l'en-tête**, **édition en cellule** avec aperçu du `UPDATE` avant exécution (clé primaire exigée), ajout et suppression de ligne, export CSV. **Explorateur Redis / Valkey** : clés par pages (SCAN), tous les types, durée de vie, console. |
 | **Sites** | Domaine → nginx ou Apache → port → conteneur, certificats TLS, éditeur de vhost sécurisé, assistant « Nouveau site », **historique des configurations** avec comparaison et restauration. |
 | **Journaux** | Logs Docker, systemd et fichiers suivis en direct, fusionnés, filtrables (texte, expression régulière, niveau) et exportables. |
 | **Tunnels** | Tunnels SSH locaux (127.0.0.1 uniquement) pour joindre une base ou une interface d'administration sans l'exposer. |
 | **Sauvegardes** | restic chiffré et dédupliqué : dumps MySQL/PostgreSQL cohérents, volumes, dossiers, vers le serveur ou un stockage S3. Planification, rétention, vérification, restauration (téléchargement, remise en place, réimport d'une base). |
-| **Sécurité** | Audit (SSH, pare-feu, fail2ban, mises à jour, ports exposés, comptes UID 0) et corrections guidées ; alertes ignorables puis archivées. Pour SSH et le pare-feu, une connexion de contrôle est maintenue et la modification est annulée automatiquement si elle échoue. |
+| **Sécurité** | Audit (SSH, pare-feu, fail2ban, mises à jour, ports exposés, comptes UID 0, xrdp limité à 16 bits) et corrections guidées ; alertes ignorables puis archivées. Pour SSH et le pare-feu, une connexion de contrôle est maintenue et la modification est annulée automatiquement si elle échoue. |
 | **Réglages** | Journal de toutes les actions, accès IA serveur par serveur, synchronisation, verrouillage de l'app, thème clair/sombre, raccourcis. |
 
 ## Assistant IA
@@ -167,7 +180,7 @@ Optionnel : Helm fonctionne sans lui, mais l'agent apporte l'historique et les a
 | Terminal persistant | `tmux` (installé depuis l'app si absent) |
 | Conteneurs | Docker ou Podman, accès direct ou via `sudo` |
 | Sites | nginx ou Apache |
-| Bases de données | MySQL/MariaDB, PostgreSQL (hôte ou conteneur) |
+| Bases de données | MySQL/MariaDB, PostgreSQL (hôte ou conteneur), `sqlite3` pour SQLite, `redis-cli` pour Redis |
 | Sauvegardes | restic (installé depuis l'app si absent) |
 | Supervision étendue | agent `helmd` (facultatif) |
 
@@ -186,6 +199,8 @@ Tous modifiables dans Réglages → Préférences.
 | Fermer l'onglet | `Ctrl+Shift+W` |
 | Onglet suivant / précédent | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Rechercher dans le terminal | `Ctrl+Shift+F` |
+| Historique des commandes du serveur | `Ctrl+Shift+R` |
+| Chercher un fichier ou du texte (Fichiers) | `Ctrl+P` |
 | Copier / coller dans le terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
 | Actualiser la vue | `F5` |
 
@@ -262,10 +277,13 @@ pnpm release 0.6.0
 ```
 
 Le script met la version à jour (Cargo, app, Tauri), crée le commit `chore(release): v0.6.0` et le
-tag `v0.5.0`, puis les pousse. Le tag déclenche [release.yml](.github/workflows/release.yml) : CI
+tag `v0.6.0`, puis les pousse. Le tag déclenche [release.yml](.github/workflows/release.yml) : CI
 complète, brouillon de release avec notes issues des commits, installeurs Windows (NSIS), macOS
 (arm64 et Intel) et Linux (AppImage, deb, rpm) signés pour la mise à jour, puis publication avec le
-manifeste `latest.json`. Un tag suffixé (`v0.6.0-beta.1`) produit une pré-release, ignorée par les
+manifeste `latest.json`. Si les secrets SignPath existent, l'installeur Windows est signé entre les
+deux, et sa signature de mise à jour recalculée. Une fois la release publiée,
+[winget.yml](.github/workflows/winget.yml) soumet la version à winget, et
+`python3 scripts/packaging.py v0.6.0` met à jour les manifestes Homebrew, AUR et Flatpak. Un tag suffixé (`v0.6.0-beta.1`) produit une pré-release, ignorée par les
 mises à jour automatiques.
 
 La clé de signature des mises à jour est dans les secrets du dépôt

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Helm
+GenericName=Server management
+GenericName[fr]=Gestion de serveurs
+Comment=Manage, browse and monitor your servers over SSH
+Comment[fr]=Gérer, parcourir et surveiller ses serveurs par SSH
+Exec=helm-desktop
+Icon=dev.helm.desktop
+Terminal=false
+Categories=Development;Network;RemoteAccess;System;
+Keywords=ssh;sftp;terminal;docker;server;vps;devops;serveur;
+StartupWMClass=helm-desktop

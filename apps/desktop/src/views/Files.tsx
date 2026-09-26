@@ -3,10 +3,10 @@ import { create } from "zustand";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowLeftRight, ArrowUp, Columns2, Download, Eye, EyeOff, File, FilePlus, Folder, FolderOpen, FolderPlus, House, Link2,
-  Pencil, RefreshCw, Shield, SquareTerminal, Star, Trash2, Upload, X,
+  ArrowLeftRight, ArrowUp, Columns2, Download, Eye, EyeOff, File, FileArchive, FileDiff, FilePlus, Folder, FolderOpen,
+  FolderPlus, House, Link2, PackageOpen, Pencil, RefreshCw, Search, Shield, SquareTerminal, Star, Trash2, Upload, X,
 } from "lucide-react";
-import { api, errorMessage, formatBytes, shellQuote, type FsEntry, type Listing } from "../lib/api";
+import { api, ARCHIVE_EXTENSIONS, errorMessage, formatBytes, shellQuote, type ArchiveFormat, type FsEntry, type Listing } from "../lib/api";
 import { track } from "../lib/transfers";
 import TransfersBar from "../components/TransfersBar";
 import { useAutoRefresh } from "../lib/refresh";
@@ -15,8 +15,20 @@ import { Button, EmptyState, Field, IconButton, Input, Modal } from "../componen
 import PageLayout from "../components/PageLayout";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
+const FileSearch = lazy(() => import("../components/FileSearch"));
+const DiffView = lazy(() => import("../components/DiffView"));
 
 const isDir = (e: FsEntry) => e.kind === "dir" || e.targetIsDir;
+
+/** Extensions reconnues par « Extraire ici » (mêmes formats que côté Rust). */
+const ARCHIVE_SUFFIXES = [
+  ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".tar", ".zip", ".gz", ".bz2", ".xz", ".zst",
+];
+
+const isArchive = (e: FsEntry) => !isDir(e) && ARCHIVE_SUFFIXES.some((x) => e.name.toLowerCase().endsWith(x));
+
+/** Taille maximale d'un fichier comparé dans la fenêtre de différences. */
+const MAX_DIFF_SIZE = 2 * 1024 * 1024;
 
 type PaneId = "left" | "right";
 
@@ -150,6 +162,13 @@ function Explorer({
   const [miniHistoryIndex, setMiniHistoryIndex] = useState(-1);
   const [miniRunning, setMiniRunning] = useState(false);
   const miniInputRef = useRef<HTMLInputElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** Ligne a montrer a l'ouverture de l'editeur, venue d'un resultat de recherche. */
+  const [editingLine, setEditingLine] = useState<number | undefined>(undefined);
+  /** Compression en cours de préparation : les éléments choisis. */
+  const [archiving, setArchiving] = useState<string[] | null>(null);
+  /** Comparaison de deux fichiers : leurs chemins et leur contenu. */
+  const [diff, setDiff] = useState<{ left: string; right: string; original: string; modified: string } | null>(null);
 
   const load = useCallback(
     async (path: string) => {
@@ -286,8 +305,9 @@ function Explorer({
   }, [cwd]);
 
   const activate = (e: FsEntry) => {
-    if (isDir(e)) void load(e.path);
-    else setEditing(e.path);
+    if (isDir(e)) return void load(e.path);
+    setEditingLine(undefined);
+    setEditing(e.path);
   };
 
   const onRowMouseDown = (ev: React.MouseEvent, e: FsEntry) => {
@@ -365,8 +385,51 @@ function Explorer({
     if (ok) await act(() => api.fsRemove(serverId, items.map((i) => i.path)));
   };
 
+  /** Compresse la sélection sur le serveur, sans qu'un octet transite par le PC. */
+  const archive = async (paths: string[], name: string, format: ArchiveFormat) => {
+    setArchiving(null);
+    const dest = join(name);
+    try {
+      const size = await api.fsArchive(serverId, paths, dest, format);
+      notify(`Archive créée : ${name} (${formatBytes(size)})`, "success");
+      refresh();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  /** Extrait une archive dans le dossier courant, après avoir montré ce qu'elle contient. */
+  const extract = async (e: FsEntry) => {
+    const inside = await api.fsArchiveList(serverId, e.path).catch(() => [] as string[]);
+    const ok = await ask({
+      title: `Extraire ${e.name} ici`,
+      body:
+        inside.length > 0
+          ? `${inside.length} élément(s) seront déposés dans ${cwd}. Les fichiers de même nom seront remplacés.`
+          : `Le contenu sera déposé dans ${cwd}. Les fichiers de même nom seront remplacés.`,
+      code: inside.slice(0, 40).join("\n") || undefined,
+      confirmLabel: "Extraire",
+    });
+    if (!ok) return;
+    await act(() => api.fsExtract(serverId, e.path, cwd));
+  };
+
+  /** Compare deux fichiers du serveur côte à côte dans Monaco. */
+  const compare = async (a: FsEntry, b: FsEntry) => {
+    const tooBig = [a, b].find((x) => x.size > MAX_DIFF_SIZE);
+    if (tooBig) return notify(`« ${tooBig.name} » est trop gros pour être comparé (plus de ${formatBytes(MAX_DIFF_SIZE)}).`, "error");
+    try {
+      const [original, modified] = await Promise.all([api.fsRead(serverId, a.path), api.fsRead(serverId, b.path)]);
+      setDiff({ left: a.path, right: b.path, original, modified });
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
   const crumbs = cwd.split("/").filter(Boolean);
   const single = selectedEntries.length === 1 ? selectedEntries[0] : null;
+  /** Exactement deux fichiers sélectionnés : la comparaison a un sens. */
+  const pair = selectedEntries.length === 2 && selectedEntries.every((e) => !isDir(e)) ? selectedEntries : null;
 
   return (
     <div ref={root} data-pane={pane} className="relative flex h-full flex-col" onKeyDown={(e) => {
@@ -375,6 +438,11 @@ function Explorer({
       if (e.key === "F2" && single) void rename(single);
       if (e.key === "Backspace") void load(parentOf(cwd));
       if (e.key === "F5") refresh();
+      // Ctrl+P : chercher un fichier ou du texte dans toute l'arborescence.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
     }} tabIndex={-1}>
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
         {onServerChange && (
@@ -418,6 +486,9 @@ function Explorer({
           <Input className="font-mono text-xs" value={pathInput} onChange={(e) => setPathInput(e.target.value)} aria-label="Chemin" />
         </form>
         <Input className="!w-44" placeholder="Filtrer…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <IconButton title="Chercher un fichier ou du texte dans l'arborescence (Ctrl+P)" onClick={() => setSearchOpen(true)}>
+          <Search size={15} />
+        </IconButton>
         <IconButton
           title={miniTerminalOpen ? "Fermer le mini terminal" : "Ouvrir le mini terminal dans ce dossier"}
           className={miniTerminalOpen ? "text-accent" : ""}
@@ -553,11 +624,24 @@ function Explorer({
           )}
           <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => void download(selectedEntries)}>Télécharger</Button>
           {single && !isDir(single) && (
-            <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(single.path)}>Éditer</Button>
+            <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => { setEditingLine(undefined); setEditing(single.path); }}>Éditer</Button>
           )}
           {single && isDir(single) && !bookmarks.some((b) => b.path === single.path) && (
             <Button size="sm" variant="ghost" icon={<Star size={13} />} onClick={() => addBookmark(serverId, single.path)}>
               Raccourci
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" icon={<FileArchive size={13} />} onClick={() => setArchiving(selectedEntries.map((e) => e.path))}>
+            Compresser
+          </Button>
+          {single && isArchive(single) && (
+            <Button size="sm" variant="ghost" icon={<PackageOpen size={13} />} onClick={() => void extract(single)}>
+              Extraire ici
+            </Button>
+          )}
+          {pair && (
+            <Button size="sm" variant="ghost" icon={<FileDiff size={13} />} onClick={() => void compare(pair[0], pair[1])}>
+              Comparer
             </Button>
           )}
           {single && <Button size="sm" variant="ghost" onClick={() => void rename(single)}>Renommer (F2)</Button>}
@@ -624,11 +708,105 @@ function Explorer({
 
       {editing && (
         <Suspense fallback={null}>
-          <FileEditor serverId={serverId} path={editing} onClose={() => setEditing(null)} />
+          <FileEditor
+            serverId={serverId}
+            path={editing}
+            line={editingLine}
+            onClose={() => {
+              setEditing(null);
+              setEditingLine(undefined);
+            }}
+          />
         </Suspense>
       )}
       {chmodOf && <ChmodDialog entry={chmodOf} onClose={() => setChmodOf(null)} onApply={(mode) => act(() => api.fsChmod(serverId, chmodOf.path, mode))} />}
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <FileSearch
+            serverId={serverId}
+            root={cwd}
+            onClose={() => setSearchOpen(false)}
+            onOpenFolder={(path) => void load(path)}
+            onOpenFile={(path, line) => {
+              // Le dossier du fichier est ouvert derrière l'éditeur : refermer laisse au bon endroit.
+              void load(parentOf(path)).then(() => {
+                setEditingLine(line);
+                setEditing(path);
+              });
+            }}
+          />
+        </Suspense>
+      )}
+      {archiving && <ArchiveDialog paths={archiving} onClose={() => setArchiving(null)} onCreate={archive} />}
+      {diff && (
+        <Modal title={`${diff.left.split("/").pop()} ↔ ${diff.right.split("/").pop()}`} width="max-w-[95vw]" onClose={() => setDiff(null)}>
+          <p className="mb-2 font-mono text-[11px] text-muted">
+            {diff.left} ↔ {diff.right}
+          </p>
+          <div className="h-[70vh]">
+            <Suspense fallback={<p className="text-xs text-muted">Chargement du comparateur…</p>}>
+              <DiffView original={diff.original} modified={diff.modified} language="plaintext" theme={useApp.getState().settings.theme === "light" ? "vs" : "vs-dark"} />
+            </Suspense>
+          </div>
+        </Modal>
+      )}
     </div>
+  );
+}
+
+/** Choix du nom et du format avant de compresser une sélection côté serveur. */
+function ArchiveDialog({
+  paths,
+  onClose,
+  onCreate,
+}: {
+  paths: string[];
+  onClose: () => void;
+  onCreate: (paths: string[], name: string, format: ArchiveFormat) => Promise<void>;
+}) {
+  const [format, setFormat] = useState<ArchiveFormat>("targz");
+  const [name, setName] = useState("");
+  // Le nom proposé vient du serveur : même règle que celle appliquée à la compression.
+  useEffect(() => {
+    let cancelled = false;
+    void api.fsArchiveName(paths, format).then((n) => !cancelled && setName(n));
+    return () => {
+      cancelled = true;
+    };
+  }, [paths, format]);
+
+  const FORMATS: { id: ArchiveFormat; label: string; hint: string }[] = [
+    { id: "targz", label: "tar.gz", hint: "attendu partout sous Linux, conserve droits et liens" },
+    { id: "zip", label: "zip", hint: "s'ouvre sans rien installer sous Windows" },
+    { id: "tarzst", label: "tar.zst", hint: "plus rapide et plus compact, demande zstd sur le serveur" },
+  ];
+
+  return (
+    <Modal
+      title={`Compresser ${paths.length > 1 ? `${paths.length} éléments` : paths[0].split("/").pop()}`}
+      onClose={onClose}
+      footer={
+        <Button variant="primary" disabled={!name.trim()} onClick={() => void onCreate(paths, name.trim(), format)}>
+          Compresser
+        </Button>
+      }
+    >
+      <p className="mb-3 text-xs text-muted">
+        La compression a lieu sur le serveur : aucun octet ne transite par ton PC. L'archive est déposée dans le dossier affiché.
+      </p>
+      <div className="mb-3 flex flex-col gap-1">
+        {FORMATS.map((f) => (
+          <label key={f.id} className="flex items-center gap-2 text-sm">
+            <input type="radio" name="format" checked={format === f.id} onChange={() => setFormat(f.id)} />
+            <span className="font-mono">{f.label}</span>
+            <span className="text-xs text-muted">— {f.hint}</span>
+          </label>
+        ))}
+      </div>
+      <Field label="Nom de l'archive" hint={`Extension attendue : .${ARCHIVE_EXTENSIONS[format]}`}>
+        <Input className="font-mono text-sm" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+    </Modal>
   );
 }
 

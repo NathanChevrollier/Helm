@@ -25,6 +25,8 @@ import HomeView from "./views/Home";
 const TerminalView = lazy(() => import("./views/Terminal"));
 // Client RDP : plusieurs méga-octets de WebAssembly, chargés seulement à la première session.
 const RemoteDesktopSession = lazy(() => import("./components/RemoteDesktopSession"));
+// Client VNC (noVNC) : chargé seulement à la première session VNC.
+const VncSession = lazy(() => import("./components/VncSession"));
 
 const VIEWS: Partial<Record<SectionId, ComponentType>> = {
   servers: lazy(() => import("./views/Servers")),
@@ -57,6 +59,7 @@ export default function App() {
   const active = servers.find((s) => s.id === activeServerId);
   const View = VIEWS[section];
   const rdpOuvert = useRdp((s) => s.desktop !== null);
+  const rdpVnc = useRdp((s) => s.desktop?.protocol === "vnc");
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(undefined));
@@ -255,7 +258,7 @@ export default function App() {
           {assistantOpen && <AssistantPanel />}
           {rdpOuvert && (
             <Suspense fallback={null}>
-              <RemoteDesktopSession />
+              {rdpVnc ? <VncSession /> : <RemoteDesktopSession />}
             </Suspense>
           )}
         </main>

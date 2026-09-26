@@ -1,7 +1,7 @@
 //! Bases de données du serveur : découverte des instances (conteneurs Docker ou service local),
 //! exploration et exécution de SQL.
 
-use helm_core::db::{self, Engine, Instance, Named, QueryResult};
+use helm_core::db::{self, Column, Engine, Filter, Instance, KeyPart, Named, QueryResult, SortDir};
 use helm_core::docker::{self, Access};
 use tauri::State;
 
@@ -36,13 +36,7 @@ pub async fn db_instances(store: State<'_, Store>, sessions: State<'_, Sessions>
             continue;
         }
         if let Some(engine) = Engine::from_image(&c.image) {
-            out.push(Instance {
-                id: format!("container:{}", c.name),
-                label: format!("{} ({})", c.name, c.image),
-                engine,
-                container: Some(c.name),
-                version: String::new(),
-            });
+            out.push(Instance::server(format!("container:{}", c.name), format!("{} ({})", c.name, c.image), engine, Some(c.name)));
         }
     }
     out.extend(db::parse_local(&local.map_err(err)?.stdout));
@@ -134,4 +128,78 @@ pub async fn db_query(
 #[tauri::command]
 pub fn db_preview_query(engine: Engine, table: String, limit: usize) -> Result<String, String> {
     db::preview_query(engine, &table, limit.min(5000)).map_err(err)
+}
+
+/// Colonnes d'une table, avec le repérage de la clé primaire. C'est cette information qui autorise
+/// — ou interdit — l'édition d'une cellule dans le tableau de résultats.
+#[tauri::command]
+pub async fn db_columns(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    database: Option<String>,
+    table: String,
+) -> Result<Vec<Column>, String> {
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    db::columns(&conn, pw.as_deref(), &instance, database.as_deref(), &table).await.map_err(err)
+}
+
+/// Requête de consultation d'une table avec le tri et les filtres posés depuis l'en-tête des
+/// colonnes. Le SQL est construit côté Rust : l'interface n'envoie que des noms et des valeurs.
+#[tauri::command]
+pub fn db_table_query(
+    engine: Engine,
+    table: String,
+    filters: Vec<Filter>,
+    sort_column: Option<String>,
+    sort_desc: bool,
+    limit: usize,
+    offset: usize,
+) -> Result<String, String> {
+    let sort = sort_column.as_deref().map(|c| (c, if sort_desc { SortDir::Desc } else { SortDir::Asc }));
+    db::table_query(engine, &table, &filters, sort, limit.min(5000), offset).map_err(err)
+}
+
+/// `UPDATE` d'une seule cellule, renvoyé pour être montré à l'utilisateur avant exécution. Il est
+/// ensuite lancé par `db_query`, qui l'inscrit au journal comme toute requête d'écriture.
+#[tauri::command]
+pub fn db_update_cell_sql(
+    engine: Engine,
+    table: String,
+    column: String,
+    value: Option<String>,
+    key: Vec<KeyPart>,
+) -> Result<String, String> {
+    db::update_cell_sql(engine, &table, &column, value.as_deref(), &key).map_err(err)
+}
+
+/// `DELETE` d'une seule ligne, désignée par sa clé primaire.
+#[tauri::command]
+pub fn db_delete_row_sql(engine: Engine, table: String, key: Vec<KeyPart>) -> Result<String, String> {
+    db::delete_row_sql(engine, &table, &key).map_err(err)
+}
+
+/// `INSERT` d'une ligne : les colonnes absentes prennent la valeur par défaut du moteur.
+#[tauri::command]
+pub fn db_insert_row_sql(engine: Engine, table: String, values: Vec<(String, Option<String>)>) -> Result<String, String> {
+    db::insert_row_sql(engine, &table, &values).map_err(err)
+}
+
+/// Fichiers SQLite trouvés sur le serveur. La recherche est lancée à la demande (bouton) : elle
+/// balaye plusieurs dossiers et n'a pas à retarder l'ouverture de l'onglet.
+#[tauri::command]
+pub async fn db_sqlite_files(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<Instance>, String> {
+    let (conn, _) = admin(&store, &sessions, &server_id).await?;
+    let out = helm_core::ssh::long(conn.exec(db::SQLITE_PROBE, None)).await.map_err(err)?;
+    Ok(db::parse_sqlite(&out.stdout))
+}
+
+/// Ouvre un fichier SQLite choisi à la main (par exemple repéré dans l'explorateur de fichiers).
+#[tauri::command]
+pub fn db_sqlite_instance(path: String, container: Option<String>) -> Result<Instance, String> {
+    if !db::safe_file_path(&path) {
+        return Err("chemin invalide : un chemin absolu est attendu".into());
+    }
+    Ok(Instance::sqlite(path, container))
 }

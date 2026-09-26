@@ -348,7 +348,7 @@ pub fn local_name(name: &str) -> String {
 }
 
 /// Premier chemin libre parmi `nom.ext`, `nom (1).ext`, `nom (2).ext`…
-fn unique_local(dir: &Path, name: &str) -> PathBuf {
+pub fn unique_local(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
         return first;

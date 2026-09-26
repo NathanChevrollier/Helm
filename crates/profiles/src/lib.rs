@@ -105,13 +105,38 @@ pub struct IgnoredFinding {
     pub at: i64,
 }
 
-/// Bureau à distance (RDP) : ouvert dans le client RDP du système (mstsc sous Windows),
-/// directement ou à travers un tunnel SSH par un serveur de Helm.
+/// Protocole d'un bureau à distance.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopProtocol {
+    /// Windows, ou Linux avec xrdp.
+    #[default]
+    Rdp,
+    /// Bureaux Linux (GNOME, KDE, XFCE), Raspberry Pi, macOS (Partage d'écran), consoles de VM.
+    Vnc,
+    /// Consoles de machines virtuelles QEMU/KVM (libvirt, Proxmox), ouvertes dans remote-viewer.
+    Spice,
+}
+
+impl DesktopProtocol {
+    pub fn default_port(self) -> u16 {
+        match self {
+            DesktopProtocol::Rdp => 3389,
+            DesktopProtocol::Vnc | DesktopProtocol::Spice => 5900,
+        }
+    }
+}
+
+/// Bureau à distance (RDP ou VNC) : ouvert dans Helm, ou dans le client RDP du système (mstsc
+/// sous Windows), directement ou à travers un tunnel SSH par un serveur de Helm.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktop {
     pub id: String,
     pub name: String,
+    /// Absent des profils créés avant l'arrivée de VNC : ce sont des bureaux RDP.
+    #[serde(default)]
+    pub protocol: DesktopProtocol,
     pub host: String,
     #[serde(default = "default_rdp_port")]
     pub port: u16,
@@ -155,6 +180,27 @@ impl RemoteDesktop {
     }
 }
 
+/// Registre d'images privé (Docker Hub, GitHub Packages, GitLab, AWS ECR…). Le jeton est dans
+/// le keyring, sous [`Registry::secret_owner`] ; ici ne figurent que l'adresse et l'utilisateur.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Registry {
+    pub id: String,
+    pub name: String,
+    pub kind: helm_core::registry::Kind,
+    /// Adresse du registre (`ghcr.io`, `registry.exemple.fr:5000`…).
+    pub server: String,
+    /// Utilisateur, ou identifiant de clé d'accès AWS pour ECR.
+    pub username: String,
+}
+
+impl Registry {
+    /// Propriétaire du jeton dans le keyring.
+    pub fn secret_owner(id: &str) -> String {
+        format!("registry-{id}")
+    }
+}
+
 /// Tunnel SSH local : 127.0.0.1:`local_port` sur le PC → `remote_host`:`remote_port` vu du serveur.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -187,6 +233,9 @@ pub struct Data {
     /// Bureaux à distance (RDP).
     #[serde(default)]
     pub desktops: Vec<RemoteDesktop>,
+    /// Registres d'images privés.
+    #[serde(default)]
+    pub registries: Vec<Registry>,
     /// Constats d'audit ignorés (archivés).
     #[serde(default)]
     pub ignored_findings: Vec<IgnoredFinding>,

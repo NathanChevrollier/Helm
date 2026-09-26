@@ -1,0 +1,59 @@
+# Manifeste Flatpak de Helm, pour Flathub.
+#
+# Il part de l'AppImage de la release plutôt que des sources : reconstruire Tauri dans le bac à sable
+# de Flatpak demanderait d'y embarquer Rust, Node et pnpm. Flathub accepte ce mode pour les
+# applications dont les sources sont publiques (flathub.org/docs, « extra-data » non requis ici).
+#
+# Régénéré par `python3 scripts/packaging.py vX.Y.Z` (URL et empreinte).
+id: dev.helm.desktop
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: helm-desktop
+
+finish-args:
+  # Affichage.
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  # Réseau : SSH, SFTP, tunnels et mises à jour. C'est la raison d'être de l'application.
+  - --share=network
+  # Trousseau du système (Secret Service) : les mots de passe n'y sont jamais stockés en clair.
+  - --talk-name=org.freedesktop.secrets
+  # Agent SSH de la session, pour les clés déverrouillées par l'utilisateur. Flatpak transmet
+  # lui-même SSH_AUTH_SOCK, quel que soit l'utilisateur : rien n'est codé en dur ici.
+  - --socket=ssh-auth
+  # Clés SSH et configuration (~/.ssh/config) : lecture seule. Helm n'y écrit jamais.
+  - --filesystem=~/.ssh:ro
+  # Téléchargements et envois de fichiers : seulement le dossier de l'utilisateur, pas le système.
+  - --filesystem=xdg-download
+  # Notifications d'alerte de supervision.
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  - name: helm
+    buildsystem: simple
+    build-commands:
+      # L'AppImage est extraite sans être exécutée : aucune dépendance à FUSE dans le bac à sable.
+      - chmod +x Helm.AppImage
+      - ./Helm.AppImage --appimage-extract
+      - install -Dm755 squashfs-root/usr/bin/helm-desktop /app/bin/helm-desktop
+      - cp -r squashfs-root/usr/lib/. /app/lib/ || true
+      - install -Dm644 squashfs-root/usr/share/icons/hicolor/128x128/apps/helm-desktop.png /app/share/icons/hicolor/128x128/apps/dev.helm.desktop.png
+      - install -Dm644 dev.helm.desktop.desktop /app/share/applications/dev.helm.desktop.desktop
+      - install -Dm644 dev.helm.desktop.metainfo.xml /app/share/metainfo/dev.helm.desktop.metainfo.xml
+    sources:
+      - type: file
+        dest-filename: Helm.AppImage
+        url: https://github.com/NathanChevrollier/Helm/releases/download/v1.0.0/Helm_1.0.0_amd64.AppImage
+        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        x-checker-data:
+          type: json
+          url: https://api.github.com/repos/NathanChevrollier/Helm/releases/latest
+          version-query: .tag_name | sub("^v"; "")
+          url-query: '.assets[] | select(.name | endswith("_amd64.AppImage")) | .browser_download_url'
+      - type: file
+        path: dev.helm.desktop.desktop
+      - type: file
+        path: dev.helm.desktop.metainfo.xml

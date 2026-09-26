@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{self, Payload};
-use crate::{secrets, Identity, RemoteDesktop, Store};
+use crate::{secrets, Identity, Registry, RemoteDesktop, Store};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +101,9 @@ pub(crate) fn fingerprint(p: &Payload) -> String {
     p.tunnels.sort_by(|a, b| a.id.cmp(&b.id));
     p.identities.sort_by(|a, b| a.id.cmp(&b.id));
     p.desktops.sort_by(|a, b| a.id.cmp(&b.id));
+    if let Some(r) = p.registries.as_mut() {
+        r.sort_by(|a, b| a.id.cmp(&b.id));
+    }
     p.ignored_findings.sort_by(|a, b| (&a.server_id, &a.finding_id).cmp(&(&b.server_id, &b.finding_id)));
     let json = serde_json::to_vec(&p).unwrap_or_default();
     ring::digest::digest(&ring::digest::SHA256, &json).as_ref().iter().map(|b| format!("{b:02x}")).collect()
@@ -126,6 +129,11 @@ pub(crate) fn merge(remote: &Payload, local: &Payload) -> Payload {
         tunnels: union(&remote.tunnels, &local.tunnels, |t| &t.id),
         identities: union(&remote.identities, &local.identities, |i| &i.id),
         desktops: union(&remote.desktops, &local.desktops, |r| &r.id),
+        // Un côté qui ne connaît pas les registres (`None`) ne retire rien à l'autre.
+        registries: match (&remote.registries, &local.registries) {
+            (None, None) => None,
+            (r, l) => Some(union(r.as_deref().unwrap_or_default(), l.as_deref().unwrap_or_default(), |x| &x.id)),
+        },
         ignored_findings: {
             let mut all = local.ignored_findings.clone();
             for r in &remote.ignored_findings {
@@ -152,7 +160,7 @@ fn carry_secrets(remote: &Payload, local: &BTreeMap<String, BTreeMap<String, Str
 /// Remplace les réglages synchronisés par `p` (suppressions comprises) ; l'état de l'interface et
 /// le réglage de synchronisation ne bougent pas.
 fn apply(store: &Store, p: &Payload, include_secrets: bool) -> Result<(Vec<String>, Vec<String>), String> {
-    let (removed_servers, removed_identities, removed_tunnels, removed_desktops) = store.write(|d| {
+    let (removed_servers, removed_identities, removed_tunnels, removed_desktops, removed_registries) = store.write(|d| {
         let gone = |ids: Vec<String>, keep: &dyn Fn(&str) -> bool| ids.into_iter().filter(|id| !keep(id)).collect::<Vec<_>>();
         let rs = gone(d.servers.iter().map(|s| s.id.clone()).collect(), &|id| p.servers.iter().any(|s| s.id == id));
         let ri = gone(d.identities.iter().map(|i| i.id.clone()).collect(), &|id| p.identities.iter().any(|i| i.id == id));
@@ -163,10 +171,22 @@ fn apply(store: &Store, p: &Payload, include_secrets: bool) -> Result<(Vec<Strin
         d.tunnels = p.tunnels.clone();
         d.identities = p.identities.clone();
         d.desktops = p.desktops.clone();
+        // Contenu d'une version qui ignore les registres : on garde ceux de ce PC tels quels.
+        let rr = match &p.registries {
+            Some(list) => {
+                let gone_ids = gone(d.registries.iter().map(|r| r.id.clone()).collect(), &|id| list.iter().any(|r| r.id == id));
+                d.registries = list.clone();
+                gone_ids
+            }
+            None => Vec::new(),
+        };
         d.ignored_findings = p.ignored_findings.clone();
         d.known_hosts.extend(p.known_hosts.clone());
-        (rs, ri, rt, rd)
+        (rs, ri, rt, rd, rr)
     })?;
+    for id in &removed_registries {
+        secrets::delete_all(&Registry::secret_owner(id));
+    }
     for id in &removed_desktops {
         secrets::delete_all(&RemoteDesktop::secret_owner(id));
     }
@@ -405,5 +425,35 @@ mod tests {
         assert_eq!(m.servers.iter().find(|s| s.id == "a").unwrap().name, "local");
         assert_eq!(m.secrets["a"]["password"], "distant");
         assert_eq!(fingerprint(&m), fingerprint(&Payload { servers: m.servers.iter().rev().cloned().collect(), ..m.clone() }));
+    }
+
+    fn registry(id: &str) -> crate::Registry {
+        crate::Registry {
+            id: id.into(),
+            name: id.into(),
+            kind: helm_core::registry::Kind::Ghcr,
+            server: "ghcr.io".into(),
+            username: "alice".into(),
+        }
+    }
+
+    #[test]
+    fn an_old_version_never_erases_registries() {
+        // Un PC resté sur une version qui ignore les registres envoie un contenu sans ce champ.
+        let old = Payload { servers: vec![server("a")], registries: None, ..Default::default() };
+        let mine = Payload { registries: Some(vec![registry("r1")]), ..Default::default() };
+        let m = merge(&old, &mine);
+        assert_eq!(m.registries.as_deref().map(<[_]>::len), Some(1), "la fusion garde les registres locaux");
+
+        // Et l'application d'un tel contenu ne touche pas aux registres déjà enregistrés.
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        s.write(|d| d.registries.push(registry("r1"))).unwrap();
+        apply(&s, &old, false).unwrap();
+        assert_eq!(s.read(|d| d.registries.len()), 1, "un contenu sans registres n'efface rien");
+
+        // En revanche, une liste explicitement vide venue d'une version récente est une suppression.
+        apply(&s, &Payload { registries: Some(vec![]), ..Default::default() }, false).unwrap();
+        assert!(s.read(|d| d.registries.is_empty()));
     }
 }

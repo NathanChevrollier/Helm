@@ -14,7 +14,7 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 
-use crate::{secrets, Identity, IgnoredFinding, RemoteDesktop, ServerProfile, Snippet, Store, TunnelDef};
+use crate::{secrets, Identity, IgnoredFinding, Registry, RemoteDesktop, ServerProfile, Snippet, Store, TunnelDef};
 
 const FORMAT: &str = "helm-export";
 const ITERATIONS: u32 = 600_000;
@@ -35,6 +35,11 @@ pub(crate) struct Payload {
     /// Bureaux à distance (absents des exports antérieurs).
     #[serde(default)]
     pub desktops: Vec<RemoteDesktop>,
+    /// Registres privés. `None` signifie « contenu venu d'une version de Helm qui ne les connaît
+    /// pas » — à distinguer d'une liste vide : sans cette nuance, un PC resté sur une ancienne
+    /// version effacerait les registres de tous les autres à sa première synchronisation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registries: Option<Vec<Registry>>,
     /// Constats d'audit ignorés.
     #[serde(default)]
     pub ignored_findings: Vec<IgnoredFinding>,
@@ -53,6 +58,7 @@ pub(crate) fn snapshot(store: &Store, include_secrets: bool) -> Payload {
         tunnels: d.tunnels.clone(),
         identities: d.identities.clone(),
         desktops: d.desktops.clone(),
+        registries: Some(d.registries.clone()),
         ignored_findings: d.ignored_findings.clone(),
         secrets: BTreeMap::new(),
     });
@@ -63,6 +69,7 @@ pub(crate) fn snapshot(store: &Store, include_secrets: bool) -> Payload {
             .map(|s| s.id.clone())
             .chain(payload.identities.iter().map(|i| Identity::secret_owner(&i.id)))
             .chain(payload.desktops.iter().map(|r| RemoteDesktop::secret_owner(&r.id)))
+            .chain(payload.registries.iter().flatten().map(|r| Registry::secret_owner(&r.id)))
             .collect();
         for owner in owners {
             let found: BTreeMap<String, String> =
@@ -201,6 +208,7 @@ pub fn share(store: &Store, ids: &[String], password: &str, include_secrets: boo
         snippets: vec![],
         tunnels: vec![],
         desktops: vec![],
+        registries: None,
         ignored_findings: vec![],
     };
     seal(&payload, password)
@@ -273,6 +281,7 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         merge(&mut d.tunnels, p.tunnels, |t| &t.id);
         merge(&mut d.identities, p.identities, |i| &i.id);
         merge(&mut d.desktops, p.desktops, |r| &r.id);
+        merge(&mut d.registries, p.registries.unwrap_or_default(), |r| &r.id);
         for item in p.ignored_findings {
             if !d.ignored_findings.iter().any(|x| x.server_id == item.server_id && x.finding_id == item.finding_id) {
                 d.ignored_findings.push(item);

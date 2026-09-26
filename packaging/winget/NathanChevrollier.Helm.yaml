@@ -1,0 +1,7 @@
+# Manifeste winget de Helm (version). Les trois fichiers de ce dossier vont ensemble dans
+# `manifests/n/NathanChevrollier/Helm/<version>/` du dépôt microsoft/winget-pkgs.
+PackageIdentifier: NathanChevrollier.Helm
+PackageVersion: 1.0.0
+DefaultLocale: fr-FR
+ManifestType: version
+ManifestVersion: 1.6.0

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, ScrollText, Search, Share2, Sparkles, Square, TextSelect, Upload, Users, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { ClipboardPaste, Circle, Copy, Eraser, EyeOff, FolderOpen, History, ScrollText, Search, Share2, Sparkles, Square, TextSelect, Upload, Users, X } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
@@ -16,10 +16,14 @@ import { useTheme } from "../lib/theme";
 import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
 import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
-import { explain } from "../lib/assistant";
+import { ask as askAssistant, explain } from "../lib/assistant";
+import { diagnosePrompt, findLastFailure, type Failure } from "../lib/terminal-errors";
 import { readClipboard, writeClipboard } from "../lib/clipboard";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { Button, Modal } from "./ui";
+
+// Chargée à la demande : l'historique n'est lu que lorsqu'on l'ouvre.
+const HistoryPalette = lazy(() => import("./HistoryPalette"));
 
 
 const THEME = {
@@ -175,6 +179,11 @@ export default function TerminalPane({
   const openSearchRef = useRef<() => void>(() => {});
   const joinModeRef = useRef<ShareMode | null>(null);
   const safePasteRef = useRef<(text: string) => Promise<void>>(async () => {});
+  /** Relance la recherche d'un échec dans le tampon ; posé plus bas dans le composant. */
+  const scanFailureRef = useRef<() => void>(() => {});
+  /** Ouvre l'historique du serveur ; posé plus bas, appelé depuis le gestionnaire de touches. */
+  const openHistoryRef = useRef<() => void>(() => {});
+  const [historyOpen, setHistoryOpen] = useState(false);
   openSearchRef.current = () => {
     setSearching(true);
     // Déjà ouverte : on resélectionne le texte ; sinon autoFocus prend le relais au montage.
@@ -324,6 +333,7 @@ export default function TerminalPane({
               term.write(bytes);
               const rec = recording.current;
               if (rec) rec.events.push([(performance.now() - rec.start) / 1000, "o", rec.decoder.decode(bytes, { stream: true })]);
+              scanFailureRef.current();
               return;
             }
             setTerm(null);
@@ -468,6 +478,10 @@ export default function TerminalPane({
         openSearchRef.current();
         return false;
       }
+      if (matches(e, "termHistory")) {
+        openHistoryRef.current();
+        return false;
+      }
       // Raccourcis de l'app (palette, onglets, verrouillage…) : pour Helm, pas pour le shell.
       if (isAppShortcut(e)) return false;
       if (!e.ctrlKey) return true;
@@ -606,14 +620,52 @@ export default function TerminalPane({
     fitRef.current?.fit();
   }, [fontSize]);
 
+  /** Dernières lignes affichées, de la plus ancienne à la plus récente. */
+  const lastLines = (count: number): string[] => {
+    const term = termRef.current;
+    if (!term) return [];
+    const buffer = term.buffer.active;
+    const lines: string[] = [];
+    const first = Math.max(0, buffer.length - count);
+    for (let i = first; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true).trimEnd() ?? "");
+    return lines;
+  };
+
+  /**
+   * Échec repéré dans ce qui s'affiche. Helm n'installe rien sur le serveur pour cela : le code de
+   * retour n'est donc pas lisible, et la détection se fait sur le texte (voir lib/terminal-errors).
+   * Le tampon n'est relu qu'au repos, une demi-seconde après la dernière sortie : le relire à chaque
+   * octet reçu coûterait cher pendant un « tail -f ».
+   */
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const failureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  scanFailureRef.current = () => {
+    if (failureTimer.current) clearTimeout(failureTimer.current);
+    failureTimer.current = setTimeout(() => {
+      // L'écran d'une application plein écran (vim, htop, tmux) n'est pas une sortie de commande.
+      if (termRef.current?.buffer.active.type === "alternate") return setFailure(null);
+      setFailure(findLastFailure(lastLines(60)));
+    }, 500);
+  };
+  useEffect(() => () => void (failureTimer.current && clearTimeout(failureTimer.current)), []);
+
+  openHistoryRef.current = () => setHistoryOpen(true);
+
+  /** Demande à l'assistant pourquoi la dernière commande a échoué, sa sortie en contexte. */
+  const diagnose = (f: Failure) => {
+    const contexte = `Serveur : ${label}
+
+Sortie du terminal :
+${f.output}`;
+    setFailure(null);
+    void askAssistant(diagnosePrompt(f), contexte);
+  };
+
   /** Écran courant en texte, envoyé à un invité qui vient d'arriver. */
   const screenText = (): string => {
     const term = termRef.current;
     if (!term) return "";
-    const buffer = term.buffer.active;
-    const lines: string[] = [];
-    const first = Math.max(0, buffer.length - term.rows);
-    for (let i = first; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true).trimEnd() ?? "");
+    const lines = lastLines(term.rows);
     return `\x1b[2J\x1b[H${lines.join("\r\n")}\r\n`;
   };
 
@@ -718,11 +770,24 @@ export default function TerminalPane({
       { label: "Coller", icon: <ClipboardPaste size={14} />, hint: "Ctrl+Maj+V", disabled: !connected, onClick: () => void readClipboard().then((t) => safePasteRef.current(t)) },
       { label: "Tout sélectionner", icon: <TextSelect size={14} />, onClick: () => term?.selectAll() },
       { label: "Rechercher…", icon: <Search size={14} />, hint: display(shortcutOf("termSearch")), onClick: () => openSearchRef.current() },
+      {
+        label: "Historique du serveur…",
+        icon: <History size={14} />,
+        hint: display(shortcutOf("termHistory")),
+        disabled: !connected,
+        onClick: () => setHistoryOpen(true),
+      },
       { label: "Effacer l'écran", icon: <Eraser size={14} />, onClick: () => term?.clear() },
       {
         label: selection ? "Expliquer la sélection" : "Expliquer ce qui s'affiche",
         icon: <Sparkles size={14} />,
         onClick: () => explain(selection ? "cette sortie de terminal" : "ce qui s'affiche dans mon terminal", selection || screenText()),
+      },
+      {
+        label: "Diagnostiquer la dernière erreur",
+        icon: <Sparkles size={14} />,
+        disabled: !failure,
+        onClick: () => failure && diagnose(failure),
       },
       {
         label: "Enregistrer comme fragment…",
@@ -784,6 +849,22 @@ export default function TerminalPane({
       )}
       <div className="relative min-h-0 w-full flex-1">
         <div ref={host} className="h-full w-full overflow-hidden bg-bg" />
+        {failure && (
+          <button
+            className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-warn/50 bg-panel/95 px-2.5 py-1 text-[11px] text-warn shadow-lg transition-colors hover:bg-warn/10 hover:text-fg"
+            title={`Dernière erreur : ${failure.reason}`}
+            onClick={() => diagnose(failure)}
+          >
+            <Sparkles size={12} />
+            Pourquoi cette commande a échoué ?
+            <span className="rounded p-0.5 text-muted hover:text-fg" role="presentation" title="Masquer" onClick={(e) => {
+              e.stopPropagation();
+              setFailure(null);
+            }}>
+              <X size={11} />
+            </span>
+          </button>
+        )}
         <div className={`absolute top-1 right-3 z-10 flex items-center gap-1 ${searching || isRecording ? "" : "opacity-0 group-hover/term:opacity-100"}`}>
           {isRecording && (
             <span className="flex items-center gap-1 rounded bg-danger/85 px-1.5 py-0.5 text-[10px] font-medium text-white">
@@ -842,6 +923,26 @@ export default function TerminalPane({
           setMenu(null);
           termRef.current?.focus();
         }} />}
+        {historyOpen && (
+          <Suspense fallback={null}>
+            <HistoryPalette
+              serverId={serverId}
+              onClose={() => {
+                setHistoryOpen(false);
+                termRef.current?.focus();
+              }}
+              onPick={(command, run) => {
+                setHistoryOpen(false);
+                const id = idRef.current;
+                if (id == null) return useApp.getState().notify("Le terminal n'est pas connecté.", "info");
+                // Sans « run », la commande est seulement écrite : elle se relit et se corrige
+                // avant d'être lancée, comme la recherche inversée du shell.
+                void api.termWrite(id, run ? command + "\r" : command);
+                termRef.current?.focus();
+              }}
+            />
+          </Suspense>
+        )}
         {sharePicker && (
           <SharePicker
             onClose={() => setSharePicker(false)}

@@ -1,5 +1,6 @@
 //! Terminaux interactifs.
 
+use helm_core::shell_history;
 use tauri::ipc::Channel;
 use tauri::State;
 
@@ -195,4 +196,17 @@ mod tests {
         let h = super::parse_history("ls\n#1700000000\ndocker ps\n: 1700000001:0;htop\nls\n");
         assert_eq!(h, vec!["ls", "htop", "docker ps"]);
     }
+}
+
+/// Historique des commandes du shell distant, dédoublonné et classé (le plus récent d'abord).
+/// Helm lit les fichiers que le shell tient déjà : rien n'est installé sur le serveur, et les
+/// commandes qui contiennent visiblement un secret sont écartées côté Rust.
+#[tauri::command]
+pub async fn term_history(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+) -> Result<Vec<shell_history::Entry>, String> {
+    let conn = sessions.get(&store, &server_id).await?;
+    shell_history::history(&conn).await.map_err(|e| e.to_string())
 }

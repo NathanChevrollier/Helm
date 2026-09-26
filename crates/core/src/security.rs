@@ -19,6 +19,7 @@ echo @@reboot; if [ -f /var/run/reboot-required ]; then echo yes; else echo no; 
 echo @@uid0; awk -F: '$3==0{print $1}' /etc/passwd
 echo @@listen; ss -ltnpH 2>/dev/null
 echo @@os; . /etc/os-release 2>/dev/null; echo "$PRETTY_NAME"
+echo @@xrdp; if [ -f /etc/xrdp/xrdp.ini ]; then B=$(sed -n 's/^[[:space:]]*max_bpp[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' /etc/xrdp/xrdp.ini | head -n1); echo "${B:-default}"; else echo absent; fi
 "#;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -273,6 +274,24 @@ pub fn parse_report(out: &str) -> Report {
         ));
     }
 
+    // xrdp limité à 16 bits (ou moins) : l'image arrive rayée, en couleurs dégradées, quel que soit
+    // le client RDP. Ce n'est pas une faille, mais c'est ici qu'on le corrige, côté serveur.
+    match section(out, "xrdp").trim() {
+        "" | "absent" => {}
+        value => {
+            let bpp: Option<u32> = value.parse().ok();
+            if bpp.is_some_and(|b| b < 24) {
+                f.push(finding(
+                    "xrdp-bpp",
+                    Severity::Low,
+                    &format!("Bureau à distance xrdp limité à {} bits", bpp.unwrap_or(16)),
+                    "Les clients RDP (Helm compris) reçoivent alors une image rayée et des couleurs dégradées. Passer max_bpp à 32 dans /etc/xrdp/xrdp.ini corrige l'affichage.",
+                    Some(("xrdp-32bpp", "Passer xrdp en couleurs 32 bits")),
+                ));
+            }
+        }
+    }
+
     f.sort_by_key(|x| x.severity);
     Report { os: section(out, "os").trim().to_string(), ssh_ports, findings: f }
 }
@@ -380,6 +399,22 @@ fi
 echo '@@OK unattended'
 "#;
 
+/// xrdp en 32 bits : sauvegarde de xrdp.ini, `max_bpp=32` (remplacé, ou ajouté à [Globals]),
+/// puis redémarrage du service.
+const XRDP_32BPP_SCRIPT: &str = r#"set -e
+F=/etc/xrdp/xrdp.ini
+[ -f "$F" ] || { echo "@@FAILED xrdp n'est pas installé"; exit 1; }
+mkdir -p /var/backups/helm && cp -a "$F" "/var/backups/helm/xrdp.ini.$(date +%Y%m%d-%H%M%S)"
+if grep -Eq '^[[:space:]]*max_bpp[[:space:]]*=' "$F"; then
+  sed -i -E 's/^[[:space:]]*max_bpp[[:space:]]*=.*/max_bpp=32/' "$F"
+else
+  sed -i '/^\[Globals\]/a max_bpp=32' "$F"
+fi
+grep -Eq '^max_bpp=32$' "$F" || { echo "@@FAILED max_bpp non modifié"; exit 1; }
+systemctl restart xrdp 2>/dev/null || service xrdp restart
+echo '@@OK xrdp'
+"#;
+
 /// Ce qu'une correction va faire, pour l'afficher avant exécution.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -424,6 +459,11 @@ pub fn fix_plan(id: &str) -> Result<FixPlan> {
             UNATTENDED_SCRIPT.to_string(),
             false,
         ),
+        "xrdp-32bpp" => plan(
+            "Règle xrdp en couleurs 32 bits (max_bpp=32, xrdp.ini sauvegardé dans /var/backups/helm), puis redémarre xrdp. Les sessions de bureau à distance ouvertes sur ce serveur seront coupées.",
+            XRDP_32BPP_SCRIPT.to_string(),
+            false,
+        ),
         _ => return Err(Error::Other(format!("correction inconnue : {id}"))),
     })
 }
@@ -447,7 +487,7 @@ pub async fn apply_fix(conn: &Connection, sudo: Option<&str>, id: &str) -> Resul
             .lines()
             .find_map(|l| l.strip_prefix("@@OK "))
             .map(|s| s.trim().to_string())
-            .filter(|s| s != "fail2ban" && s != "unattended");
+            .filter(|s| s != "fail2ban" && s != "unattended" && s != "xrdp");
         Ok(FixOutcome { ok, output: text.replace("@@OK", "OK").replace("@@FAILED", "ÉCHEC"), rollback })
     })
     .await
@@ -527,6 +567,24 @@ Rocky
         assert!(!ids.contains(&"exposed-6666"), "le port SSH est normal");
         let upd = r.findings.iter().find(|f| f.id == "updates").unwrap();
         assert_eq!(upd.severity, Severity::High);
+    }
+
+    #[test]
+    fn xrdp_colour_depth() {
+        let base = "@@sshd\nport 22\n@@ufw\nStatus: active\n@@f2b\nactive\n@@os\nDebian\n";
+        let with = |v: &str| parse_report(&format!("{base}@@xrdp\n{v}\n"));
+        let low = with("16");
+        let f = low.findings.iter().find(|f| f.id == "xrdp-bpp").expect("xrdp en 16 bits signalé");
+        assert_eq!(f.fix.as_deref(), Some("xrdp-32bpp"));
+        assert!(f.title.contains("16 bits"));
+        // 24 ou 32 bits, valeur absente (défaut de xrdp) ou xrdp non installé : rien à signaler.
+        for v in ["24", "32", "default", "absent"] {
+            assert!(!with(v).findings.iter().any(|f| f.id == "xrdp-bpp"), "{v}");
+        }
+        assert!(!parse_report(base).findings.iter().any(|f| f.id == "xrdp-bpp"));
+        let p = fix_plan("xrdp-32bpp").unwrap();
+        assert!(p.script.contains("max_bpp=32") && p.script.contains("/var/backups/helm/xrdp.ini"));
+        assert!(!p.needs_verification);
     }
 
     #[test]

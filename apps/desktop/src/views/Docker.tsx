@@ -2,11 +2,11 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import {
   Box, ChevronDown, ChevronRight, Container as ContainerIcon, FileCode2, FileSearch, Folder, FolderInput, FolderOpen, FolderPlus, Plus,
   Layers, MoreHorizontal, Pause, Play, RefreshCw, RotateCw, ScrollText,
-  Cable, GitBranch, Lock, Rocket, Square, SquareTerminal, Trash2, UploadCloud,
+  Cable, Database, GitBranch, Lock, Package, Rocket, Square, SquareTerminal, Trash2, UploadCloud,
 } from "lucide-react";
 import {
-  api, errorMessage, shellQuote, type ComposeProject, type Container, type ContainerStats, type DockerDiskUsage,
-  type DockerImage, type DockerOverview,
+  api, errorMessage, formatBytes, shellQuote, type ComposeProject, type Container, type ContainerStats, type DockerDiskUsage,
+  type DockerImage, type DockerOverview, type DockerVolume,
 } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { Badge, Button, EmptyState, IconButton, Input, Modal } from "../components/ui";
@@ -18,14 +18,18 @@ import { useAutoRefresh } from "../lib/refresh";
 import { askFolderName, toggleCollapsed } from "../components/Folders";
 import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { startDrag } from "../lib/drag";
+import type { ComposePreset } from "../components/NewComposeProject";
 
 const FileEditor = lazy(() => import("../components/FileEditor"));
 const NewComposeProject = lazy(() => import("../components/NewComposeProject"));
+const AppCatalog = lazy(() => import("../components/AppCatalog"));
+const DockerRegistries = lazy(() => import("../components/DockerRegistries"));
 
 const TABS = [
   { id: "containers", label: "Conteneurs" },
   { id: "compose", label: "Projets compose" },
-  { id: "storage", label: "Images & nettoyage" },
+  { id: "storage", label: "Images, volumes & nettoyage" },
+  { id: "registries", label: "Registres" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -141,6 +145,11 @@ function Docker({ serverId }: { serverId: string }) {
         {tab === "containers" && <Containers serverId={serverId} data={data} docker={docker} reload={load} />}
         {tab === "compose" && <Compose serverId={serverId} data={data} docker={docker} reload={load} />}
         {tab === "storage" && <Storage serverId={serverId} notify={notify} />}
+        {tab === "registries" && (
+          <Suspense fallback={<p className="text-sm text-muted">Chargement…</p>}>
+            <DockerRegistries serverId={serverId} />
+          </Suspense>
+        )}
       </div>
     </PageLayout>
   );
@@ -409,17 +418,49 @@ function Compose({ serverId, data, docker, reload }: { serverId: string; data: D
   const [editing, setEditing] = useState<string | null>(null);
   const [github, setGithub] = useState<ComposeProject | null>(null);
   const [creating, setCreating] = useState(false);
+  /** Projet pré-rempli par le catalogue, en attente de relecture. */
+  const [preset, setPreset] = useState<ComposePreset | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState<{ project: ComposeProject; file: string; x: number; y: number } | null>(null);
 
   const newProjectButton = (
-    <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating(true)}>
-      Nouveau projet
-    </Button>
+    <>
+      <Button icon={<Package size={13} />} onClick={() => setCatalogOpen(true)}>
+        Catalogue
+      </Button>
+      <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating(true)}>
+        Nouveau projet
+      </Button>
+    </>
   );
-  const creator = creating && (
-    <Suspense fallback={null}>
-      <NewComposeProject serverId={serverId} onClose={() => setCreating(false)} onDone={() => void reload()} />
-    </Suspense>
+  const creator = (
+    <>
+      {catalogOpen && (
+        <Suspense fallback={null}>
+          <AppCatalog
+            onClose={() => setCatalogOpen(false)}
+            onDeploy={(p) => {
+              // Le catalogue rend les fichiers, la fenêtre de création les montre avant écriture.
+              setCatalogOpen(false);
+              setPreset(p);
+            }}
+          />
+        </Suspense>
+      )}
+      {(creating || preset) && (
+        <Suspense fallback={null}>
+          <NewComposeProject
+            serverId={serverId}
+            preset={preset}
+            onClose={() => {
+              setCreating(false);
+              setPreset(null);
+            }}
+            onDone={() => void reload()}
+          />
+        </Suspense>
+      )}
+    </>
   );
 
   if (data.projects.length === 0) {
@@ -600,6 +641,7 @@ function Storage({ serverId, notify }: { serverId: string; notify: (m: string, k
   const ask = useApp((s) => s.ask);
   const [images, setImages] = useState<DockerImage[]>([]);
   const [usage, setUsage] = useState<DockerDiskUsage[]>([]);
+  const [volumes, setVolumes] = useState<DockerVolume[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -607,6 +649,9 @@ function Storage({ serverId, notify }: { serverId: string; notify: (m: string, k
       const s = await api.dockerStorage(serverId);
       setImages(s.images);
       setUsage(s.usage);
+      // Les volumes arrivent à part : leur taille est mesurée avec `du`, ce qui peut prendre
+      // quelques secondes et n'a pas à retarder l'affichage des images.
+      api.dockerVolumes(serverId).then(setVolumes, () => setVolumes([]));
     } catch (e) {
       notify(errorMessage(e), "error");
     }
@@ -632,6 +677,9 @@ function Storage({ serverId, notify }: { serverId: string; notify: (m: string, k
   };
 
   const labels: Record<string, string> = { Images: "Images", Containers: "Conteneurs", "Local Volumes": "Volumes", "Build Cache": "Cache de build" };
+  /** Volumes qu'aucun conteneur n'utilise : ce sont eux que le nettoyage supprimerait. */
+  const orphans = (volumes ?? []).filter((v) => v.orphan);
+  const reclaimable = orphans.reduce((n, v) => n + v.size, 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -657,7 +705,45 @@ function Storage({ serverId, notify }: { serverId: string; notify: (m: string, k
         <Button size="sm" variant="danger" loading={busy === "images-all"} onClick={() => void prune("images-all", "Supprimer toutes les images inutilisées ?", "Supprime toutes les images qui ne sont utilisées par aucun conteneur, même taguées. Elles devront être re-téléchargées si besoin.")}>
           Toutes les images inutilisées
         </Button>
+        {orphans.length > 0 && (
+          <Button
+            size="sm"
+            variant="danger"
+            loading={busy === "volumes"}
+            onClick={() =>
+              void prune(
+                "volumes",
+                `Supprimer ${orphans.length} volume(s) orphelin(s) ?`,
+                `Environ ${formatBytes(reclaimable)} seront libérés. Ces volumes ne sont utilisés par aucun conteneur, même arrêté — mais leurs données seront perdues définitivement :\n\n${orphans
+                  .map((v) => `· ${v.name} (${formatBytes(v.size)})`)
+                  .join("\n")}`,
+              )
+            }
+          >
+            Volumes orphelins ({formatBytes(reclaimable)})
+          </Button>
+        )}
       </div>
+
+      <VolumesTable
+        volumes={volumes}
+        onRemove={async (v) => {
+          const ok = await ask({
+            title: `Supprimer le volume ${v.name} ?`,
+            body: `Ses données (${formatBytes(v.size)}) seront perdues définitivement. Docker refuse si un conteneur l'utilise encore.`,
+            confirmLabel: "Supprimer",
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            await api.dockerRemoveVolume(serverId, v.name);
+            notify(`Volume ${v.name} supprimé.`, "success");
+            await load();
+          } catch (e) {
+            notify(errorMessage(e), "error");
+          }
+        }}
+      />
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full text-sm">
           <thead className="bg-panel text-left text-xs text-muted">
@@ -703,6 +789,50 @@ function Storage({ serverId, notify }: { serverId: string; notify: (m: string, k
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/** Volumes du serveur : ce qui les utilise, leur taille, et ceux que plus rien ne réclame. */
+function VolumesTable({ volumes, onRemove }: { volumes: DockerVolume[] | null; onRemove: (v: DockerVolume) => void }) {
+  if (volumes === null) return <p className="text-xs text-muted">Mesure de la taille des volumes…</p>;
+  if (volumes.length === 0) return <p className="text-xs text-muted">Aucun volume Docker.</p>;
+  // Les orphelins d'abord, puis du plus gros au plus petit : l'espace à récupérer est en haut.
+  const sorted = [...volumes].sort((a, b) => Number(b.orphan) - Number(a.orphan) || b.size - a.size);
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead className="bg-panel text-left text-xs text-muted">
+          <tr>
+            <th className="px-3 py-2 font-medium">Volume</th>
+            <th className="px-3 py-2 text-right font-medium">Taille</th>
+            <th className="px-3 py-2 font-medium">Utilisé par</th>
+            <th className="w-12" />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((v) => (
+            <tr key={v.name} className={`group border-t border-border/50 hover:bg-hover-soft ${v.orphan ? "bg-warn/5" : ""}`}>
+              <td className="px-3 py-1.5">
+                <span className="flex items-center gap-2">
+                  <Database size={14} className={v.orphan ? "text-warn" : "text-muted"} />
+                  <span className="truncate font-mono text-xs" title={v.mountpoint}>
+                    {v.name}
+                  </span>
+                  {v.orphan && <Badge tone="warn">orphelin</Badge>}
+                </span>
+              </td>
+              <td className="px-3 py-1.5 text-right text-xs tabular-nums">{v.size ? formatBytes(v.size) : "—"}</td>
+              <td className="px-3 py-1.5 text-xs text-muted">{v.usedBy.length > 0 ? v.usedBy.join(", ") : "personne"}</td>
+              <td className="px-2 text-right">
+                <IconButton title="Supprimer le volume" className="invisible group-hover:visible" onClick={() => onRemove(v)}>
+                  <Trash2 size={14} />
+                </IconButton>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
