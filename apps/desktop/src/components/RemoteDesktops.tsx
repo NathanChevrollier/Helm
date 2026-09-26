@@ -3,11 +3,11 @@ import { Cable, ExternalLink, IdCard, Link2Off, Monitor, MonitorPlay, Pencil, Pl
 import { create } from "zustand";
 import { api, errorMessage, type DesktopProtocol, type DesktopView, type RemoteDesktop } from "../lib/api";
 import { ensureConnected, useApp } from "../lib/store";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "./ui";
+import { Badge, Button, Card, Checkbox, ColorPicker, EmptyState, Field, IconButton, Input, Modal, PROFILE_COLORS, Select } from "./ui";
 import { IdentitySuggestions, useIdentities } from "./Identities";
 import { useRdp } from "../lib/rdp";
 
-const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6"];
+const COLORS = PROFILE_COLORS;
 
 /** Port par défaut de chaque protocole (même règle que côté Rust). */
 const DEFAULT_PORT: Record<DesktopProtocol, number> = { rdp: 3389, vnc: 5900, spice: 5900 };
@@ -34,11 +34,12 @@ export async function launchDesktop(d: DesktopView) {
 }
 
 /** Onglet « Bureaux à distance » de la page Serveurs. */
-export function DesktopsPanel() {
+export function DesktopsPanel({ creating, onCreatingChange }: { creating: boolean; onCreatingChange: (v: boolean) => void }) {
   const { list, reload } = useDesktops();
   const servers = useApp((s) => s.servers);
   const identities = useIdentities((s) => s.list);
-  const [editing, setEditing] = useState<DesktopView | "new" | null>(null);
+  const [edited, setEditing] = useState<DesktopView | null>(null);
+  const editing: DesktopView | "new" | null = creating ? "new" : edited;
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     void reload();
@@ -57,17 +58,17 @@ export function DesktopsPanel() {
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <p className="max-w-2xl text-sm text-muted">
-          Bureaux Windows (RDP) et Linux, Raspberry Pi ou macOS (VNC), ouverts dans Helm ; consoles de VM QEMU/KVM (SPICE) dans remote-viewer. Via un serveur SSH, Helm ouvre un tunnel le temps de la session : ni le port 3389 ni le 5900 n'ont besoin d'être exposés sur Internet.
-        </p>
-        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEditing("new")}>
-          Nouveau bureau
-        </Button>
-      </div>
       {list.length === 0 ? (
-        <EmptyState icon={<Monitor size={40} />} title="Aucun bureau à distance">
-          Ajoute un PC Windows (RDP) ou un bureau Linux, un Raspberry Pi, un Mac (VNC), directement ou à travers un de tes serveurs.
+        <EmptyState
+          icon={<Monitor />}
+          title="Aucun bureau à distance"
+          action={
+            <Button variant="primary" icon={<Plus size={14} />} onClick={() => onCreatingChange(true)}>
+              Nouveau bureau
+            </Button>
+          }
+        >
+          Bureaux Windows (RDP) et Linux, Raspberry Pi ou macOS (VNC) ouverts dans Helm, consoles de VM QEMU/KVM (SPICE) dans remote-viewer. Via un serveur SSH, Helm ouvre un tunnel le temps de la session : ni le port 3389 ni le 5900 n'ont besoin d'être exposés.
         </EmptyState>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
@@ -75,7 +76,7 @@ export function DesktopsPanel() {
             const via = servers.find((s) => s.id === d.viaServerId);
             const identity = identities.find((i) => i.id === d.identityId);
             return (
-              <div key={d.id} className="group rounded-lg border border-border bg-panel p-4">
+              <Card key={d.id}>
                 <div className="mb-3 flex items-start gap-3">
                   <Monitor size={16} className="mt-0.5 shrink-0" style={{ color: d.color ?? COLORS[0] }} />
                   <div className="min-w-0 flex-1">
@@ -85,7 +86,7 @@ export function DesktopsPanel() {
                       {d.port !== DEFAULT_PORT[protocolOf(d)] && `:${d.port}`}
                     </div>
                   </div>
-                  <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex">
                     <IconButton title="Modifier" onClick={() => setEditing(d)}>
                       <Pencil size={14} />
                     </IconButton>
@@ -146,7 +147,10 @@ export function DesktopsPanel() {
                   </Button>
                   )}
                 </div>
-              </div>
+                {protocolOf(d) === "rdp" && !d.hasPassword && (
+                  <p className="mt-2.5 text-xs text-faint">Enregistre un mot de passe dans le profil pour ouvrir la session dans Helm.</p>
+                )}
+              </Card>
             );
           })}
         </div>
@@ -154,9 +158,13 @@ export function DesktopsPanel() {
       {editing && (
         <DesktopForm
           desktop={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            onCreatingChange(false);
+          }}
           onSaved={() => {
             setEditing(null);
+            onCreatingChange(false);
             void reload();
           }}
         />
@@ -226,11 +234,15 @@ function DesktopForm({ desktop, onClose, onSaved }: { desktop: DesktopView | nul
         </div>
         <div className="col-span-2">
           <Field label="Protocole">
-            <select className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm" value={protocol} onChange={(e) => setProtocol(e.target.value as DesktopProtocol)}>
-              <option value="rdp">RDP (Windows, xrdp)</option>
-              <option value="vnc">VNC (Linux, Mac, Pi)</option>
-              <option value="spice">SPICE (VM QEMU/KVM)</option>
-            </select>
+            <Select<DesktopProtocol>
+              value={protocol}
+              onChange={setProtocol}
+              options={[
+                { value: "rdp", label: "RDP (Windows, xrdp)" },
+                { value: "vnc", label: "VNC (Linux, Mac, Pi)" },
+                { value: "spice", label: "SPICE (VM QEMU/KVM)" },
+              ]}
+            />
           </Field>
         </div>
         <div className="col-span-4">
@@ -245,20 +257,17 @@ function DesktopForm({ desktop, onClose, onSaved }: { desktop: DesktopView | nul
         </div>
         <div className="col-span-6">
           <Field label="Passer par un serveur SSH (recommandé hors du réseau local)">
-            <select className="h-8 w-full rounded-md border border-border bg-bg px-2 text-sm" value={d.viaServerId ?? ""} onChange={(e) => set("viaServerId", e.target.value || null)}>
-              <option value="">Non : connexion directe</option>
-              {servers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.host})
-                </option>
-              ))}
-            </select>
+            <Select
+              value={d.viaServerId ?? ""}
+              onChange={(v) => set("viaServerId", v || null)}
+              options={[{ value: "", label: "Non : connexion directe" }, ...servers.map((s) => ({ value: s.id, label: `${s.name} (${s.host})` }))]}
+            />
           </Field>
         </div>
         <div className={protocol === "rdp" ? "col-span-3" : "col-span-6"}>
           <Field label={protocol === "vnc" ? "Utilisateur (seulement si la machine en demande un, macOS par exemple)" : protocol === "spice" ? "Utilisateur (inutilisé en SPICE)" : "Utilisateur"}>
             {identity ? (
-              <div className="flex h-8 items-center gap-2 rounded-md border border-accent/50 bg-accent/10 px-2.5 text-sm">
+              <div className="flex h-8 items-center gap-2 rounded-lg border border-accent/50 bg-accent/10 px-2.5 text-[13px]">
                 <IdCard size={14} className="shrink-0 text-accent" />
                 <span className="min-w-0 flex-1 truncate">
                   {identity.name} <span className="font-mono text-xs text-muted">({identity.username})</span>
@@ -311,56 +320,39 @@ function DesktopForm({ desktop, onClose, onSaved }: { desktop: DesktopView | nul
         )}
         {protocol === "rdp" && (
         <div className="col-span-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={d.fullscreen} onChange={(e) => set("fullscreen", e.target.checked)} />
-            Plein écran
-          </label>
+          <Checkbox checked={d.fullscreen} onChange={(v) => set("fullscreen", v)} label="Plein écran" />
           {!d.fullscreen && (
             <span className="flex items-center gap-1.5">
               <Input className="!h-7 !w-20" type="number" value={d.width ?? 1600} onChange={(e) => set("width", Number(e.target.value) || null)} />×
               <Input className="!h-7 !w-20" type="number" value={d.height ?? 900} onChange={(e) => set("height", Number(e.target.value) || null)} />
             </span>
           )}
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={d.multimon} onChange={(e) => set("multimon", e.target.checked)} />
-            Tous les écrans
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={d.redirectDrives} onChange={(e) => set("redirectDrives", e.target.checked)} />
-            Partager mes disques
-          </label>
+          <Checkbox checked={d.multimon} onChange={(v) => set("multimon", v)} label="Tous les écrans" />
+          <Checkbox checked={d.redirectDrives} onChange={(v) => set("redirectDrives", v)} label="Partager mes disques" />
         </div>
         )}
         {protocol === "spice" && (
-          <p className="col-span-6 rounded-md border border-border bg-bg p-3 text-xs text-muted">
+          <p className="col-span-6 rounded-lg border border-border bg-subtle p-3 text-xs text-muted">
             SPICE s'ouvre dans remote-viewer (paquet virt-viewer), le client de référence : à installer sur ce PC. Pour une VM Proxmox, le VNC intégré à
             Helm suffit souvent — c'est ce qu'utilise sa console web.
           </p>
         )}
         {protocol !== "rdp" && !d.viaServerId && (
-          <p className="col-span-6 rounded-md border border-warn/40 bg-warn/5 p-3 text-xs">
+          <p className="col-span-6 rounded-lg border border-warn/40 bg-warn/8 p-3 text-xs">
             {protocol === "spice" ? "SPICE sans TLS" : "VNC"} ne chiffre généralement ni l'écran ni le mot de passe. Hors de ton réseau local, choisis un serveur SSH ci-dessus : la session passera
             alors dans un tunnel chiffré, et le port 5900 n'aura pas à être ouvert.
           </p>
         )}
         {d.viaServerId && (
-          <p className="col-span-6 flex items-start gap-2 rounded-md border border-border bg-bg p-3 text-xs text-muted">
+          <p className="col-span-6 flex items-start gap-2 rounded-lg border border-border bg-subtle p-3 text-xs text-muted">
             <Cable size={14} className="mt-px shrink-0" />
             Un tunnel SSH local est ouvert à chaque connexion vers {d.host || "l'hôte"}:{d.port}, puis refermé à la fin de la session.
           </p>
         )}
-        <div className="col-span-6 flex items-center gap-2">
-          <span className="text-xs font-medium text-muted">Couleur</span>
-          {COLORS.map((c) => (
-            <button
-              type="button"
-              key={c}
-              onClick={() => set("color", c)}
-              className={`size-5 rounded-full ring-offset-2 ring-offset-panel ${d.color === c ? "ring-2 ring-fg" : ""}`}
-              style={{ background: c }}
-              aria-label={`Couleur ${c}`}
-            />
-          ))}
+        <div className="col-span-6">
+          <Field label="Couleur">
+            <ColorPicker value={d.color} onChange={(c) => set("color", c)} />
+          </Field>
         </div>
         <button type="submit" hidden />
       </form>

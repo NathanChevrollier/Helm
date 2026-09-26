@@ -35,8 +35,8 @@ export default function Topbar() {
           <span className="shrink-0 text-faint">Poste</span>
         )}
         <span className="text-border-strong">/</span>
-        <span className={`truncate ${crumb ? "text-muted" : "font-medium"}`}>{meta?.label}</span>
-        {crumb && (
+        <span className={`truncate ${crumb && crumb !== meta?.label ? "text-muted" : "font-medium"}`}>{meta?.label}</span>
+        {crumb && crumb !== meta?.label && (
           <>
             <span className="text-border-strong">/</span>
             <span className="truncate font-medium">{crumb}</span>

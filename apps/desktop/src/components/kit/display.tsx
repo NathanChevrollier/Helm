@@ -181,18 +181,20 @@ export function ColorPicker({ value, onChange, colors = PROFILE_COLORS }: { valu
   );
 }
 
+/** « prod-01 » → « P1 », « web-02 » → « W2 », « staging » → « ST », « Mon VPS » → « MV ». */
+export function initialsOf(name: string): string {
+  const words = name.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(" ").filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  const last = words[words.length - 1];
+  const second = /^\d+$/.test(last) ? String(Number(last)).slice(-1) : last[0];
+  return (words[0][0] + second).toUpperCase();
+}
+
 /** Pastille de profil (initiales sur la couleur du serveur). */
 export function Avatar({ name, color, size = 32 }: { name: string; color?: string | null; size?: number }) {
   const c = color || "#8ab4ff";
-  const initials =
-    name
-      .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .trim()
-      .split(" ")
-      .map((w) => w[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?";
+  const initials = initialsOf(name);
   return (
     <span
       aria-hidden
