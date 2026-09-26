@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, Play, Settings, Sparkles, SquareTerminal, TriangleAlert, Wrench, X } from "lucide-react";
+import { Loader2, MessageSquarePlus, Play, SendHorizontal, Settings, Sparkles, SquareTerminal, TriangleAlert, Wrench, X } from "lucide-react";
 import { answerProposal, ask, useAssistant, type Entry } from "../lib/assistant";
-import { useApp } from "../lib/store";
-import { Badge, Button, IconButton } from "./ui";
+import { navigate } from "../lib/shell";
+import { Badge, Button, CodeBlock, IconButton, ResultBanner, Textarea } from "./ui";
 
 /** Noms d'outils tels qu'ils s'affichent dans la discussion. */
 const TOOL_LABELS: Record<string, string> = {
@@ -28,9 +28,7 @@ function Rendered({ text }: { text: string }) {
     <div className="flex flex-col gap-2 text-sm leading-relaxed whitespace-pre-wrap select-text">
       {parts.map((part, i) =>
         i % 2 === 1 ? (
-          <pre key={i} className="overflow-x-auto rounded-md border border-border bg-bg p-2 font-mono text-xs whitespace-pre">
-            {part.replace(/^[a-z]*\n/, "")}
-          </pre>
+          <CodeBlock key={i} className="whitespace-pre" code={part.replace(/^[a-z]*\n/, "").replace(/\n$/, "")} />
         ) : (
           part.trim() && <p key={i}>{part.trim()}</p>
         ),
@@ -87,7 +85,7 @@ function ProposalCard({ entry }: { entry: Extract<Entry, { kind: "proposal" }> }
 /** Panneau de discussion avec l'assistant, ouvrable depuis n'importe quelle page. */
 export default function AssistantPanel() {
   const { entries, running, config, setOpen, reset } = useAssistant();
-  const setSection = useApp((s) => s.setSection);
+  const openSettings = () => navigate("settings", "ai");
   const [text, setText] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -115,16 +113,11 @@ export default function AssistantPanel() {
         <span className="text-sm font-medium">Assistant</span>
         {config && <span className="truncate text-[11px] text-muted">{config.model}</span>}
         <span className="ml-auto flex">
-          <IconButton title="Nouvelle discussion" onClick={() => void reset()}>
-            <X size={14} />
+          <IconButton title="Nouvelle discussion" disabled={!entries.length || running} onClick={() => void reset()}>
+            <MessageSquarePlus size={15} />
           </IconButton>
-          <IconButton
-            title="Réglages de l'assistant"
-            onClick={() => {
-              setSection("settings");
-            }}
-          >
-            <Settings size={14} />
+          <IconButton title="Réglages de l'assistant" onClick={openSettings}>
+            <Settings size={15} />
           </IconButton>
           <IconButton title="Fermer le panneau" onClick={() => setOpen(false)}>
             <X size={15} />
@@ -134,12 +127,17 @@ export default function AssistantPanel() {
 
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         {!configured && (
-          <div className="rounded-lg border border-warn/40 bg-warn/10 p-3 text-sm">
-            <p className="mb-2">L'assistant n'est pas configuré : choisis un fournisseur et une clé dans les réglages.</p>
-            <Button size="sm" onClick={() => setSection("settings")}>
-              Ouvrir les réglages
-            </Button>
-          </div>
+          <ResultBanner
+            tone="warn"
+            title="L'assistant n'est pas configuré"
+            action={
+              <Button size="sm" onClick={openSettings}>
+                Configurer
+              </Button>
+            }
+          >
+            <span className="text-xs text-muted">Choisis un fournisseur, un modèle et une clé dans Réglages › Assistant IA.</span>
+          </ResultBanner>
         )}
         {entries.length === 0 && configured && (
           <div className="text-sm text-muted">
@@ -153,7 +151,14 @@ export default function AssistantPanel() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-xs">Il ne voit que les serveurs cochés « accès IA », et te demande ton accord avant chaque commande.</p>
+            <p className="mt-3 text-xs">
+              Il ne voit que les serveurs autorisés dans Réglages › Accès IA.{" "}
+              {config?.execMode === "off"
+                ? "Il n'exécute aucune commande : il explique, tu tapes."
+                : config?.execMode === "auto"
+                  ? "Il exécute lui-même les commandes courantes ; les commandes sensibles demandent ton accord."
+                  : "Il te demande ton accord avant chaque commande."}
+            </p>
           </div>
         )}
         {entries.map((e, i) =>
@@ -182,9 +187,9 @@ export default function AssistantPanel() {
       </div>
 
       <div className="border-t border-border p-2">
-        <textarea
+        <Textarea
           ref={input}
-          className="h-20 w-full resize-none rounded-md border border-border bg-bg p-2 text-sm outline-none focus:border-accent"
+          className="h-20 min-h-0 resize-none"
           placeholder="Ta question… (Entrée pour envoyer, Maj+Entrée pour aller à la ligne)"
           value={text}
           disabled={!configured}
@@ -197,10 +202,10 @@ export default function AssistantPanel() {
           }}
         />
         <div className="mt-1 flex items-center gap-2">
-          <span className="text-[11px] text-muted">
+          <button type="button" className="text-[11px] text-muted hover:text-fg" title="Changer le mode d'exécution" onClick={openSettings}>
             {config?.execMode === "auto" ? "exécution autonome activée" : config?.execMode === "off" ? "lecture seule" : "commandes soumises à validation"}
-          </span>
-          <Button size="sm" variant="primary" className="ml-auto" icon={<Check size={13} />} loading={running} disabled={!text.trim() || !configured} onClick={send}>
+          </button>
+          <Button size="sm" variant="primary" className="ml-auto" icon={<SendHorizontal size={13} />} loading={running} disabled={!text.trim() || !configured} onClick={send}>
             Envoyer
           </Button>
         </div>

@@ -12,7 +12,7 @@ import type RFB from "@novnc/novnc";
 import { ClipboardPaste, Eye, Gauge, Keyboard, Maximize2, Minimize2, Power, RefreshCw, ScanLine, ShieldAlert } from "lucide-react";
 import { readClipboard, writeClipboard } from "../lib/clipboard";
 import { useRdp } from "../lib/rdp";
-import { Button, IconButton } from "./ui";
+import { Button, IconButton, Select } from "./ui";
 
 /**
  * Préréglages de qualité. noVNC demande au serveur une qualité JPEG et un niveau de compression :
@@ -149,19 +149,7 @@ export default function VncSession() {
         <div className="ml-auto flex items-center gap-1">
           <label className="mr-1 flex items-center gap-1 text-xs text-muted" title={QUALITES.find((q) => q.id === qualite)?.aide}>
             <Gauge size={14} />
-            <select
-              className="h-7 rounded-md border border-border bg-bg px-1 text-xs"
-              value={qualite}
-              disabled={!connecte}
-              onChange={(e) => choisirQualite(e.target.value as QualiteId)}
-              aria-label="Qualité d'image"
-            >
-              {QUALITES.map((q) => (
-                <option key={q.id} value={q.id}>
-                  {q.label}
-                </option>
-              ))}
-            </select>
+            <Select size="sm" value={qualite} disabled={!connecte} onChange={choisirQualite} aria-label="Qualité d'image" options={QUALITES.map((q) => ({ value: q.id, label: q.label }))} />
           </label>
           <IconButton title="Envoyer Ctrl+Alt+Suppr" disabled={!connecte || lecture} onClick={() => rfbRef.current?.sendCtrlAltDel()}>
             <Keyboard size={15} />

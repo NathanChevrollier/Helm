@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { create } from "zustand";
-import { CheckCircle2, Copy, ShieldAlert, Stethoscope, XCircle } from "lucide-react";
+import { CheckCircle2, Copy, RefreshCw, ShieldAlert, Stethoscope, XCircle } from "lucide-react";
 import { api, errorMessage, type Diagnosis } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useApp } from "../lib/store";
-import { Button, Modal } from "./ui";
+import { Button, ErrorState, Loading, Modal } from "./ui";
 
 /** Serveur dont le diagnostic de connexion est affiché. */
 export const useDoctor = create<{ serverId: string | null; open: (id: string) => void; close: () => void }>((set) => ({
@@ -25,12 +25,18 @@ export default function ConnectionDoctor() {
   const [result, setResult] = useState<Diagnosis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [busy, setBusy] = useState(false);
+  const run = useCallback(() => {
     if (!serverId) return;
     setResult(null);
     setError(null);
-    api.diagnose(serverId).then(setResult, (e) => setError(errorMessage(e)));
+    setBusy(true);
+    api
+      .diagnose(serverId)
+      .then(setResult, (e) => setError(errorMessage(e)))
+      .finally(() => setBusy(false));
   }, [serverId]);
+  useEffect(run, [run]);
 
   if (!serverId || !server) return null;
   const unban = result?.publicIp ? `sudo fail2ban-client set sshd unbanip ${result.publicIp}` : null;
@@ -44,14 +50,21 @@ export default function ConnectionDoctor() {
       }
       width="max-w-2xl"
       onClose={close}
-      footer={<Button onClick={close}>Fermer</Button>}
+      footer={
+        <>
+          <Button variant="ghost" icon={<RefreshCw size={13} className={busy ? "animate-spin" : ""} />} disabled={busy} onClick={run}>
+            Relancer
+          </Button>
+          <Button onClick={close}>Fermer</Button>
+        </>
+      }
     >
       <div className="flex flex-col gap-4 text-sm">
         <p className="text-muted">
           Tests réseau depuis ton PC vers {server.host}, sans aucune tentative de connexion : ils ne peuvent pas aggraver un bannissement.
         </p>
-        {error && <p className="text-danger">{error}</p>}
-        {!result && !error && <p className="text-muted">Tests en cours (jusqu'à une trentaine de secondes)…</p>}
+        {error && <ErrorState message={error} onRetry={run} />}
+        {!result && !error && <Loading label="Tests en cours (jusqu'à une trentaine de secondes)…" rows={4} />}
         {result && (
           <>
             <ul className="flex flex-col gap-1.5 rounded-lg border border-border bg-bg p-3">
