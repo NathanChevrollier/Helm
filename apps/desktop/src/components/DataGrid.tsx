@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, Filter as FilterIcon, KeyRound, ListFilter, Maximize2, Trash2, X } from "lucide-react";
 import { DB_FILTER_OPS, type DbColumn, type DbFilter, type DbFilterOp, type DbQueryResult } from "../lib/api";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
-import { Button, Input } from "./ui";
+import { Button, Input, Select } from "./ui";
 
 export interface Sort {
   column: string;
@@ -265,13 +265,7 @@ function FilterForm({
     >
       <p className="mb-2 truncate font-mono text-[11px] text-muted">{column}</p>
       <div className="flex gap-1">
-        <select className="h-7 rounded-md border border-border bg-bg px-1 text-xs" value={op} onChange={(e) => setOp(e.target.value as DbFilterOp)}>
-          {DB_FILTER_OPS.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <Select size="sm" aria-label="Opérateur" value={op} onChange={setOp} options={DB_FILTER_OPS.map((o) => ({ value: o, label: o }))} />
         {needsValue && (
           <Input
             className="h-7 flex-1 font-mono text-xs"
