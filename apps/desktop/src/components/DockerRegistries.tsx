@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { KeyRound, LogIn, LogOut, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { api, errorMessage, type Registry, type RegistryKind, type RegistrySession, type RegistryView } from "../lib/api";
 import { useAppPick } from "../lib/store";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal } from "./ui";
+import { Badge, Button, EmptyState, Field, IconButton, Input, Modal, Select } from "./ui";
 
 const KINDS: { id: RegistryKind; label: string; server: string; user: string }[] = [
   { id: "dockerhub", label: "Docker Hub", server: "docker.io", user: "Nom d'utilisateur Docker Hub" },
@@ -245,20 +245,14 @@ function RegistryForm({
     >
       <div className="flex flex-col gap-3">
         <Field label="Type">
-          <select
-            className="h-9 w-full rounded-md border border-border bg-bg px-2 text-sm"
+          <Select<RegistryKind>
             value={registry.kind}
-            onChange={(e) => {
-              const k = kindOf(e.target.value as RegistryKind);
+            onChange={(v) => {
+              const k = kindOf(v);
               set({ kind: k.id, server: k.server });
             }}
-          >
-            {KINDS.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </select>
+            options={KINDS.map((k) => ({ value: k.id, label: k.label }))}
+          />
         </Field>
         <Field label="Nom" hint="Pour t'y retrouver ; l'adresse sert par défaut.">
           <Input value={registry.name} placeholder={registry.server || "Mon registre"} onChange={(e) => set({ name: e.target.value })} />

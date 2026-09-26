@@ -346,6 +346,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
                   rowKey={(x) => x.server.id}
                   onRowClick={(x) => go(x.server, "monitoring")}
                   rowMenu={(x) => serverMenu(x.server)}
+                  actionsWidth={150}
                   rowActions={(x) => (
                     <Button size="sm" variant="ghost" icon={<SquareTerminal size={13} />} onClick={() => openTab(x.server.id)}>
                       Terminal

@@ -91,6 +91,7 @@ export default function Processes({ serverId, visible, onCount }: { serverId: st
         columns={columns}
         rowHeight={34}
         initialSort={{ key: "cpu", dir: "desc" }}
+        actionsWidth={76}
         rowActions={(p) => (
           <IconButton size="sm" title="Arrêter (SIGTERM)" onClick={() => void kill(p, false)}>
             <X size={14} />

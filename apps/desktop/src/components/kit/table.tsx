@@ -44,6 +44,7 @@ export function DataTable<T>({
   footer,
   groupBy,
   onBackgroundClick,
+  actionsWidth,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -66,9 +67,11 @@ export function DataTable<T>({
   stickyHeader?: boolean;
   footer?: ReactNode;
   /** Regroupement visuel : titre de groupe pour chaque ligne (les lignes doivent être triées par groupe). */
-  groupBy?: { key: (row: T) => string; header: (key: string, rows: T[]) => ReactNode };
+  groupBy?: { key: (row: T) => string; header: (key: string, rows: T[]) => ReactNode; collapsed?: (key: string) => boolean };
   /** Clic dans la zone vide sous les lignes (désélection). */
   onBackgroundClick?: () => void;
+  /** Largeur (px) de la colonne d'actions : fixe, pour que les colonnes restent alignées d'une ligne à l'autre. */
+  actionsWidth?: number;
 }) {
   const [localSort, setLocalSort] = useState<SortState>(initialSort);
   const sort = controlledSort !== undefined ? controlledSort : localSort;
@@ -76,7 +79,8 @@ export function DataTable<T>({
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; align?: "start" | "end" } | null>(null);
 
   const hasActions = !!rowActions || !!rowMenu;
-  const template = [...columns.map((c) => c.width ?? "minmax(0,1fr)"), ...(hasActions ? ["auto"] : [])].join(" ");
+  const actionsCol = actionsWidth ?? (rowActions ? 120 : 44);
+  const template = [...columns.map((c) => c.width ?? "minmax(0,1fr)"), ...(hasActions ? [`${actionsCol}px`] : [])].join(" ");
 
   const sorted = useMemo(() => {
     if (!sort) return rows;
@@ -184,7 +188,7 @@ export function DataTable<T>({
     body = groups.map(([k, list]) => (
       <div key={`g:${k}`} role="rowgroup">
         {groupBy.header(k, list)}
-        {list.map(renderRow)}
+        {!groupBy.collapsed?.(k) && list.map(renderRow)}
       </div>
     ));
   } else if (virtual) {

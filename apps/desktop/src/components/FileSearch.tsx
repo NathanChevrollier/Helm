@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { File, Folder, Search, Type } from "lucide-react";
 import { api, errorMessage, formatBytes, type FsHit, type FsMatch } from "../lib/api";
-import { Button, Input, Modal } from "./ui";
+import { Button, Checkbox, Input, Modal, Segmented } from "./ui";
 
 type Mode = "name" | "text";
 
@@ -65,14 +65,30 @@ export default function FileSearch({
 
   return (
     <Modal title={`Chercher dans ${root || "/"}`} width="max-w-4xl" onClose={onClose}>
-      <div className="mb-3 flex gap-1">
-        <Button size="sm" variant={mode === "name" ? "primary" : "outline"} icon={<File size={13} />} onClick={() => setMode("name")}>
-          Par nom
-        </Button>
-        <Button size="sm" variant={mode === "text" ? "primary" : "outline"} icon={<Type size={13} />} onClick={() => setMode("text")}>
-          Dans le contenu
-        </Button>
-      </div>
+      <Segmented
+        className="mb-3"
+        label="Type de recherche"
+        value={mode}
+        onChange={setMode}
+        options={[
+          {
+            value: "name",
+            label: (
+              <>
+                <File size={13} /> Par nom
+              </>
+            ),
+          },
+          {
+            value: "text",
+            label: (
+              <>
+                <Type size={13} /> Dans le contenu
+              </>
+            ),
+          },
+        ]}
+      />
 
       <form
         className="flex flex-col gap-2"
@@ -99,14 +115,10 @@ export default function FileSearch({
               Fichiers :
               <Input className="!h-7 !w-32 font-mono text-xs" placeholder="*.conf" value={glob} onChange={(e) => setGlob(e.target.value)} />
             </label>
-            <label className="flex items-center gap-1">
-              <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} />
-              Respecter la casse
-            </label>
-            <label className="flex items-center gap-1" title="Sinon le texte est cherché littéralement : un point reste un point.">
-              <input type="checkbox" checked={regex} onChange={(e) => setRegex(e.target.checked)} />
-              Expression régulière
-            </label>
+            <Checkbox className="text-xs" checked={caseSensitive} onChange={setCaseSensitive} label="Respecter la casse" />
+            <span title="Sinon le texte est cherché littéralement : un point reste un point.">
+              <Checkbox className="text-xs" checked={regex} onChange={setRegex} label="Expression régulière" />
+            </span>
           </div>
         )}
       </form>

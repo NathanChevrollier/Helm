@@ -111,7 +111,8 @@ export default function Services({ serverId, onCount }: { serverId: string; onCo
           rowHeight={38}
           initialSort={{ key: "state", dir: "asc" }}
           onRowDoubleClick={(s) => setLogsOf(s.unit)}
-          rowActions={(s) =>
+          actionsWidth={76}
+        rowActions={(s) =>
             s.active === "active" ? (
               <IconButton size="sm" title="Redémarrer" disabled={!!busy} onClick={() => void act(s, "restart", "Redémarrer")}>
                 <RotateCw size={14} className={busy === s.unit ? "animate-spin" : ""} />
