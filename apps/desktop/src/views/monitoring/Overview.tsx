@@ -142,11 +142,12 @@ export default function Overview({
   const loadPct = m ? (m.load[0] / Math.max(m.cpuCount, 1)) * 100 : 0;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="@container flex flex-col gap-4">
       {error && <ErrorState message={error} />}
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-        <StatTile label="CPU" value={prevOk ? pct(m.cpuPercent) : "…"} hint={m ? `${m.cpuCount} cœurs` : undefined} tone={prevOk ? meterTone(m.cpuPercent) : undefined} flag={prevOk ? flag(m.cpuPercent) : undefined} trend={trend((x) => x.cpuPercent)} />
+      {/* Six tuiles : deux rangées de trois, ou une seule rangée quand la place le permet (jamais une tuile orpheline). */}
+      <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-3 @7xl:grid-cols-6">
+        <StatTile label="CPU" value={prevOk ? pct(m.cpuPercent) : "…"} hint={m ? `${m.cpuCount} cœurs` : undefined} tone={prevOk ? meterTone(m.cpuPercent) : undefined} flag={prevOk ? flag(m.cpuPercent) : undefined} trend={trend((x) => x.cpuPercent)} trendMax={100} />
         <StatTile
           label="Mémoire"
           value={m ? pct(memPct) : "…"}
@@ -154,6 +155,7 @@ export default function Overview({
           tone={m ? meterTone(memPct) : undefined}
           flag={m ? flag(memPct) : undefined}
           trend={trend((x) => (x.memTotal ? (x.memUsed / x.memTotal) * 100 : 0))}
+          trendMax={100}
         />
         <StatTile
           label={`Disque ${rootDisk?.mount ?? ""}`}
@@ -170,7 +172,7 @@ export default function Overview({
           trend={trend((x) => x.load[0])}
         />
         <StatTile label="Réseau" value={prevOk ? `↓ ${rate(m.netRxRate)}` : "…"} hint={prevOk ? `↑ ${rate(m.netTxRate)}` : undefined} tone="ok" trend={trend((x) => x.netRxRate)} />
-        <StatTile label="En ligne depuis" value={m ? formatDuration(m.uptimeSecs) : "…"} hint={m ? `depuis le ${new Date((m.timestamp - m.uptimeSecs) * 1000).toLocaleDateString("fr-FR")}` : undefined} />
+        <StatTile label="En ligne depuis" value={m ? formatDuration(m.uptimeSecs) : "…"} hint={m ? `depuis le ${new Date(m.timestamp - m.uptimeSecs * 1000).toLocaleDateString("fr-FR")}` : undefined} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

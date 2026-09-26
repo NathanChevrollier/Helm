@@ -11,15 +11,16 @@ use helm_core::{tmux, Auth, ConnectParams, Connection};
 /// Mêmes commandes que l'app (apps/desktop/src-tauri/src/commands/terminal.rs).
 const SHELL_WITH_PID: &str = r#"exec sh -c 'printf "\033]7770;%s\007" "$$"; exec "${SHELL:-/bin/sh}" -l'"#;
 
-fn cwd_of_pids(pids: &[u32]) -> String {
-    let list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(" ");
+fn cwd_of_pid(pid: u32) -> String {
     format!(
-        "for base in {list}; do \
-           for p in $(ps -o tpgid= -p $base 2>/dev/null) $base; do \
-             d=$(readlink /proc/$p/cwd 2>/dev/null); \
-             [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; \
-           done; \
-         done; true"
+        "fg=$(ps -o tpgid= -p {pid} 2>/dev/null | tr -d ' '); \
+         if [ -n \"$fg\" ] && [ \"$fg\" != -1 ] && [ \"$fg\" != {pid} ]; then \
+           d=$(readlink /proc/$fg/cwd 2>/dev/null); \
+           [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; \
+           [ -d /proc/$fg ] && locked=1; \
+         fi; \
+         d=$(readlink /proc/{pid}/cwd 2>/dev/null); \
+         [ -n \"$d\" ] && {{ echo \"$d\"; [ -n \"$locked\" ] && echo locked; }}; true"
     )
 }
 
@@ -65,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     writer.data("cd /etc\n".as_bytes()).await?;
     let _ = read_for(&mut reader, 800).await;
-    let found = conn.run(&cwd_of_pids(&[pid])).await?.trim().to_string();
+    let found = conn.run(&cwd_of_pid(pid)).await?.lines().next().unwrap_or_default().trim().to_string();
     if found != "/etc" {
         return Err(format!("dossier attendu /etc, obtenu {found:?}").into());
     }
@@ -74,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Programme au premier plan lancé depuis un autre dossier : c'est le sien qui compte.
     writer.data("cd /var/log && sleep 5\n".as_bytes()).await?;
     tokio::time::sleep(Duration::from_millis(700)).await;
-    let found = conn.run(&cwd_of_pids(&[pid])).await?.trim().to_string();
+    let found = conn.run(&cwd_of_pid(pid)).await?.lines().next().unwrap_or_default().trim().to_string();
     if found != "/var/log" {
         return Err(format!("programme au premier plan : attendu /var/log, obtenu {found:?}").into());
     }

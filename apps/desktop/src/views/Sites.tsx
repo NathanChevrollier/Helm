@@ -310,7 +310,7 @@ function Sites({ serverId }: { serverId: string }) {
               L'assistant crée le conteneur (ou pointe vers un port existant), le vhost et le certificat HTTPS, puis vérifie que le site répond.
             </EmptyState>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(460px,1fr))] gap-3.5">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,460px),1fr))] gap-3.5">
               {sites.map((site) => {
                 const httpsBlock = site.blocks.find((b) => b.ssl);
                 const cert = httpsBlock ? certFor(httpsBlock) : undefined;

@@ -1,22 +1,21 @@
 import { useMemo, useState } from "react";
 import { Cable, FileSearch, FolderInput, FolderPlus, Lock, Pause, Pencil, Play, RotateCw, ScrollText, Search, Square, SquareTerminal, Trash2 } from "lucide-react";
-import { api, errorMessage, shellQuote, type ComposeProject, type Container, type ContainerStats, type DockerOverview } from "../../lib/api";
-import { useApp, useAppPick } from "../../lib/store";
-import { usePolling } from "../../lib/poll";
-import { useCachedState } from "../../lib/cache";
+import { type ComposeProject, type Container, type DockerOverview } from "../../lib/api";
+import { useApp } from "../../lib/store";
 import { startDrag } from "../../lib/drag";
 import { askFolderName, toggleCollapsed } from "../../components/Folders";
 import { tunnelTo, RestrictPortDialog } from "../../components/DockerExtras";
 import { DataTable, IconButton, Input, MenuButton, Segmented, Select, StatusDot, useContextMenu, type Column, type MenuItem } from "../../components/ui";
 import ContainerDrawer from "./ContainerDrawer";
-import { useContainerFolders } from "./shared";
+import { useContainerActions, useContainerFolders, useContainerStats } from "./shared";
+import PortChips, { isExposed } from "./PortChips";
 
 type GroupBy = "project" | "folder" | "none";
 type StateFilter = "all" | "running" | "stopped";
 
 export default function Containers({ serverId, data, docker, reload }: { serverId: string; data: DockerOverview; docker: string; reload: () => Promise<void> }) {
-  const { ask, notify, openTab } = useAppPick("ask", "notify", "openTab");
-  const [stats, setStats] = useCachedState<Record<string, ContainerStats>>(`dockerStats:${serverId}`, {});
+  const stats = useContainerStats(serverId);
+  const { busy, act: runAction, shell, logs } = useContainerActions(serverId, docker, reload);
   const [filter, setFilter] = useState("");
   const [state, setState] = useState<StateFilter>("all");
   const [groupBy, setGroupBy] = useState<GroupBy>(() => {
@@ -27,7 +26,6 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
       return "project";
     }
   });
-  const [busy, setBusy] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restrict, setRestrict] = useState<{ project: ComposeProject; port: number } | null>(null);
   const collapsed = useApp((s) => s.folders.collapsed);
@@ -42,17 +40,6 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
       /* préférence non retenue */
     }
   };
-
-  // `docker stats` prend souvent 2 à 3 s : le hook évite d'empiler les appels.
-  usePolling(
-    () =>
-      api
-        .dockerStats(serverId)
-        .then((list) => setStats(Object.fromEntries(list.map((s) => [s.id, s]))))
-        .catch(() => {}),
-    5000,
-    [serverId],
-  );
 
   const groupOf = (c: Container) => (groupBy === "project" ? (c.composeProject ?? "") : groupBy === "folder" ? folders.folderOf(c.name) : "");
   const rows = useMemo(() => {
@@ -74,30 +61,8 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
 
 
   const act = async (c: Container, action: string) => {
-    const labels: Record<string, [string, string?, boolean?]> = {
-      restart: ["Redémarrer"],
-      stop: ["Arrêter", "Le service rendu par ce conteneur sera interrompu."],
-      pause: ["Mettre en pause"],
-      unpause: ["Reprendre"],
-      start: ["Démarrer"],
-      remove: ["Supprimer", "Le conteneur sera supprimé. Ses volumes nommés sont conservés.", true],
-    };
-    const [label, body, danger] = labels[action] ?? [action];
-    if (body && !(await ask({ title: `${label} ${c.name} ?`, body, confirmLabel: label, danger }))) return;
-    setBusy(c.id);
-    try {
-      await api.dockerAction(serverId, c.id, action);
-      notify(`${c.name} : ${label.toLowerCase()} OK`, "success");
-      if (action === "remove") setSelectedId(null);
-      await reload();
-    } catch (e) {
-      notify(errorMessage(e), "error");
-    } finally {
-      setBusy(null);
-    }
+    if ((await runAction(c, action)) && action === "remove") setSelectedId(null);
   };
-  const shell = (c: Container) => openTab(serverId, { title: `${c.name} (shell)`, command: `${docker} exec -it ${shellQuote(c.id)} sh -c 'command -v bash >/dev/null && exec bash || exec sh'` });
-  const logs = (c: Container) => openTab(serverId, { title: `${c.name} (logs)`, command: `${docker} logs -f --tail 300 ${shellQuote(c.id)}` });
   const projectOf = (c: Container) => data.projects.find((x) => x.name === c.composeProject);
 
   const moveItems = (c: Container): MenuItem[] => [
@@ -158,31 +123,17 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
         c.ports.length === 0 ? (
           <span className="text-faint">—</span>
         ) : (
-          <span className="flex flex-wrap gap-1">
-            {c.ports.map((p) => {
-              const exposed = p.hostIp === "0.0.0.0" || p.hostIp === "::";
+          <PortChips
+            ports={c.ports}
+            onPortClick={(p, e) => {
               const project = projectOf(c);
-              return (
-                <button
-                  key={`${p.hostIp}:${p.hostPort}/${p.protocol}`}
-                  type="button"
-                  title={exposed ? "Exposé sur toutes les interfaces : clic pour les actions" : "Accessible uniquement depuis le serveur : clic pour les actions"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    portMenu.open(e, [
-                      { heading: `Port ${p.hostPort}` },
-                      ...(p.protocol === "tcp" ? [{ label: "Ouvrir un tunnel depuis mon PC", icon: <Cable size={14} />, onClick: () => void tunnelTo(serverId, c, p.hostPort) }] : []),
-                      ...(exposed && project ? [{ label: "Restreindre à 127.0.0.1…", icon: <Lock size={14} />, onClick: () => setRestrict({ project, port: p.hostPort }) }] : []),
-                    ]);
-                  }}
-                  className={`inline-flex h-[22px] items-center rounded-md border px-1.5 font-mono text-[11px] ${exposed ? "border-warn/45 text-warn" : "border-border-strong/60 bg-raised text-fg/80"}`}
-                >
-                  {exposed ? "*" : ""}
-                  {p.hostPort}→{p.containerPort}
-                </button>
-              );
-            })}
-          </span>
+              portMenu.open(e, [
+                { heading: `Port ${p.hostPort}` },
+                ...(p.protocol === "tcp" ? [{ label: "Ouvrir un tunnel depuis mon PC", icon: <Cable size={14} />, onClick: () => void tunnelTo(serverId, c, p.hostPort) }] : []),
+                ...(isExposed(p) && project ? [{ label: "Restreindre à 127.0.0.1…", icon: <Lock size={14} />, onClick: () => setRestrict({ project, port: p.hostPort }) }] : []),
+              ]);
+            }}
+          />
         ),
     },
     {

@@ -14,6 +14,10 @@ export interface PaneInfo {
   pid?: number;
   /** Dossier annoncé par le shell lui-même (OSC 7) : secours quand le serveur ne répond pas. */
   cwd?: string;
+  /** Dossier lu dans la dernière invite affichée (fourni par le terminal). */
+  promptCwd?: () => string | null;
+  /** Change à chaque commande validée (Entrée) : le panneau Fichiers se resynchronise aussitôt. */
+  inputTick?: number;
 }
 
 interface PanesState {
@@ -45,10 +49,11 @@ if (import.meta.env.DEV) {
 }
 
 /**
- * Dossier courant d'un panneau, demandé au serveur (tmux ou /proc du shell) pour qu'il suive les
- * `cd`. Le dossier annoncé par le shell (OSC 7) ne sert que si la question échoue, car il date du
- * dernier message reçu. `null` quand il reste introuvable (terminal lancé sur une commande,
- * serveur sans /proc, déconnecté…).
+ * Dossier courant d'un panneau, demandé au serveur (tmux ou /proc du programme au premier plan)
+ * pour qu'il suive les `cd`. Quand ce programme appartient à un autre utilisateur (shell root
+ * ouvert par `sudo -i` ou `su`), son dossier est illisible : on le lit alors dans l'invite affichée.
+ * Le dossier annoncé par le shell (OSC 7) ne sert que si tout le reste échoue. `null` quand il
+ * reste introuvable (terminal lancé sur une commande, serveur sans /proc, déconnecté…).
  */
 export async function paneCwd(paneId: string): Promise<string | null> {
   const p = usePanes.getState().panes[paneId];
@@ -56,12 +61,12 @@ export async function paneCwd(paneId: string): Promise<string | null> {
   if (p.tmux || p.pid) {
     try {
       const live = await api.termCwd(p.serverId, p.tmux, p.pid);
-      if (live) return live;
+      if (live) return (live.locked && p.promptCwd?.()) || live.path;
     } catch {
       /* serveur momentanément injoignable : on retombe sur ce que le shell avait annoncé */
     }
   }
-  return p.cwd ?? null;
+  return p.cwd ?? p.promptCwd?.() ?? null;
 }
 
 /**

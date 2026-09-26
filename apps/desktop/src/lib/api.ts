@@ -661,6 +661,14 @@ export interface DeployKey {
   workflow: string;
 }
 
+/** Ce que la règle sudo de la clé de déploiement ajoute aux droits du compte SSH. */
+export interface SudoRisk {
+  root: boolean;
+  dockerGroup: boolean;
+  /** Dossier, fichiers compose et .env du projet modifiables par le compte. */
+  writable: string[];
+}
+
 export interface McpConfig {
   command: string;
   claudeDesktop: string;
@@ -697,13 +705,26 @@ export interface ImportSummary {
   duplicated: number;
   /** Empreintes de clé d'hôte reçues qui contredisaient une empreinte approuvée : ignorées. */
   hostKeysKept: number;
+  /** Bureaux à distance et registres dans le même cas que `duplicated`. */
+  duplicatedOther: number;
+  /** Liens vers un de tes identifiants retirés : le contenu reçu s'en servait sans son secret. */
+  identityLinksRemoved: number;
+  /** Bureaux à distance ou registres invalides : ignorés. */
+  rejected: number;
 }
+
+/** L'import a-t-il écarté ou détourné quelque chose (bilan à afficher en avertissement) ? */
+export const importHasWarnings = (r: ImportSummary) => !!(r.duplicated || r.hostKeysKept || r.duplicatedOther || r.identityLinksRemoved || r.rejected);
 
 /** Phrase de bilan, avec les avertissements de sécurité s'il y en a. */
 export function importMessage(r: ImportSummary): string {
   let m = `Importé : ${r.servers} serveur(s), ${r.identities} identifiant(s), ${r.snippets} fragment(s), ${r.tunnels} tunnel(s), ${r.secrets} secret(s).`;
   if (r.duplicated) m += ` ${r.duplicated} serveur(s) portaient l'identifiant d'un serveur existant avec une autre adresse : ajoutés comme nouveaux serveurs.`;
+  if (r.duplicatedOther) m += ` ${r.duplicatedOther} bureau(x) à distance ou registre(s) dans le même cas : ajoutés à côté des existants.`;
   if (r.hostKeysKept) m += ` ${r.hostKeysKept} empreinte(s) de clé d'hôte différente(s) de celles déjà approuvées : ignorées.`;
+  if (r.identityLinksRemoved)
+    m += ` ${r.identityLinksRemoved} élément(s) utilisaient un de tes identifiants sans son mot de passe : lien retiré, choisis l'identifiant toi-même si c'est voulu.`;
+  if (r.rejected) m += ` ${r.rejected} bureau(x) à distance ou registre(s) invalides : ignorés.`;
   return m;
 }
 
@@ -1131,7 +1152,7 @@ export const api = {
   termJoinWrite: (id: number, data: string) => invoke<void>("term_join_write", { id, data }),
   termJoinClose: (id: number) => invoke<void>("term_join_close", { id }),
 
-  termCwd: (serverId: string, tmuxSession?: string, pid?: number) => invoke<string | null>("term_cwd", { serverId, tmuxSession, pid }),
+  termCwd: (serverId: string, tmuxSession?: string, pid?: number) => invoke<{ path: string; locked: boolean } | null>("term_cwd", { serverId, tmuxSession, pid }),
 
   /** Historique du shell distant, dédoublonné et classé (le plus récent d'abord). */
   termHistory: (serverId: string) => invoke<ShellHistoryEntry[]>("term_history", { serverId }),
@@ -1283,6 +1304,7 @@ export const api = {
   deployKeyCreate: (serverId: string, project: ComposeProject, checkHost: string | null) =>
     invoke<DeployKey>("deploy_key_create", { serverId, project, checkHost }),
   deployKeyRevoke: (serverId: string, project: string) => invoke<void>("deploy_key_revoke", { serverId, project }),
+  deploySudoRisk: (serverId: string, project: ComposeProject) => invoke<SudoRisk>("deploy_sudo_risk", { serverId, project }),
 
   mcpConfig: () => invoke<McpConfig>("mcp_config"),
   saveTextFile: (path: string, content: string) => invoke<void>("save_text_file", { path, content }),

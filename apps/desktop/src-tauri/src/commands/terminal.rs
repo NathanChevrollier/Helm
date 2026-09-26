@@ -43,23 +43,43 @@ fn announcing_pid(command: &str) -> String {
     format!("exec sh -c '{}'", script.replace('\'', r"'\''"))
 }
 
-/// Dossier de travail d'un ou plusieurs processus : celui du programme au premier plan du
-/// terminal (après un `cd` dans un éditeur, par exemple), sinon celui du shell lui-même.
-fn cwd_of_pids(pids: &[u32]) -> String {
-    let list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(" ");
+/// Dossier de travail du terminal dont `pid` est le shell : celui du programme au premier plan
+/// (shell imbriqué, `cd` dans un éditeur…), sinon celui du shell lui-même.
+///
+/// Sortie : le chemin, puis `locked` quand le programme au premier plan appartient à un autre
+/// utilisateur (shell root ouvert par `sudo -i` ou `su`) : son dossier est illisible sans droits,
+/// et le chemin donné n'est alors que celui du shell de départ.
+fn cwd_of_pid(pid: u32) -> String {
     format!(
-        "for base in {list}; do \
-           for p in $(ps -o tpgid= -p $base 2>/dev/null) $base; do \
-             d=$(readlink /proc/$p/cwd 2>/dev/null); \
-             [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; \
-           done; \
-         done; true"
+        "fg=$(ps -o tpgid= -p {pid} 2>/dev/null | tr -d ' '); \
+         if [ -n \"$fg\" ] && [ \"$fg\" != -1 ] && [ \"$fg\" != {pid} ]; then \
+           d=$(readlink /proc/$fg/cwd 2>/dev/null); \
+           [ -n \"$d\" ] && {{ echo \"$d\"; exit 0; }}; \
+           [ -d /proc/$fg ] && locked=1; \
+         fi; \
+         d=$(readlink /proc/{pid}/cwd 2>/dev/null); \
+         [ -n \"$d\" ] && {{ echo \"$d\"; [ -n \"$locked\" ] && echo locked; }}; true"
     )
 }
 
-/// Dossier courant d'un terminal. Plusieurs pistes sont tentées dans l'ordre : le panneau tmux,
-/// le PID annoncé par le shell, puis le PID du panneau tmux. `None` si aucune n'aboutit
-/// (serveur déconnecté, système sans /proc, terminal lancé sur une commande).
+/// Dossier courant d'un terminal, tel que le serveur le voit.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TermCwd {
+    path: String,
+    /// Le programme au premier plan appartient à un autre utilisateur (voir [`cwd_of_pid`]).
+    locked: bool,
+}
+
+fn parse_cwd(stdout: &str) -> Option<TermCwd> {
+    let mut lines = stdout.lines().map(str::trim).filter(|l| !l.is_empty());
+    let path = lines.next()?;
+    path.starts_with('/').then(|| TermCwd { path: path.to_string(), locked: lines.next() == Some("locked") })
+}
+
+/// Dossier courant d'un terminal : via le PID du panneau tmux ou celui annoncé par le shell, puis
+/// le chemin donné par tmux en dernier recours. `None` si aucune piste n'aboutit (serveur
+/// déconnecté, système sans /proc, terminal lancé sur une commande).
 #[tauri::command]
 pub async fn term_cwd(
     store: State<'_, Store>,
@@ -67,7 +87,7 @@ pub async fn term_cwd(
     server_id: String,
     tmux_session: Option<String>,
     pid: Option<u32>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<TermCwd>, String> {
     if !sessions.is_connected(&server_id).await {
         return Ok(None);
     }
@@ -80,22 +100,21 @@ pub async fn term_cwd(
         let cmd = helm_core::tmux::pane_path_command(&name).map_err(|e| e.to_string())?;
         let out = conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
         let mut lines = out.stdout.lines().map(str::trim).filter(|l| !l.is_empty());
-        // Première ligne : le chemin donné par tmux ; deuxième : le PID du panneau, pour /proc.
-        let path = lines.next().unwrap_or_default();
-        if path.starts_with('/') {
-            return Ok(Some(path.to_string()));
-        }
+        // Première ligne : le chemin donné par tmux ; deuxième : le PID du shell du panneau.
+        // /proc passe en premier : tmux retombe sans rien dire sur le shell du panneau quand le
+        // programme au premier plan appartient à root, et on perdrait l'information.
+        let tmux_path = lines.next().unwrap_or_default().to_string();
         if let Some(pane_pid) = lines.next().and_then(|p| p.parse::<u32>().ok()) {
-            let out = conn.exec(&cwd_of_pids(&[pane_pid]), None).await.map_err(|e| e.to_string())?;
-            let path = out.stdout.lines().next().unwrap_or_default().trim().to_string();
-            return Ok(path.starts_with('/').then_some(path));
+            let out = conn.exec(&cwd_of_pid(pane_pid), None).await.map_err(|e| e.to_string())?;
+            if let Some(cwd) = parse_cwd(&out.stdout) {
+                return Ok(Some(cwd));
+            }
         }
-        return Ok(None);
+        return Ok(tmux_path.starts_with('/').then_some(TermCwd { path: tmux_path, locked: false }));
     }
 
-    let out = conn.exec(&cwd_of_pids(&[pid.unwrap_or(0)]), None).await.map_err(|e| e.to_string())?;
-    let path = out.stdout.lines().next().unwrap_or_default().trim().to_string();
-    Ok(path.starts_with('/').then_some(path))
+    let out = conn.exec(&cwd_of_pid(pid.unwrap_or(0)), None).await.map_err(|e| e.to_string())?;
+    Ok(parse_cwd(&out.stdout))
 }
 
 /// Fait défiler l'historique d'une session tmux (molette de la souris dans le terminal).
@@ -173,7 +192,17 @@ fn parse_history(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{announcing_pid, LOGIN_SHELL};
+    use super::{announcing_pid, parse_cwd, LOGIN_SHELL};
+
+    #[test]
+    fn dossier_du_terminal() {
+        let c = parse_cwd("/etc/nginx\n").unwrap();
+        assert_eq!((c.path.as_str(), c.locked), ("/etc/nginx", false));
+        let c = parse_cwd("/home/alice\nlocked\n").unwrap();
+        assert_eq!((c.path.as_str(), c.locked), ("/home/alice", true));
+        assert!(parse_cwd("").is_none());
+        assert!(parse_cwd("readlink: permission denied").is_none());
+    }
 
     #[test]
     fn annonce_le_pid_avant_le_shell() {

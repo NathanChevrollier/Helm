@@ -64,7 +64,13 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
         setEntries([...l.entries].sort((a, b) => Number(isDir(b)) - Number(isDir(a)) || a.name.localeCompare(b.name)));
         setError(null);
       } catch (e) {
-        setError(errorMessage(e));
+        // On montre quand même le dossier demandé : garder l'ancien contenu ferait croire que
+        // le terminal y est encore (cas typique : shell root dans /root, illisible en SFTP).
+        const msg = errorMessage(e);
+        setPath(dir);
+        setInput(dir);
+        setEntries([]);
+        setError(/permission|denied|refus/i.test(msg) ? "Dossier illisible avec l'utilisateur du profil SSH (le terminal y accède via sudo ou su)." : msg);
       } finally {
         setLoading(false);
       }
@@ -97,6 +103,20 @@ export default function TerminalFiles({ paneId, visible }: { paneId: string; vis
 
   // Suit les « cd » du terminal (léger : une commande toutes les 2,5 s, panneau visible seulement).
   usePolling(() => syncWithTerminal(false), 2500, [syncWithTerminal], visible && connected && (follow || path === null));
+
+  // Et aussitôt après chaque commande validée, sans attendre le prochain relevé : une fois quand
+  // le shell a changé de dossier, une seconde fois pour les commandes plus lentes (sudo -i, su).
+  const inputTick = pane?.inputTick;
+  useEffect(() => {
+    if (!inputTick || !visible || !connected || !follow) return;
+    const t1 = setTimeout(() => void syncWithTerminal(false), 250);
+    const t2 = setTimeout(() => void syncWithTerminal(false), 1200);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputTick]);
 
   const sendToTerminal = (text: string) => {
     const id = usePanes.getState().panes[paneId]?.termId;

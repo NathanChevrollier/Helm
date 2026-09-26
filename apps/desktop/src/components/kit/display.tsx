@@ -83,12 +83,18 @@ export function LabeledMeter({ label, value, detail }: { label: ReactNode; value
   );
 }
 
-/** Mini-courbe sans axes : une tendance, pas une mesure. */
+/**
+ * Mini-courbe sans axes : une tendance, pas une mesure. Avec `max`, l'échelle va de 0 à `max`
+ * (pourcentages) ; sans, elle suit l'écart des valeurs et une série constante reste au milieu.
+ */
 function Sparkline({ values, tone = "accent", width = 84, height = 28, max }: { values: number[]; tone?: Tone; width?: number; height?: number; max?: number }) {
   if (values.length < 2) return <svg width={width} height={height} aria-hidden />;
-  const hi = max ?? Math.max(...values, 1);
+  const lo = max != null ? 0 : Math.min(...values);
+  const hi = max ?? Math.max(...values);
+  const span = hi - lo;
+  const y = (v: number) => (span > 0 ? height - 2 - ((Math.min(hi, Math.max(lo, v)) - lo) / span) * (height - 4) : height / 2);
   const step = width / (values.length - 1);
-  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(height - 2 - (Math.max(0, v) / hi) * (height - 4)).toFixed(1)}`).join(" ");
+  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const stroke: Record<Tone, string> = { accent: "var(--color-accent)", ok: "var(--color-ok)", warn: "var(--color-warn)", danger: "var(--color-danger)", muted: "var(--color-muted)" };
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden className="shrink-0">
@@ -104,6 +110,7 @@ export function StatTile({
   hint,
   tone,
   trend,
+  trendMax,
   onClick,
   flag,
 }: {
@@ -112,6 +119,8 @@ export function StatTile({
   hint?: ReactNode;
   tone?: Tone;
   trend?: number[];
+  /** Haut de l'échelle de la tendance (100 pour un pourcentage) ; sinon, échelle relative. */
+  trendMax?: number;
   onClick?: () => void;
   flag?: ReactNode;
 }) {
@@ -130,7 +139,7 @@ export function StatTile({
       </div>
       <div className="flex items-end justify-between gap-2">
         <span className="truncate text-2xl leading-tight font-semibold tracking-tight tabular-nums">{value}</span>
-        {trend && <Sparkline values={trend} tone={tone ?? "accent"} />}
+        {trend && <Sparkline values={trend} tone={tone ?? "accent"} max={trendMax} />}
       </div>
       {hint && <div className="truncate text-[11.5px] text-faint">{hint}</div>}
     </Tag>

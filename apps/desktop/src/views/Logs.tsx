@@ -434,13 +434,15 @@ function Logs({ serverId }: { serverId: string }) {
         <div className="relative flex min-w-0 flex-1 flex-col">
           <div ref={box} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto bg-bg px-3 py-2 font-mono text-xs leading-5 select-text">
             {!running && lines.length === 0 && (
-              <EmptyState icon={<ScrollText />} title={chosen.length ? "Prêt à suivre" : "Choisis des sources à suivre"}>
-                {chosen.length
-                  ? "Lance le suivi depuis l'en-tête : les 200 dernières lignes de chaque source s'affichent, puis les nouvelles en direct."
-                  : presets.length
-                    ? "Coche des sources à gauche, ou reprends un préréglage enregistré."
-                    : "Coche des conteneurs, services ou fichiers dans la colonne de gauche."}
-              </EmptyState>
+              <div className="h-full font-sans">
+                <EmptyState icon={<ScrollText />} title={chosen.length ? "Prêt à suivre" : "Choisis des sources à suivre"}>
+                  {chosen.length
+                    ? "Lance le suivi depuis l'en-tête : les 200 dernières lignes de chaque source s'affichent, puis les nouvelles en direct."
+                    : presets.length
+                      ? "Coche des sources à gauche, ou reprends un préréglage enregistré."
+                      : "Coche des conteneurs, services ou fichiers dans la colonne de gauche."}
+                </EmptyState>
+              </div>
             )}
             {running && lines.length === 0 && <p className="py-2 font-sans text-muted">En attente des premières lignes…</p>}
             {visible.map((l) =>

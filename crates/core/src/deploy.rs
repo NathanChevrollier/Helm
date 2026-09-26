@@ -148,6 +148,12 @@ fn marker(project: &str) -> String {
     format!("helm-deploy:{project}")
 }
 
+/// Motif `sed` qui ne reconnaît que la clé de CE projet : le `.` autorisé dans un nom de projet
+/// est un joker pour sed, et révoquer `my.app` effacerait aussi la clé de `myXapp`.
+fn marker_pattern(project: &str) -> String {
+    marker(project).replace('.', r"\.")
+}
+
 /// Crée une clé de déploiement restreinte pour GitHub Actions.
 pub async fn create_key(conn: &Connection, sudo: Option<&str>, project: &str, host: &str, port: u16) -> Result<DeployKey> {
     if !valid_project(project) {
@@ -179,7 +185,7 @@ pub async fn create_key(conn: &Connection, sudo: Option<&str>, project: &str, ho
     }
     let forced = if root { format!("{SCRIPT_PATH} {project}") } else { format!("sudo -n {SCRIPT_PATH} {project}") };
     let line = format!("command=\"{forced}\",restrict {public}");
-    let m = marker(project);
+    let m = marker_pattern(project);
     conn.run(&format!(
         "set -e; umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; sed -i '/ {m}$/d' ~/.ssh/authorized_keys; printf '%s\\n' {l} >> ~/.ssh/authorized_keys",
         l = shell_quote(&line)
@@ -214,6 +220,49 @@ jobs:
     Ok(DeployKey { project: project.into(), private_key: private_key.to_string(), known_hosts, user, workflow })
 }
 
+/// Ce que la règle sudo de [`create_key`] ajoute aux droits du compte SSH.
+///
+/// Pour un compte non root, cette règle lui permet de lancer le déploiement en root sans mot de
+/// passe. Si ce compte peut modifier les fichiers compose du projet, il peut y ajouter un volume
+/// `/:/host` : quiconque prend ce compte devient donc root. Rien ne change s'il est déjà root ou
+/// membre du groupe `docker`, qui donne déjà les mêmes droits.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SudoRisk {
+    /// Compte root : aucune règle sudo n'est ajoutée.
+    pub root: bool,
+    /// Membre du groupe `docker` : la règle n'ajoute aucun droit.
+    pub docker_group: bool,
+    /// Fichiers et dossiers du projet modifiables par le compte (dossier, fichiers compose, `.env`).
+    pub writable: Vec<String>,
+}
+
+impl SudoRisk {
+    /// La règle ouvrirait un chemin vers root qui n'existait pas.
+    pub fn escalates(&self) -> bool {
+        !self.root && !self.docker_group && !self.writable.is_empty()
+    }
+}
+
+fn parse_sudo_risk(out: &str) -> SudoRisk {
+    let mut lines = out.lines().map(str::trim);
+    let root = lines.next() == Some("0");
+    let docker_group = lines.next().unwrap_or_default().split_whitespace().any(|g| g == "docker");
+    SudoRisk { root, docker_group, writable: lines.filter(|l| l.starts_with('/')).map(str::to_string).collect() }
+}
+
+/// Évalue [`SudoRisk`] pour un projet, avant de créer sa clé de déploiement.
+pub async fn sudo_risk(conn: &Connection, config_files: &str) -> Result<SudoRisk> {
+    let files: Vec<&str> = config_files.split(',').map(str::trim).filter(|f| !f.is_empty()).collect();
+    let dir = files.first().map(|f| crate::sftp::parent(f)).ok_or_else(|| Error::Other("projet sans fichier compose".into()))?;
+    let env = crate::sftp::join(&dir, ".env");
+    let paths: Vec<String> = std::iter::once(dir.as_str()).chain(files.iter().copied()).chain([env.as_str()]).map(shell_quote).collect();
+    let out = conn
+        .run(&format!("id -u; id -nG; for f in {}; do [ -e \"$f\" ] && [ -w \"$f\" ] && echo \"$f\"; done; true", paths.join(" ")))
+        .await?;
+    Ok(parse_sudo_risk(&out))
+}
+
 /// Projets qui ont une clé de déploiement active.
 pub async fn keys(conn: &Connection) -> Result<Vec<String>> {
     let out = conn.exec("grep -o ' helm-deploy:[A-Za-z0-9_.-]*$' ~/.ssh/authorized_keys 2>/dev/null || true", None).await?;
@@ -224,7 +273,7 @@ pub async fn revoke_key(conn: &Connection, project: &str) -> Result<()> {
     if !valid_project(project) {
         return Err(Error::Other("nom de projet invalide".into()));
     }
-    conn.run(&format!("sed -i '/ {}$/d' ~/.ssh/authorized_keys", marker(project))).await?;
+    conn.run(&format!("sed -i '/ {}$/d' ~/.ssh/authorized_keys", marker_pattern(project))).await?;
     Ok(())
 }
 
@@ -247,5 +296,21 @@ mod tests {
         assert!(valid_project("mypage"));
         assert!(!valid_project("a b"));
         assert!(!valid_project("x;id"));
+    }
+
+    #[test]
+    fn sudo_rule_risk() {
+        let r = parse_sudo_risk("1000\nalice sudo\n/home/alice/app\n/home/alice/app/compose.yml\n");
+        assert!(r.escalates(), "compte non root, hors groupe docker, fichiers modifiables");
+        assert_eq!(r.writable.len(), 2);
+        assert!(!parse_sudo_risk("1000\nalice docker\n/home/alice/app\n").escalates(), "le groupe docker donne déjà root");
+        assert!(!parse_sudo_risk("0\nroot\n/opt/app\n").escalates());
+        assert!(!parse_sudo_risk("1000\nalice sudo\n").escalates(), "projet appartenant à root");
+    }
+
+    #[test]
+    fn revoke_pattern_matches_only_its_project() {
+        assert_eq!(marker_pattern("my.app"), r"helm-deploy:my\.app");
+        assert_eq!(marker_pattern("site-web_2"), "helm-deploy:site-web_2");
     }
 }

@@ -178,6 +178,26 @@ impl RemoteDesktop {
     pub fn secret_owner(id: &str) -> String {
         format!("rdp-{id}")
     }
+
+    /// Bureau utilisable tel quel. Un bureau peut venir d'un fichier de partage, donc de quelqu'un
+    /// d'autre, sans passer par le formulaire : l'identifiant sert de nom de fichier (`<id>.rdp`)
+    /// et chaque champ devient une ligne du fichier `.rdp` ou `.vv`. Un séparateur de chemin ou un
+    /// retour à la ligne y écrirait ailleurs ou ajouterait ses propres options.
+    pub fn is_valid(&self) -> bool {
+        let text = |s: &str| !s.chars().any(char::is_control);
+        valid_id(&self.id)
+            && !self.host.is_empty()
+            && !self.host.contains(char::is_whitespace)
+            && text(&self.host)
+            && text(&self.username)
+            && text(&self.name)
+            && self.domain.as_deref().is_none_or(text)
+    }
+}
+
+/// Identifiant d'élément tel que l'app les crée (UUID) : ni séparateur de chemin ni caractère spécial.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Registre d'images privé (Docker Hub, GitHub Packages, GitLab, AWS ECR…). Le jeton est dans
@@ -198,6 +218,11 @@ impl Registry {
     /// Propriétaire du jeton dans le keyring.
     pub fn secret_owner(id: &str) -> String {
         format!("registry-{id}")
+    }
+
+    /// Mêmes règles que le formulaire d'enregistrement (adresse et utilisateur).
+    pub fn is_valid(&self) -> bool {
+        valid_id(&self.id) && helm_core::registry::valid_server(&self.server) && helm_core::registry::valid_word(&self.username)
     }
 }
 

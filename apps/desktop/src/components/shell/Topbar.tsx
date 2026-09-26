@@ -47,7 +47,7 @@ export default function Topbar() {
       <button
         type="button"
         onClick={() => openPalette()}
-        className={`flex h-8 w-full max-w-[460px] min-w-0 shrink items-center gap-2.5 rounded-lg border border-border bg-panel px-2.5 text-[13px] text-muted transition-colors hover:border-border-strong ${FOCUS_RING}`}
+        className={`flex h-8 w-full max-w-[320px] min-w-0 shrink 2xl:max-w-[460px] items-center gap-2.5 rounded-lg border border-border bg-panel px-2.5 text-[13px] text-muted transition-colors hover:border-border-strong ${FOCUS_RING}`}
       >
         <Search size={15} className="shrink-0" />
         <span className="flex-1 truncate text-left">Rechercher, ouvrir, lancer…</span>

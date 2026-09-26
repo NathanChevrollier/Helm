@@ -309,6 +309,7 @@ pub fn run() {
             deploy::deploy_suggest_host,
             deploy::deploy_prepare,
             deploy::deploy_keys,
+            deploy::deploy_sudo_risk,
             deploy::deploy_key_create,
             deploy::deploy_key_revoke,
         ]))

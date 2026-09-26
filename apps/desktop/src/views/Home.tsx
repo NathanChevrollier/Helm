@@ -123,7 +123,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
   const nRunning = online.reduce((n, x) => n + x.r!.containersRunning, 0);
   const nStopped = online.reduce((n, x) => n + x.r!.containersStopped, 0);
   const nAlerts = online.reduce((n, x) => n + x.r!.alerts.length, 0);
-  if (pending.size === 0) {
+  // Tendance enregistrée seulement quand tous les serveurs ont répondu : sinon la courbe partirait de 0.
+  if (pending.size === 0 && known.every((x) => x.r)) {
     pushTrend("online", online.length);
     pushTrend("running", nRunning);
     pushTrend("stopped", nStopped);
@@ -253,8 +254,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
       }
     >
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
-        <section className="flex min-h-0 min-w-0 flex-col gap-5 overflow-auto px-7 py-5">
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
+        <section className="@container flex min-h-0 min-w-0 flex-col gap-5 overflow-auto px-7 py-5">
+          <div className="grid grid-cols-2 gap-3 @3xl:grid-cols-4">
             <StatTile label="Serveurs en ligne" value={`${online.length} / ${servers.length}`} tone="ok" trend={trends.online} hint={servers.length - online.length ? `${servers.length - online.length} hors ligne` : "Tous joignables"} />
             <StatTile label="Conteneurs actifs" value={nRunning} tone="accent" trend={trends.running} hint={`Sur ${online.filter((x) => x.r!.docker).length} serveur(s) Docker`} />
             <StatTile
@@ -269,7 +270,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
 
           <Section title="Serveurs" count={shown.length}>
             {view === "grid" ? (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] gap-3">
                 {shown.map(({ server: s, r }) => {
                   const h = healthOf(r);
                   const certs = r?.certificates ?? [];

@@ -70,6 +70,18 @@ pub async fn deploy_keys(store: State<'_, Store>, sessions: State<'_, Sessions>,
     deploy::keys(&conn).await.map_err(err)
 }
 
+/// Ce que la clé de déploiement changerait aux droits du compte SSH (voir [`deploy::SudoRisk`]).
+#[tauri::command]
+pub async fn deploy_sudo_risk(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    project: ComposeProject,
+) -> Result<deploy::SudoRisk, String> {
+    let conn = sessions.get(&store, &server_id).await?;
+    deploy::sudo_risk(&conn, &project.config_files).await.map_err(err)
+}
+
 #[tauri::command]
 pub async fn deploy_key_create(
     audit: State<'_, AuditLog>,

@@ -16,6 +16,7 @@ import { useTheme } from "../lib/theme";
 import { display, isAppShortcut, matches, shortcutOf } from "../lib/shortcuts";
 import { focusedTerminal } from "../lib/focus";
 import { paneCwd, uploadToPane, usePanes } from "../lib/panes";
+import { cwdFromPrompt } from "../lib/prompt-cwd";
 import { registerPaneActions, usePaneStatus } from "../lib/paneActions";
 import { ask as askAssistant, explain } from "../lib/assistant";
 import { diagnosePrompt, findLastFailure, type Failure } from "../lib/terminal-errors";
@@ -227,6 +228,16 @@ export default function TerminalPane({
       if (Number.isInteger(pid) && pid > 0) usePanes.getState().set(paneId, { pid });
       return true;
     });
+    // Secours quand /proc est illisible (shell root) : l'invite affichée dit où l'on est.
+    usePanes.getState().set(paneId, {
+      promptCwd: () => {
+        const buf = term.buffer.active;
+        const end = buf.baseY + buf.cursorY;
+        const lines: string[] = [];
+        for (let i = Math.max(0, end - 200); i <= end; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+        return cwdFromPrompt(lines);
+      },
+    });
     term.parser.registerOscHandler(7, (data) => {
       try {
         const url = new URL(data);
@@ -393,6 +404,7 @@ export default function TerminalPane({
         return;
       }
       void api.termWrite(idRef.current, data);
+      if (data.includes("\r")) usePanes.getState().set(paneId, { inputTick: Date.now() });
     });
     term.onResize(({ cols, rows }) => {
       if (idRef.current != null) void api.termResize(idRef.current, cols, rows);

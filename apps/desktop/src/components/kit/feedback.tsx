@@ -217,7 +217,7 @@ export function Toasts() {
 
 export function EmptyState({ icon, title, children, action }: { icon?: ReactNode; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 p-8 text-center">
+    <div className="flex h-full min-h-48 w-full flex-col items-center justify-center gap-3 p-8 text-center">
       {icon && <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/10 text-accent [&>svg]:size-7">{icon}</div>}
       <h2 className="text-[15px] font-semibold">{title}</h2>
       {children && <div className="max-w-md text-[13px] leading-relaxed text-muted">{children}</div>}

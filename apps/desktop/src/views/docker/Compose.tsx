@@ -1,18 +1,29 @@
 import { lazy, Suspense, useState } from "react";
-import { FileCode2, GitBranch, Layers, Package, Play, Plus, Rocket, RotateCw, ScrollText, Square, UploadCloud } from "lucide-react";
-import { api, errorMessage, type ComposeProject, type DockerOverview } from "../../lib/api";
+import { Cable, FileCode2, GitBranch, Layers, Lock, Package, Play, Plus, Rocket, RotateCw, ScrollText, Square, SquareTerminal, UploadCloud } from "lucide-react";
+import { api, errorMessage, type ComposeProject, type Container, type DockerOverview } from "../../lib/api";
 import { useAppPick } from "../../lib/store";
-import { Badge, Button, EmptyState, MenuButton, Modal, type MenuItem } from "../../components/ui";
-import { deployProject, GithubDeployDialog } from "../../components/DockerExtras";
+import { Badge, Button, EmptyState, IconButton, MenuButton, Modal, StatusDot, useContextMenu, type MenuItem } from "../../components/ui";
+import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../../components/DockerExtras";
+import ContainerDrawer from "./ContainerDrawer";
+import PortChips, { isExposed } from "./PortChips";
+import { stateTone, useContainerActions, useContainerStats } from "./shared";
 
 const FileEditor = lazy(() => import("../../components/FileEditor"));
 
+/** Colonnes d'une ligne de service : nom et état, image, ports, CPU, mémoire, actions. */
+const SERVICE_GRID = "grid grid-cols-[minmax(140px,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_64px_72px_96px] items-center gap-3";
+
 export default function Compose({ serverId, data, docker, reload, onNew, onCatalog }: { serverId: string; data: DockerOverview; docker: string; reload: () => Promise<void>; onNew: () => void; onCatalog: () => void }) {
   const { ask, notify, openTab } = useAppPick("ask", "notify", "openTab");
+  const stats = useContainerStats(serverId);
+  const containerActions = useContainerActions(serverId, docker, reload);
   const [busy, setBusy] = useState<string | null>(null);
   const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [github, setGithub] = useState<ComposeProject | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [restrict, setRestrict] = useState<{ project: ComposeProject; port: number } | null>(null);
+  const portMenu = useContextMenu();
   if (data.projects.length === 0) {
     return (
       <EmptyState
@@ -51,7 +62,8 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
     }
   };
 
-  const containersOf = (name: string) => data.containers.filter((c) => c.composeProject === name);
+  const containersOf = (name: string) => data.containers.filter((c) => c.composeProject === name).sort((a, b) => (a.composeService ?? a.name).localeCompare(b.composeService ?? b.name, "fr"));
+  const projectOf = (c: Container) => data.projects.find((x) => x.name === c.composeProject);
 
   const projectItems = (p: ComposeProject, file: string, stopped: boolean): MenuItem[] => [
     { label: "Mettre à jour (pull + up)", icon: <UploadCloud size={14} />, onClick: () => void act(p, "update", "Mettre à jour (pull + up)") },
@@ -82,83 +94,172 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
     },
   ];
 
+  const selected = data.containers.find((c) => c.id === selectedId);
+
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-4 px-7 py-5">
+    // Une colonne tant qu'il n'y a pas la place pour deux projets lisibles côte à côte.
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,640px),1fr))] items-start gap-4 px-7 py-5">
       {data.projects.map((p) => {
         const file = p.configFiles.split(",")[0];
         const b = (a: string) => busy === `${p.name}:${a}`;
         const services = containersOf(p.name);
         const enMarche = services.filter((c) => c.state === "running").length;
         const arrete = services.length > 0 && enMarche === 0;
+        const cpu = services.reduce((n, c) => n + (stats[c.id]?.cpu ?? 0), 0);
         return (
-          <div key={p.name} className="flex flex-col overflow-hidden rounded-xl border border-border bg-panel">
-            <div className="flex items-start gap-2 border-b border-border px-4 py-3">
-              <Layers size={15} className="mt-0.5 shrink-0 text-accent" />
+          <section key={p.name} className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-panel">
+            <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
+              <Layers size={16} className="shrink-0 text-accent" />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{p.name}</div>
-                <div className="truncate font-mono text-xs text-muted" title={p.configFiles}>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-semibold">{p.name}</span>
+                  <Badge tone={arrete ? "muted" : enMarche === services.length ? "ok" : "warn"}>
+                    {services.length > 0 ? `${enMarche}/${services.length} en cours` : p.status}
+                  </Badge>
+                  {enMarche > 0 && <span className="shrink-0 text-xs text-muted tabular-nums">CPU {cpu.toFixed(1)} %</span>}
+                </div>
+                <button type="button" className="block max-w-full truncate font-mono text-xs text-muted hover:text-accent" title={`${p.configFiles}\nClic : éditer le fichier`} onClick={() => setEditing(file)}>
                   {file}
+                </button>
+              </div>
+              {/* Les actions courantes en clair, le reste rangé derrière « … ». */}
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button size="sm" variant="primary" icon={<Rocket size={12} />} title="Nouvelles images, redémarrage, vérification, et retour à la version précédente si elle échoue" onClick={() => void deployProject(serverId, p)}>
+                  Déployer
+                </Button>
+                {arrete ? (
+                  <Button size="sm" icon={<Play size={12} />} loading={b("up")} onClick={() => void act(p, "up", "Démarrer (up -d)")}>
+                    Démarrer
+                  </Button>
+                ) : (
+                  <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>
+                    Redémarrer
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  icon={<ScrollText size={12} />}
+                  title="Logs de tous les services, en direct"
+                  onClick={async () =>
+                    openTab(serverId, {
+                      title: `${p.name} (logs)`,
+                      command: (await api.composeCommand(p, "logs -f --tail 200")).replace(/^docker /, `${docker} `),
+                    })
+                  }
+                >
+                  Logs
+                </Button>
+                <MenuButton size="sm" title="Autres actions" items={() => projectItems(p, file, arrete)} />
+              </div>
+            </header>
+
+            {services.length > 0 ? (
+              <div className="overflow-x-auto">
+                <div className="min-w-[620px]">
+                  <div className={`${SERVICE_GRID} border-b border-line bg-subtle px-4 py-1.5 text-[11px] font-medium text-muted`}>
+                    <span>Service</span>
+                    <span>Image</span>
+                    <span>Ports</span>
+                    <span className="text-right">CPU</span>
+                    <span className="text-right">Mémoire</span>
+                    <span />
+                  </div>
+                  <ul className="flex flex-col divide-y divide-line">
+                    {services.map((c) => {
+                      const running = c.state === "running";
+                      const s = running ? stats[c.id] : undefined;
+                      return (
+                        <li
+                          key={c.id}
+                          className={`group ${SERVICE_GRID} cursor-pointer px-4 py-2 text-[13px] hover:bg-hover-soft ${c.id === selectedId ? "bg-hover-soft" : ""}`}
+                          onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
+                        >
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <StatusDot tone={stateTone(c.state)} className="size-2!" />
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium">{c.composeService ?? c.name}</span>
+                              <span className="block truncate text-[11.5px] text-muted">{c.status}</span>
+                            </span>
+                          </span>
+                          <span className="truncate font-mono text-xs text-fg/80" title={c.image}>
+                            {c.image.split("@")[0]}
+                          </span>
+                          <PortChips
+                            ports={c.ports}
+                            onPortClick={(port, e) =>
+                              portMenu.open(e, [
+                                { heading: `Port ${port.hostPort}` },
+                                ...(port.protocol === "tcp" ? [{ label: "Ouvrir un tunnel depuis mon PC", icon: <Cable size={14} />, onClick: () => void tunnelTo(serverId, c, port.hostPort) }] : []),
+                                ...(isExposed(port) ? [{ label: "Restreindre à 127.0.0.1…", icon: <Lock size={14} />, onClick: () => setRestrict({ project: p, port: port.hostPort }) }] : []),
+                              ])
+                            }
+                          />
+                          <span className="text-right text-xs tabular-nums">{s ? `${s.cpu.toFixed(1)} %` : <span className="text-faint">—</span>}</span>
+                          <span className="truncate text-right text-xs text-muted tabular-nums" title={s?.memUsage}>
+                            {s ? s.memUsage.split(" / ")[0] : <span className="text-faint">—</span>}
+                          </span>
+                          <span className="flex justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+                            <IconButton size="sm" title="Logs en direct" onClick={() => containerActions.logs(c)}>
+                              <ScrollText size={14} />
+                            </IconButton>
+                            {running ? (
+                              <>
+                                <IconButton size="sm" title="Shell dans le conteneur" onClick={() => containerActions.shell(c)}>
+                                  <SquareTerminal size={14} />
+                                </IconButton>
+                                <IconButton size="sm" title="Redémarrer ce service" disabled={!!containerActions.busy} onClick={() => void containerActions.act(c, "restart")}>
+                                  <RotateCw size={14} className={containerActions.busy === c.id ? "animate-spin" : ""} />
+                                </IconButton>
+                              </>
+                            ) : (
+                              <IconButton size="sm" title="Démarrer ce service" disabled={!!containerActions.busy} onClick={() => void containerActions.act(c, "start")}>
+                                <Play size={14} />
+                              </IconButton>
+                            )}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
               </div>
-              <Badge tone={arrete ? "muted" : enMarche === services.length ? "ok" : "warn"}>
-                {services.length > 0 ? `${enMarche}/${services.length} en cours` : p.status}
-              </Badge>
-            </div>
-
-            {/* Les services en liste plutôt qu'en pastilles : on y lit l'état, l'image et les ports. */}
-            <ul className="flex flex-col divide-y divide-border/60">
-              {services.map((c) => (
-                <li key={c.id} className="flex items-center gap-2 px-4 py-2 text-[13px]">
-                  <span className={`size-1.5 shrink-0 rounded-full ${c.state === "running" ? "bg-ok" : "bg-muted"}`} />
-                  <span className="min-w-0 flex-1 truncate">{c.composeService ?? c.name}</span>
-                  <span className="hidden truncate font-mono text-[11px] text-muted sm:block">{c.image.split("@")[0]}</span>
-                  {c.ports.length > 0 && (
-                    <span className="shrink-0 font-mono text-[11px] text-muted">{c.ports.map((x) => `${x.hostPort}→${x.containerPort}`).join(" ")}</span>
-                  )}
-                </li>
-              ))}
-              {services.length === 0 && <li className="px-4 py-2 text-[13px] text-muted">Aucun conteneur en cours pour ce projet.</li>}
-            </ul>
-
-            {/* Deux actions courantes en clair, le reste rangé derrière « … ». */}
-            <div className="mt-auto flex items-center gap-1.5 border-t border-border px-4 py-2.5">
-              <Button
-                size="sm"
-                variant="primary"
-                icon={<Rocket size={12} />}
-                title="Nouvelles images, redémarrage, vérification, et retour à la version précédente si elle échoue"
-                onClick={() => void deployProject(serverId, p)}
-              >
-                Déployer
-              </Button>
-              {arrete ? (
-                <Button size="sm" icon={<Play size={12} />} loading={b("up")} onClick={() => void act(p, "up", "Démarrer (up -d)")}>
-                  Démarrer
-                </Button>
-              ) : (
-                <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>
-                  Redémarrer
-                </Button>
-              )}
-              <Button
-                size="sm"
-                icon={<ScrollText size={12} />}
-                onClick={async () =>
-                  openTab(serverId, {
-                    title: `${p.name} (logs)`,
-                    command: (await api.composeCommand(p, "logs -f --tail 200")).replace(/^docker /, `${docker} `),
-                  })
-                }
-              >
-                Logs
-              </Button>
-              <span className="ml-auto">
-                <MenuButton size="sm" title="Autres actions" items={() => projectItems(p, file, arrete)} />
-              </span>
-            </div>
-          </div>
+            ) : (
+              <p className="px-4 py-3 text-[13px] text-muted">Aucun conteneur pour ce projet : « Démarrer » le lance (up -d).</p>
+            )}
+          </section>
         );
       })}
+      {portMenu.menu}
+      {selected && (
+        <ContainerDrawer
+          key={selected.id}
+          serverId={serverId}
+          container={selected}
+          stats={stats[selected.id]}
+          project={projectOf(selected)}
+          onClose={() => setSelectedId(null)}
+          onAction={(a) => void containerActions.act(selected, a).then((ok) => ok && a === "remove" && setSelectedId(null))}
+          onShell={() => containerActions.shell(selected)}
+          onLogs={() => containerActions.logs(selected)}
+          onTunnel={(port) => void tunnelTo(serverId, selected, port)}
+          onRestrict={(port) => {
+            const project = projectOf(selected);
+            if (project) setRestrict({ project, port });
+          }}
+        />
+      )}
+      {restrict && (
+        <RestrictPortDialog
+          serverId={serverId}
+          project={restrict.project}
+          port={restrict.port}
+          onClose={() => setRestrict(null)}
+          onDone={() => {
+            setRestrict(null);
+            void reload();
+          }}
+        />
+      )}
       {output && (
         <Modal title={output.title} width="max-w-3xl" onClose={() => setOutput(null)}>
           <pre className="max-h-[60vh] overflow-auto rounded-lg border border-border bg-term p-3 font-mono text-xs whitespace-pre-wrap select-text">{output.text}</pre>
@@ -173,4 +274,3 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
     </div>
   );
 }
-

@@ -59,6 +59,8 @@ pub fn desktop_save(store: State<'_, Store>, mut desktop: RemoteDesktop, passwor
     }
     if desktop.id.is_empty() {
         desktop.id = uuid::Uuid::new_v4().to_string();
+    } else if !helm_profiles::valid_id(&desktop.id) {
+        return Err("identifiant de bureau invalide".into());
     }
     let id = desktop.id.clone();
     if let Some(p) = password {
@@ -77,6 +79,18 @@ pub fn desktop_delete(store: State<'_, Store>, tunnels: State<'_, Tunnels>, id: 
     store.write(|d| d.desktops.retain(|x| x.id != id))?;
     secrets::delete_all(&RemoteDesktop::secret_owner(&id));
     Ok(())
+}
+
+/// Bureau enregistré, revérifié avant usage : il a pu arriver par un import d'une version
+/// antérieure, sans passer par [`desktop_save`] (voir [`RemoteDesktop::is_valid`]).
+fn find_desktop(store: &Store, id: &str) -> Result<RemoteDesktop, String> {
+    let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    if !d.is_valid() {
+        return Err(
+            "ce bureau à distance contient des valeurs invalides (identifiant, hôte ou utilisateur) : modifie-le ou supprime-le".into()
+        );
+    }
+    Ok(d)
 }
 
 fn tunnel_id(desktop: &str) -> String {
@@ -117,6 +131,9 @@ fn credentials(store: &Store, d: &RemoteDesktop) -> Result<(String, Option<Strin
         Some(domain) if !user.contains('\\') && !user.contains('@') => format!("{domain}\\{user}"),
         _ => user,
     };
+    // L'utilisateur peut venir d'un identifiant de la banque : une ligne de plus dans le .rdp
+    // ajouterait ses propres options (partage des disques, programme au démarrage…).
+    let user = clean(&user, "utilisateur")?;
     Ok((user, password))
 }
 
@@ -130,7 +147,7 @@ fn free_port() -> Result<u16, String> {
 /// refermé quand la fenêtre RDP se ferme (Windows).
 #[tauri::command]
 pub async fn desktop_launch(app: AppHandle, store: State<'_, Store>, tunnels: State<'_, Tunnels>, id: String) -> Result<String, String> {
-    let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    let d = find_desktop(&store, &id)?;
     if d.protocol == DesktopProtocol::Vnc {
         return Err("les bureaux VNC s'ouvrent dans Helm : utilise « Se connecter »".into());
     }
@@ -194,7 +211,7 @@ pub async fn desktop_session_open(
     bridges: State<'_, crate::rdp_bridge::Bridges>,
     id: String,
 ) -> Result<RdpSession, String> {
-    let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    let d = find_desktop(&store, &id)?;
     if d.protocol != DesktopProtocol::Rdp {
         return Err("ce bureau n'est pas en RDP : il ne s'ouvre pas dans le client RDP intégré".into());
     }
@@ -388,7 +405,7 @@ pub async fn vnc_session_open(
     bridges: State<'_, crate::rdp_bridge::Bridges>,
     id: String,
 ) -> Result<VncSession, String> {
-    let d = store.read(|data| data.desktops.iter().find(|x| x.id == id).cloned()).ok_or("bureau à distance introuvable")?;
+    let d = find_desktop(&store, &id)?;
     if d.protocol != DesktopProtocol::Vnc {
         return Err("ce bureau n'est pas en VNC".into());
     }

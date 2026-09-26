@@ -367,7 +367,7 @@ function ServerDetail({ server, onEdit, moveItems }: { server: ServerView; onEdi
   ];
 
   return (
-    <div className="flex max-w-5xl flex-col gap-5 px-7 py-6">
+    <div className="@container flex flex-col gap-5 px-7 py-6">
       <div className="flex flex-wrap items-center gap-3.5">
         <Avatar name={server.name} color={server.color} size={52} />
         <div className="min-w-0 flex-1">
@@ -407,7 +407,7 @@ function ServerDetail({ server, onEdit, moveItems }: { server: ServerView; onEdi
         />
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3.5">
+      <div className="grid grid-cols-1 gap-3.5 @xl:grid-cols-2">
         <Card className="flex flex-col gap-3">
           <Eyebrow>Connexion</Eyebrow>
           <KeyValue
@@ -459,9 +459,9 @@ function ServerDetail({ server, onEdit, moveItems }: { server: ServerView; onEdi
             <p className="text-[13px] text-muted">{server.connected ? "Mesure en cours…" : "Connecte le serveur pour voir sa santé."}</p>
           )}
         </Card>
-        <Card className="flex flex-col gap-3">
+        <Card className="@container flex flex-col gap-3">
           <Eyebrow>Aller à</Eyebrow>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 @sm:grid-cols-3">
             {jumps.map((j) => (
               <button
                 key={j.section}

@@ -1,9 +1,9 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { Copy, KeyRound, Lock, Trash2 } from "lucide-react";
-import { api, errorMessage, type ComposeProject, type Container, type DeployKey } from "../lib/api";
+import { Copy, KeyRound, Lock, RotateCw, ShieldAlert, Trash2 } from "lucide-react";
+import { api, errorMessage, shellQuote, type ComposeProject, type Container, type DeployKey, type SudoRisk } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useApp, useAppPick } from "../lib/store";
-import { Button, Field, IconButton, Input, Modal } from "./ui";
+import { Button, CodeBlock, Field, IconButton, Input, Modal } from "./ui";
 import { useMonacoTheme } from "../lib/theme";
 
 const DiffView = lazy(() => import("./DiffView"));
@@ -119,11 +119,19 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
   const [keys, setKeys] = useState<string[]>([]);
   const [created, setCreated] = useState<DeployKey | null>(null);
   const [busy, setBusy] = useState(false);
+  const [risk, setRisk] = useState<SudoRisk | null>(null);
+  const checkRisk = () => void api.deploySudoRisk(serverId, project).then(setRisk, () => setRisk(null));
 
   useEffect(() => {
     void api.deploySuggestHost(serverId, project.name).then((h) => setHost(h ?? ""), () => {});
     void api.deployKeys(serverId).then(setKeys, () => {});
+    checkRisk();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId, project.name]);
+
+  // La règle sudo ne crée un chemin vers root que si le compte n'y a pas déjà accès (root, groupe
+  // docker) et peut modifier les fichiers du projet.
+  const escalates = !!risk && !risk.root && !risk.dockerGroup && risk.writable.length > 0;
 
   const copy = (t: string, what: string) => {
     void writeClipboard(t);
@@ -131,6 +139,16 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
   };
 
   const create = async () => {
+    if (
+      escalates &&
+      !(await ask({
+        title: "Créer la clé malgré le risque ?",
+        body: "Quiconque prend le contrôle de ce compte SSH pourra devenir root sur le serveur sans mot de passe, en modifiant les fichiers du projet listés.",
+        confirmLabel: "Créer quand même",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     try {
       setCreated(await api.deployKeyCreate(serverId, project, host || null));
@@ -154,6 +172,30 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
           <p className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
             À savoir : le déploiement tourne en root et démarre les images que ton dépôt désigne. Quiconque peut modifier le dépôt (ou ses secrets GitHub) peut donc faire tourner du code sur ce serveur. Protège la branche déployée, limite les collaborateurs, et régénère la clé si un accès est compromis.
           </p>
+          {escalates && risk && (
+            <div className="flex flex-col gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2.5 text-xs">
+              <p className="flex items-start gap-2 text-danger">
+                <ShieldAlert size={15} className="mt-px shrink-0" />
+                <span>
+                  <strong>Cette clé donnerait root au compte SSH.</strong> Pour que GitHub puisse déployer, Helm autorise ce compte à lancer le déploiement en root
+                  sans mot de passe. Or il peut modifier les fichiers du projet : il suffirait d'y ajouter un volume <span className="font-mono">/:/host</span> pour
+                  prendre la main sur tout le serveur. Quiconque obtient ce compte (mot de passe volé, clé SSH copiée) deviendrait donc root.
+                </span>
+              </p>
+              <ul className="ml-6 list-disc font-mono text-[11px] text-fg/80">
+                {risk.writable.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+              <p className="text-muted">Pour supprimer ce risque, rends ces éléments modifiables par root seulement (les données du projet ne sont pas touchées), puis revérifie :</p>
+              <CodeBlock code={`sudo chown root:root ${risk.writable.map(shellQuote).join(" ")} && sudo chmod go-w ${risk.writable.map(shellQuote).join(" ")}`} />
+              <div>
+                <Button size="sm" icon={<RotateCw size={12} />} onClick={checkRisk}>
+                  Revérifier
+                </Button>
+              </div>
+            </div>
+          )}
           <Field label="Domaine à vérifier après déploiement (optionnel)" hint="Le déploiement est annulé si ce site ne répond pas en 2xx/3xx.">
             <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="app.mondomaine.fr" />
           </Field>

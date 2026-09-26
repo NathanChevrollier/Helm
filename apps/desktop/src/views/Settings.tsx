@@ -18,7 +18,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
-import { api, errorMessage, importMessage, type AuditEntry, type McpConfig } from "../lib/api";
+import { api, errorMessage, importHasWarnings, importMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useAppPick } from "../lib/store";
 import { useTabIntent } from "../lib/shell";
 import { hashPassword, useLock } from "../lib/lock";
@@ -597,7 +597,7 @@ function ExportImport() {
       }
       const r = await api.settingsImport(path, password);
       await refreshServers();
-      notify(importMessage(r), r.duplicated || r.hostKeysKept ? "info" : "success");
+      notify(importMessage(r), importHasWarnings(r) ? "info" : "success");
     } catch (e) {
       notify(errorMessage(e), "error");
     }

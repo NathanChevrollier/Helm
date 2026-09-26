@@ -123,6 +123,14 @@ pub struct ImportSummary {
     pub duplicated: usize,
     /// Empreintes de clé d'hôte reçues qui contredisaient une empreinte déjà approuvée : ignorées.
     pub host_keys_kept: usize,
+    /// Bureaux à distance et registres reçus avec l'identifiant d'un élément existant mais une
+    /// autre adresse : ajoutés à côté, pour la même raison que `duplicated`.
+    pub duplicated_other: usize,
+    /// Liens vers un de tes identifiants (banque) retirés : le contenu reçu s'en servait sans en
+    /// fournir le secret, donc avec ton mot de passe, vers une adresse que tu n'avais pas.
+    pub identity_links_removed: usize,
+    /// Bureaux à distance ou registres reçus invalides (identifiant, adresse…) : ignorés.
+    pub rejected: usize,
 }
 
 fn key(password: &str, salt: &[u8], iterations: u32) -> Result<LessSafeKey, String> {
@@ -272,7 +280,10 @@ pub(crate) fn open(text: &str, password: &str) -> Result<Payload, String> {
 ///   dans le coffre) vers l'adresse reçue à la connexion suivante.
 pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary, String> {
     let mut p = open(text, password)?;
+    let rejected = drop_invalid(&mut p);
     let duplicated = store.read(|d| rekey_conflicting_servers(&mut p, &d.servers));
+    let duplicated_other = store.read(|d| rekey_conflicting_others(&mut p, &d.desktops, &d.registries));
+    let identity_links_removed = store.read(|d| protect_identities(&mut p, d));
     let host_keys_kept = store.read(|d| p.known_hosts.iter().filter(|(k, v)| d.known_hosts.get(*k).is_some_and(|mine| mine != *v)).count());
     let summary = ImportSummary {
         servers: p.servers.len(),
@@ -282,6 +293,9 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
         secrets: p.secrets.values().map(BTreeMap::len).sum(),
         duplicated,
         host_keys_kept,
+        duplicated_other,
+        identity_links_removed,
+        rejected,
     };
     store.write(|d| {
         fn merge<T>(into: &mut Vec<T>, from: Vec<T>, id: impl Fn(&T) -> &str) {
@@ -349,6 +363,90 @@ fn rekey_conflicting_servers(p: &mut Payload, existing: &[ServerProfile]) -> usi
     renamed.len()
 }
 
+/// Écarte les bureaux à distance et registres reçus qui ne passeraient pas le formulaire de l'app
+/// (voir [`RemoteDesktop::is_valid`]), avec leurs secrets. Renvoie le nombre d'éléments écartés.
+fn drop_invalid(p: &mut Payload) -> usize {
+    let mut dropped: Vec<String> = p.desktops.iter().filter(|r| !r.is_valid()).map(|r| RemoteDesktop::secret_owner(&r.id)).collect();
+    p.desktops.retain(RemoteDesktop::is_valid);
+    if let Some(list) = p.registries.as_mut() {
+        dropped.extend(list.iter().filter(|r| !r.is_valid()).map(|r| Registry::secret_owner(&r.id)));
+        list.retain(Registry::is_valid);
+    }
+    for owner in &dropped {
+        p.secrets.remove(owner);
+    }
+    dropped.len()
+}
+
+/// Même règle que [`rekey_conflicting_servers`] pour les bureaux à distance et les registres : leur
+/// mot de passe ou jeton est rangé sous leur identifiant, et remplacer l'existant l'enverrait vers
+/// l'adresse reçue à la prochaine ouverture (ou au prochain `docker login`).
+fn rekey_conflicting_others(p: &mut Payload, desktops: &[RemoteDesktop], registries: &[Registry]) -> usize {
+    let mut count = 0;
+    for r in &mut p.desktops {
+        let moved = desktops
+            .iter()
+            .any(|e| e.id == r.id && !(e.host.eq_ignore_ascii_case(&r.host) && e.port == r.port && e.username == r.username));
+        if moved {
+            let new_id = fresh_id();
+            if let Some(s) = p.secrets.remove(&RemoteDesktop::secret_owner(&r.id)) {
+                p.secrets.insert(RemoteDesktop::secret_owner(&new_id), s);
+            }
+            r.id = new_id;
+            count += 1;
+        }
+    }
+    for r in p.registries.iter_mut().flatten() {
+        let moved = registries.iter().any(|e| e.id == r.id && !(e.server.eq_ignore_ascii_case(&r.server) && e.username == r.username));
+        if moved {
+            let new_id = fresh_id();
+            if let Some(s) = p.secrets.remove(&Registry::secret_owner(&r.id)) {
+                p.secrets.insert(Registry::secret_owner(&new_id), s);
+            }
+            r.id = new_id;
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Un identifiant de la banque porte un utilisateur et un mot de passe, sans adresse : ce sont
+/// les serveurs et bureaux qui le référencent qui décident où ce mot de passe part. Un contenu
+/// reçu qui référence un de TES identifiants sans en fournir le secret utiliserait donc ton mot de
+/// passe vers ses adresses à lui. Dans ce cas :
+/// - l'identifiant local n'est pas modifié (le reçu est ignoré) ;
+/// - le lien est retiré, sauf s'il existait déjà à l'identique chez toi (réimport du même serveur).
+///
+/// Renvoie le nombre de liens retirés.
+fn protect_identities(p: &mut Payload, d: &crate::Data) -> usize {
+    let carried = |id: &str, p: &Payload| p.secrets.contains_key(&Identity::secret_owner(id));
+    let borrowed: Vec<String> = d.identities.iter().map(|i| i.id.clone()).filter(|id| !carried(id, p)).collect();
+    p.identities.retain(|i| !borrowed.contains(&i.id));
+
+    let mut removed = 0;
+    for s in &mut p.servers {
+        let Some(id) = s.identity_id.clone().filter(|id| borrowed.contains(id)) else { continue };
+        let known = d.servers.iter().any(|e| {
+            e.id == s.id && e.identity_id.as_deref() == Some(id.as_str()) && e.host.eq_ignore_ascii_case(&s.host) && e.port == s.port
+        });
+        if !known {
+            s.identity_id = None;
+            removed += 1;
+        }
+    }
+    for r in &mut p.desktops {
+        let Some(id) = r.identity_id.clone().filter(|id| borrowed.contains(id)) else { continue };
+        let known = d.desktops.iter().any(|e| {
+            e.id == r.id && e.identity_id.as_deref() == Some(id.as_str()) && e.host.eq_ignore_ascii_case(&r.host) && e.port == r.port
+        });
+        if !known {
+            r.identity_id = None;
+            removed += 1;
+        }
+    }
+    removed
+}
+
 /// Identifiant aléatoire au format UUID v4, comme ceux créés par l'app.
 fn fresh_id() -> String {
     use ring::rand::SecureRandom;
@@ -363,7 +461,7 @@ fn fresh_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AuthKind;
+    use crate::{AuthKind, Data};
 
     fn store_with_server(dir: &std::path::Path) -> Store {
         let s = Store::open(dir);
@@ -480,5 +578,117 @@ mod tests {
         let copy = hosts.iter().find(|(_, h)| h == "attaquant.example").unwrap();
         assert_ne!(copy.0, "a");
         assert_eq!(tunnel_owner, copy.0, "les références suivent le nouvel identifiant");
+    }
+
+    fn desktop(id: &str, host: &str, username: &str) -> RemoteDesktop {
+        serde_json::from_value(serde_json::json!({ "id": id, "name": "Bureau", "host": host, "username": username })).unwrap()
+    }
+
+    fn registry(id: &str, server: &str) -> Registry {
+        serde_json::from_value(serde_json::json!({ "id": id, "name": "Registre", "kind": "custom", "server": server, "username": "bob" }))
+            .unwrap()
+    }
+
+    /// Contenu reçu, en clair (sans secrets) : ce que produirait un partage piégé.
+    fn received(fill: impl FnOnce(&mut Data)) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let source = Store::open(dir.path());
+        source.write(fill).unwrap();
+        export(&source, "", false).unwrap()
+    }
+
+    #[test]
+    fn import_does_not_redirect_a_desktop_or_registry() {
+        let b = tempfile::tempdir().unwrap();
+        let target = Store::open(b.path());
+        target
+            .write(|d| {
+                d.desktops.push(desktop("d1", "bureau.lan", "alice"));
+                d.registries.push(registry("r1", "registry.exemple.fr"));
+            })
+            .unwrap();
+        let text = received(|d| {
+            d.desktops.push(desktop("d1", "attaquant.example", "alice"));
+            d.registries.push(registry("r1", "attaquant.example"));
+        });
+        let summary = import(&target, &text, "").unwrap();
+        assert_eq!(summary.duplicated_other, 2);
+        target.read(|d| {
+            assert!(d.desktops.iter().any(|r| r.id == "d1" && r.host == "bureau.lan"), "le bureau existant garde son adresse");
+            assert!(d.desktops.iter().any(|r| r.id != "d1" && r.host == "attaquant.example"));
+            assert!(d.registries.iter().any(|r| r.id == "r1" && r.server == "registry.exemple.fr"), "le registre existant aussi");
+            assert!(d.registries.iter().any(|r| r.id != "r1" && r.server == "attaquant.example"));
+        });
+    }
+
+    #[test]
+    fn import_does_not_lend_my_identity() {
+        let b = tempfile::tempdir().unwrap();
+        let target = store_with_server(b.path());
+        let mine = Identity {
+            id: "moi".into(),
+            name: "root du VPS".into(),
+            username: "root".into(),
+            auth_kind: AuthKind::Password,
+            key_path: None,
+        };
+        target.write(|d| d.identities.push(mine.clone())).unwrap();
+        // Un serveur de l'attaquant qui se sert de mon identifiant, et une copie modifiée de celui-ci.
+        let text = received(|d| {
+            d.identities.push(Identity { username: "autre".into(), ..mine.clone() });
+            d.servers.push(ServerProfile {
+                id: "x".into(),
+                name: "piège".into(),
+                host: "attaquant.example".into(),
+                port: 22,
+                username: "root".into(),
+                auth_kind: AuthKind::Password,
+                key_path: None,
+                color: None,
+                group: None,
+                ai_access: false,
+                jump_id: None,
+                identity_id: Some("moi".into()),
+            });
+        });
+        let summary = import(&target, &text, "").unwrap();
+        assert_eq!(summary.identity_links_removed, 1);
+        target.read(|d| {
+            assert_eq!(d.servers.iter().find(|s| s.id == "x").unwrap().identity_id, None, "le lien vers mon identifiant est retiré");
+            assert_eq!(d.identities.iter().find(|i| i.id == "moi").unwrap().username, "root", "mon identifiant n'est pas modifié");
+        });
+    }
+
+    #[test]
+    fn import_keeps_my_own_identity_link_on_reimport() {
+        let b = tempfile::tempdir().unwrap();
+        let target = store_with_server(b.path());
+        let mine =
+            Identity { id: "moi".into(), name: "root".into(), username: "root".into(), auth_kind: AuthKind::Password, key_path: None };
+        target
+            .write(|d| {
+                d.identities.push(mine.clone());
+                d.servers[0].identity_id = Some("moi".into());
+            })
+            .unwrap();
+        let text = export(&target, "", false).unwrap();
+        let summary = import(&target, &text, "").unwrap();
+        assert_eq!(summary.identity_links_removed, 0);
+        assert_eq!(target.read(|d| d.servers[0].identity_id.clone()), Some("moi".into()));
+    }
+
+    #[test]
+    fn import_rejects_desktops_that_would_escape_or_inject() {
+        let b = tempfile::tempdir().unwrap();
+        let target = Store::open(b.path());
+        let text = received(|d| {
+            d.desktops.push(desktop(r"..\..\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\x", "h", "u"));
+            d.desktops.push(desktop("d2", "h", "u\r\ndrivestoredirect:s:*"));
+            d.desktops.push(desktop("d3", "bureau.lan", "alice"));
+            d.registries.push(registry("r2", "x; rm -rf /"));
+        });
+        let summary = import(&target, &text, "").unwrap();
+        assert_eq!(summary.rejected, 3);
+        assert_eq!(target.read(|d| d.desktops.iter().map(|r| r.id.clone()).collect::<Vec<_>>()), vec!["d3".to_string()]);
     }
 }
