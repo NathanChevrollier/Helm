@@ -4,14 +4,11 @@ import { api } from "./lib/api";
 import { useApp, useAppPick } from "./lib/store";
 import type { SectionId } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
-import CommandPalette from "./components/CommandPalette";
 import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
-import GuideDialog from "./components/GuideDialog";
 import Sidebar from "./components/shell/Sidebar";
 import Topbar from "./components/shell/Topbar";
 import StatusBar from "./components/shell/StatusBar";
-import ShortcutsHelp from "./components/shell/ShortcutsHelp";
 import { useRdp } from "./lib/rdp";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
@@ -24,8 +21,13 @@ import { useAssistant } from "./lib/assistant";
 import { useShell } from "./lib/shell";
 import { fetchHealth } from "./lib/health";
 import { usePolling } from "./lib/poll";
-import AssistantPanel from "./components/AssistantPanel";
-import HomeView from "./views/Home";
+
+// Fenêtres et panneaux ouverts à la demande : chargés à leur première ouverture, pas au démarrage.
+const CommandPalette = lazy(() => import("./components/CommandPalette"));
+const AssistantPanel = lazy(() => import("./components/AssistantPanel"));
+const GuideDialog = lazy(() => import("./components/GuideDialog"));
+const ShortcutsHelp = lazy(() => import("./components/shell/ShortcutsHelp"));
+const HomeView = lazy(() => import("./views/Home"));
 
 // Chargé à part : xterm pèse un tiers de l'app et n'est pas nécessaire pour afficher l'accueil.
 const TerminalView = lazy(() => import("./views/Terminal"));
@@ -54,13 +56,28 @@ export default function App() {
   const [version, setVersion] = useState<string>();
   const paletteOpen = useShell((s) => s.paletteOpen);
   const View = VIEWS[section];
+  // Le terminal n'est monté qu'une fois utile (onglets restaurés, ou première visite) ; ensuite il
+  // reste monté pour ne pas couper les sessions quand on change de section.
+  const hasTabs = useApp((s) => s.tabs.length > 0);
+  const [terminalMounted, setTerminalMounted] = useState(false);
+  useEffect(() => {
+    if (hydrated && (hasTabs || section === "terminal")) setTerminalMounted(true);
+  }, [hydrated, hasTabs, section]);
+  const guideDialogOpen = useApp((s) => !!s.guide && !s.guideInPage);
+  const shortcutsOpen = useShell((s) => s.shortcutsOpen);
   const rdpOuvert = useRdp((s) => s.desktop !== null);
   const rdpVnc = useRdp((s) => s.desktop?.protocol === "vnc");
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(undefined));
     // Profils d'abord (les onglets restaurés en dépendent), puis l'espace de travail sauvegardé.
-    void refreshServers().then(hydrate);
+    // Les deux lectures partent en même temps ; seule leur application suit cet ordre.
+    const saved = api.uiStateGet();
+    saved.catch(() => {}); // erreur traitée par hydrate
+
+    void refreshServers()
+      .catch(() => {})
+      .then(() => hydrate(saved));
     // Fichier de configuration illisible au démarrage : on prévient au lieu de repartir de zéro en silence.
     void api.storeWarning().then((w) => {
       if (w) void useApp.getState().ask({ title: "Configuration récupérée", body: w, confirmLabel: "Compris" });
@@ -74,6 +91,22 @@ export default function App() {
     return watchInactivity(() => useApp.getState().settings.lockMinutes);
   }, []);
   useEffect(() => watchAlerts(), []);
+  // Une fois l'app affichée et au repos, précharge les écrans les plus ouverts : leur première
+  // ouverture devient instantanée sans alourdir le démarrage.
+  useEffect(() => {
+    if (!hydrated) return;
+    const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 1500));
+    const id = window.setTimeout(
+      () =>
+        idle(() => {
+          for (const load of [() => import("./views/Terminal"), () => import("./views/Servers"), () => import("./views/Home"), () => import("./components/CommandPalette")]) {
+            void load().catch(() => {});
+          }
+        }),
+      2000,
+    );
+    return () => window.clearTimeout(id);
+  }, [hydrated]);
   // Réglages partagés avec les autres PC (si la synchronisation est configurée).
   useEffect(() => (hydrated ? watchSync() : undefined), [hydrated]);
   // Nouvelle version sur GitHub : vérifiée quelques secondes après le démarrage (pas en dev).
@@ -145,14 +178,18 @@ export default function App() {
             {hydrated && (
               <>
                 {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
-                <div className={`absolute inset-0 ${section === "terminal" ? "" : "invisible"}`}>
-                  <Suspense fallback={null}>
-                    <TerminalView visible={section === "terminal"} />
-                  </Suspense>
-                </div>
+                {terminalMounted && (
+                  <div className={`absolute inset-0 ${section === "terminal" ? "" : "invisible"}`}>
+                    <Suspense fallback={null}>
+                      <TerminalView visible={section === "terminal"} />
+                    </Suspense>
+                  </div>
+                )}
                 {section === "home" && (
                   <div className="absolute inset-0 bg-bg">
-                    <HomeView visible />
+                    <Suspense fallback={null}>
+                      <HomeView visible />
+                    </Suspense>
                   </div>
                 )}
                 {View && (
@@ -165,7 +202,11 @@ export default function App() {
               </>
             )}
           </div>
-          {assistantOpen && <AssistantPanel />}
+          {assistantOpen && (
+            <Suspense fallback={null}>
+              <AssistantPanel />
+            </Suspense>
+          )}
           {rdpOuvert && (
             <Suspense fallback={null}>
               {rdpVnc ? <VncSession /> : <RemoteDesktopSession />}
@@ -175,9 +216,11 @@ export default function App() {
         <StatusBar />
       </div>
 
-      {paletteOpen && <CommandPalette onClose={() => useShell.getState().closePalette()} />}
-      <ShortcutsHelp />
-      <GuideDialog />
+      <Suspense fallback={null}>
+        {paletteOpen && <CommandPalette onClose={() => useShell.getState().closePalette()} />}
+        {shortcutsOpen && <ShortcutsHelp />}
+        {guideDialogOpen && <GuideDialog />}
+      </Suspense>
       <ConnectionDoctor />
       <DialogHost />
       <Toasts />

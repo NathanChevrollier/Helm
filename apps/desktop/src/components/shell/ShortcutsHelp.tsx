@@ -1,6 +1,5 @@
 // Aide-mémoire des raccourcis : ceux de l'app (modifiables) et ceux, fixes, des pages.
-import { useApp } from "../../lib/store";
-import { useShell } from "../../lib/shell";
+import { navigate, useShell } from "../../lib/shell";
 import { display, SHORTCUTS, shortcutOf, type ShortcutId } from "../../lib/shortcuts";
 import { Button, Kbd, Modal } from "../ui";
 
@@ -18,12 +17,11 @@ const FIXED: [string, string][] = [
 export default function ShortcutsHelp() {
   const open = useShell((s) => s.shortcutsOpen);
   const setOpen = useShell((s) => s.setShortcutsOpen);
-  const setSection = useApp((s) => s.setSection);
   if (!open) return null;
   return (
     <Modal
       title="Raccourcis clavier"
-      description="Ceux de la première liste se changent dans Réglages → Raccourcis clavier."
+      description="Ceux de la première liste se changent dans Réglages → Raccourcis."
       width="max-w-2xl"
       onClose={() => setOpen(false)}
       footer={
@@ -31,7 +29,7 @@ export default function ShortcutsHelp() {
           variant="ghost"
           onClick={() => {
             setOpen(false);
-            setSection("settings");
+            navigate("settings", "shortcuts");
           }}
         >
           Modifier les raccourcis

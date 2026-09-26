@@ -119,7 +119,8 @@ const NO_FOLDERS: Folders = { servers: [], containers: {}, containerFolders: {},
 
 interface State {
   hydrated: boolean;
-  hydrate: () => Promise<void>;
+  /** `saved` : lecture de l'état déjà lancée (en parallèle de la liste des serveurs, au démarrage). */
+  hydrate: (saved?: Promise<unknown>) => Promise<void>;
 
   section: SectionId;
   setSection: (s: SectionId) => void;
@@ -203,9 +204,9 @@ function readActiveServer(): string | null {
 
 export const useApp = create<State>((set, get) => ({
   hydrated: false,
-  hydrate: async () => {
+  hydrate: async (saved) => {
     try {
-      const raw = (await api.uiStateGet()) as Partial<Persisted> | null;
+      const raw = (await (saved ?? api.uiStateGet())) as Partial<Persisted> | null;
       if (raw && raw.v === 1) {
         set({
           section: raw.section ?? "servers",
