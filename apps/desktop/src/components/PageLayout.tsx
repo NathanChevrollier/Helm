@@ -113,7 +113,3 @@ export default function PageLayout<T extends string>({
   );
 }
 
-/** Contenu standard d'une page qui défile : marges et espacement vertical communs. */
-export function PageBody({ children, className = "", max }: { children: ReactNode; className?: string; max?: string }) {
-  return <div className={`flex flex-col gap-5 px-7 py-5 ${max ?? ""} ${className}`}>{children}</div>;
-}

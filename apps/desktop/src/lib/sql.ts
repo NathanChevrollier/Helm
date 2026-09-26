@@ -15,7 +15,7 @@ const WRITE_WORDS = new Set([
  * `$$…$$`. Ni `#` ni l'antislash ne sont interprétés (leur sens dépend du moteur) : dans le doute,
  * on garde du texte, ce qui ne peut que faire demander une confirmation de trop.
  */
-export function sqlSkeleton(sql: string): string {
+function sqlSkeleton(sql: string): string {
   let out = "";
   let i = 0;
   while (i < sql.length) {

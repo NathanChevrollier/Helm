@@ -84,7 +84,7 @@ export function LabeledMeter({ label, value, detail }: { label: ReactNode; value
 }
 
 /** Mini-courbe sans axes : une tendance, pas une mesure. */
-export function Sparkline({ values, tone = "accent", width = 84, height = 28, max }: { values: number[]; tone?: Tone; width?: number; height?: number; max?: number }) {
+function Sparkline({ values, tone = "accent", width = 84, height = 28, max }: { values: number[]; tone?: Tone; width?: number; height?: number; max?: number }) {
   if (values.length < 2) return <svg width={width} height={height} aria-hidden />;
   const hi = max ?? Math.max(...values, 1);
   const step = width / (values.length - 1);
@@ -182,7 +182,7 @@ export function ColorPicker({ value, onChange, colors = PROFILE_COLORS }: { valu
 }
 
 /** « prod-01 » → « P1 », « web-02 » → « W2 », « staging » → « ST », « Mon VPS » → « MV ». */
-export function initialsOf(name: string): string {
+function initialsOf(name: string): string {
   const words = name.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(" ").filter(Boolean);
   if (words.length === 0) return "?";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();

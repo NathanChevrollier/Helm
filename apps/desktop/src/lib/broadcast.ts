@@ -4,7 +4,7 @@ import { api } from "./api";
 import { useApp } from "./store";
 
 /** Commandes qui demandent une confirmation avant d'être validées sur plusieurs terminaux. */
-export const DANGEROUS =
+const DANGEROUS =
   /(^|[\s;&|])(rm\s+-[a-z]*(rf|fr)[a-z]*|mkfs(\.\w+)?|dd\s+if=|shutdown|reboot|poweroff|halt|init\s+[06]|systemctl\s+(stop|disable|poweroff|reboot|halt)|docker\s+(rm|rmi|system\s+prune|volume\s+(rm|prune))|chmod\s+-R\s+777|chown\s+-R|:\(\)\s*\{|>\s*\/dev\/sd|userdel|apt(-get)?\s+(remove|purge))/i;
 
 interface Pane {

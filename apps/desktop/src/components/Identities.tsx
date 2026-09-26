@@ -148,7 +148,7 @@ export function IdentitiesPanel({ creating, onCreatingChange }: { creating: bool
   );
 }
 
-export function IdentityForm({ identity, onClose, onSaved }: { identity: IdentityView | null; onClose: () => void; onSaved: (id: string) => void }) {
+function IdentityForm({ identity, onClose, onSaved }: { identity: IdentityView | null; onClose: () => void; onSaved: (id: string) => void }) {
   const notify = useApp((s) => s.notify);
   const [p, setP] = useState<Identity>(identity ? { id: identity.id, name: identity.name, username: identity.username, authKind: identity.authKind, keyPath: identity.keyPath } : { id: "", name: "", username: "root", authKind: "password", keyPath: null });
   const [password, setPassword] = useState("");

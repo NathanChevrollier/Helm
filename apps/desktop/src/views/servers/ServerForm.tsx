@@ -8,7 +8,7 @@ import { useApp } from "../../lib/store";
 import { AUTH_LABELS, filterIdentities, IdentitySuggestions, useIdentities } from "../../components/Identities";
 import { Button, Checkbox, ColorPicker, Drawer, Eyebrow, Field, Input, PROFILE_COLORS, Segmented, Select } from "../../components/ui";
 
-export function emptyProfile(): ServerProfile {
+function emptyProfile(): ServerProfile {
   return { id: "", name: "", host: "", port: 22, username: "root", authKind: "password", keyPath: null, color: PROFILE_COLORS[0], group: null };
 }
 

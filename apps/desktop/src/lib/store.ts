@@ -185,7 +185,7 @@ interface State {
 const ACTIVE_SERVER_KEY = "helm.activeServer";
 let toastSeq = 0;
 
-export function newId(): string {
+function newId(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
 }
 

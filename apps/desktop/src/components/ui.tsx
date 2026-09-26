@@ -5,4 +5,4 @@ export * from "./kit/base";
 export * from "./kit/feedback";
 export * from "./kit/display";
 export * from "./kit/table";
-export { ContextMenu, MenuButton, useContextMenu, type MenuItem } from "./ContextMenu";
+export { MenuButton, useContextMenu, type MenuItem } from "./ContextMenu";

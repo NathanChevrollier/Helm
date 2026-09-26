@@ -244,19 +244,3 @@ export function DataTable<T>({
   );
 }
 
-/** Titre de groupe d'un `DataTable` (dossier, projet compose…). */
-export function GroupHeader({ children, right, collapsed, onToggle }: { children: ReactNode; right?: ReactNode; collapsed?: boolean; onToggle?: () => void }) {
-  return (
-    <div className="flex h-8 items-center gap-2 border-b border-line bg-subtle px-3 text-xs text-muted">
-      {onToggle ? (
-        <button type="button" onClick={onToggle} aria-expanded={!collapsed} className={`flex min-w-0 items-center gap-2 rounded ${FOCUS_RING}`}>
-          <span className={`inline-block transition-transform ${collapsed ? "-rotate-90" : ""}`}>▾</span>
-          {children}
-        </button>
-      ) : (
-        <span className="flex min-w-0 items-center gap-2">{children}</span>
-      )}
-      {right && <span className="ml-auto flex shrink-0 items-center gap-2">{right}</span>}
-    </div>
-  );
-}

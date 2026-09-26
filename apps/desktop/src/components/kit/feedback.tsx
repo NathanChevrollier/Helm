@@ -16,7 +16,7 @@ function onEscape(e: KeyboardEvent) {
 }
 
 /** Ferme sur Échap, seulement si cette fenêtre est au-dessus des autres. */
-export function useEscape(onClose: () => void) {
+function useEscape(onClose: () => void) {
   const ref = useRef(onClose);
   ref.current = onClose;
   useEffect(() => {
@@ -242,7 +242,7 @@ export function Skeleton({ rows = 3, className = "", height = "h-9" }: { rows?: 
 }
 
 /** Vrai seulement si la condition dure : évite de faire clignoter un squelette sur 80 ms. */
-export function useDelayed(active: boolean, delay = 150): boolean {
+function useDelayed(active: boolean, delay = 150): boolean {
   const [shown, setShown] = useState(false);
   useEffect(() => {
     if (!active) return setShown(false);

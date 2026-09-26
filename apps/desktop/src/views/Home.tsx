@@ -503,7 +503,7 @@ const ACTIONS: Record<string, string> = {
   "timer.run": "Tâche planifiée lancée",
 };
 
-export function actionLabel(action: string): string {
+function actionLabel(action: string): string {
   const l = ACTIONS[action] ?? action.replace(/[._]/g, " ");
   return l.charAt(0).toUpperCase() + l.slice(1);
 }

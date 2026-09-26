@@ -606,5 +606,3 @@ export const GUIDES: Guide[] = [
 
 export const guideOf = (id: GuideId): Guide | undefined => GUIDES.find((g) => g.id === id);
 
-/** Fiche correspondant à une section, pour le « ? » du bandeau de page. */
-export const guideForSection = (section: SectionId): Guide | undefined => GUIDES.find((g) => g.section === section);
