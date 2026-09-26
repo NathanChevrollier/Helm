@@ -118,6 +118,11 @@ pub struct ImportSummary {
     pub snippets: usize,
     pub tunnels: usize,
     pub secrets: usize,
+    /// Serveurs reçus avec l'identifiant d'un serveur existant mais une autre adresse : importés
+    /// comme nouveaux serveurs plutôt que de rediriger l'existant (et ses secrets) ailleurs.
+    pub duplicated: usize,
+    /// Empreintes de clé d'hôte reçues qui contredisaient une empreinte déjà approuvée : ignorées.
+    pub host_keys_kept: usize,
 }
 
 fn key(password: &str, salt: &[u8], iterations: u32) -> Result<LessSafeKey, String> {
@@ -258,14 +263,25 @@ pub(crate) fn open(text: &str, password: &str) -> Result<Payload, String> {
 
 /// Fusionne un export dans la configuration : un élément de même identifiant est remplacé,
 /// les autres sont ajoutés. Rien n'est supprimé.
+///
+/// Un fichier ou un code de partage vient potentiellement de quelqu'un d'autre, d'où deux règles :
+/// - une empreinte de clé d'hôte déjà approuvée n'est jamais remplacée (sinon un partage piégé
+///   ferait accepter la clé d'un serveur intercepté) ;
+/// - un serveur reçu avec l'identifiant d'un serveur existant mais une autre adresse devient un
+///   nouveau serveur : remplacer l'existant enverrait ses mots de passe (rangés par identifiant
+///   dans le coffre) vers l'adresse reçue à la connexion suivante.
 pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary, String> {
-    let p = open(text, password)?;
+    let mut p = open(text, password)?;
+    let duplicated = store.read(|d| rekey_conflicting_servers(&mut p, &d.servers));
+    let host_keys_kept = store.read(|d| p.known_hosts.iter().filter(|(k, v)| d.known_hosts.get(*k).is_some_and(|mine| mine != *v)).count());
     let summary = ImportSummary {
         servers: p.servers.len(),
         identities: p.identities.len(),
         snippets: p.snippets.len(),
         tunnels: p.tunnels.len(),
         secrets: p.secrets.values().map(BTreeMap::len).sum(),
+        duplicated,
+        host_keys_kept,
     };
     store.write(|d| {
         fn merge<T>(into: &mut Vec<T>, from: Vec<T>, id: impl Fn(&T) -> &str) {
@@ -287,10 +303,60 @@ pub fn import(store: &Store, text: &str, password: &str) -> Result<ImportSummary
                 d.ignored_findings.push(item);
             }
         }
-        d.known_hosts.extend(p.known_hosts);
+        for (host, fingerprint) in p.known_hosts {
+            d.known_hosts.entry(host).or_insert(fingerprint);
+        }
     })?;
     store_secrets(&p.secrets)?;
     Ok(summary)
+}
+
+/// Donne un nouvel identifiant à chaque serveur reçu qui porte celui d'un serveur existant avec
+/// une autre adresse (hôte, port ou utilisateur), et reporte ce changement partout où l'identifiant
+/// sert de référence dans le contenu reçu. Renvoie le nombre de serveurs concernés.
+fn rekey_conflicting_servers(p: &mut Payload, existing: &[ServerProfile]) -> usize {
+    let same_target = |a: &ServerProfile, b: &ServerProfile| a.host.eq_ignore_ascii_case(&b.host) && a.port == b.port && a.username == b.username;
+    let mut renamed: Vec<(String, String)> = Vec::new();
+    for s in &mut p.servers {
+        if existing.iter().any(|e| e.id == s.id && !same_target(e, s)) {
+            let new_id = fresh_id();
+            renamed.push((std::mem::replace(&mut s.id, new_id.clone()), new_id));
+        }
+    }
+    for (old, new) in &renamed {
+        let swap = |r: &mut Option<String>| {
+            if r.as_deref() == Some(old.as_str()) {
+                *r = Some(new.clone());
+            }
+        };
+        for s in &mut p.servers {
+            swap(&mut s.jump_id);
+        }
+        for d in &mut p.desktops {
+            swap(&mut d.via_server_id);
+        }
+        for t in p.tunnels.iter_mut().filter(|t| &t.server_id == old) {
+            t.server_id = new.clone();
+        }
+        for f in p.ignored_findings.iter_mut().filter(|f| &f.server_id == old) {
+            f.server_id = new.clone();
+        }
+        if let Some(secrets) = p.secrets.remove(old) {
+            p.secrets.insert(new.clone(), secrets);
+        }
+    }
+    renamed.len()
+}
+
+/// Identifiant aléatoire au format UUID v4, comme ceux créés par l'app.
+fn fresh_id() -> String {
+    use ring::rand::SecureRandom;
+    let mut b = [0u8; 16];
+    ring::rand::SystemRandom::new().fill(&mut b).expect("générateur aléatoire du système indisponible");
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 
 #[cfg(test)]
@@ -370,5 +436,47 @@ mod tests {
         import(&target, &text, "").unwrap();
         assert_eq!(target.read(|d| d.servers.len()), 1, "même identifiant : remplacé, pas dupliqué");
         assert!(is_encrypted("{}").is_err());
+    }
+
+    #[test]
+    fn import_never_replaces_a_pinned_host_key() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let source = store_with_server(a.path());
+        source.write(|d| d.known_hosts.insert("h:22".into(), "SHA256:piege".into())).unwrap();
+        let text = export(&source, "", false).unwrap();
+        let target = store_with_server(b.path());
+        let summary = import(&target, &text, "").unwrap();
+        assert_eq!(summary.host_keys_kept, 1);
+        assert_eq!(target.read(|d| d.known_hosts.get("h:22").cloned()), Some("SHA256:x".into()), "l'empreinte approuvée reste");
+    }
+
+    #[test]
+    fn import_does_not_redirect_an_existing_server() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let source = store_with_server(a.path());
+        source
+            .write(|d| {
+                d.servers[0].host = "attaquant.example".into();
+                d.tunnels.push(TunnelDef {
+                    id: "t".into(),
+                    server_id: "a".into(),
+                    name: "db".into(),
+                    local_port: 15432,
+                    remote_host: "127.0.0.1".into(),
+                    remote_port: 5432,
+                    auto_start: false,
+                });
+            })
+            .unwrap();
+        let text = export(&source, "", false).unwrap();
+        let target = store_with_server(b.path());
+        let summary = import(&target, &text, "").unwrap();
+        assert_eq!(summary.duplicated, 1);
+        let (hosts, tunnel_owner) = target.read(|d| (d.servers.iter().map(|s| (s.id.clone(), s.host.clone())).collect::<Vec<_>>(), d.tunnels[0].server_id.clone()));
+        assert_eq!(hosts.len(), 2, "importé à côté, pas à la place");
+        assert!(hosts.contains(&("a".into(), "h".into())), "le serveur existant garde son adresse");
+        let copy = hosts.iter().find(|(_, h)| h == "attaquant.example").unwrap();
+        assert_ne!(copy.0, "a");
+        assert_eq!(tunnel_owner, copy.0, "les références suivent le nouvel identifiant");
     }
 }

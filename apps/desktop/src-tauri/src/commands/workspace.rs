@@ -30,11 +30,31 @@ pub fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
 /// Helm est verrouillé. Gardé côté Rust : recharger l'interface (F5) ne déverrouille pas.
 static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Empreinte du mot de passe de verrouillage de l'app (PBKDF2, calculée par l'interface),
-/// conservée dans le coffre de l'OS. `None` : verrouillage désactivé.
+/// Commandes permises quand Helm est verrouillé : de quoi afficher l'écran de verrouillage et
+/// le lever. Tout le reste est refusé par `lib.rs` avant d'atteindre la commande : sans cela, le
+/// verrou ne serait qu'un calque d'interface, contournable depuis les outils de développement.
+pub const ALLOWED_WHILE_LOCKED: &[&str] =
+    &["app_version", "app_is_locked", "app_unlock", "app_lock_engage", "ui_state_get", "store_warning", "term_resize"];
+
+/// Vrai si Helm est verrouillé (mot de passe défini et verrou engagé).
+pub fn is_locked() -> bool {
+    LOCKED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Un seul essai de déverrouillage à la fois : lancer des essais en parallèle ne contourne pas
+/// le délai imposé après un échec.
+static UNLOCK_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Au moins autant d'itérations que l'interface en utilise (200 000) à 50 % près : une empreinte
+/// faible, fabriquée à la main, est refusée.
+const MIN_LOCK_ITERATIONS: u32 = 100_000;
+
+/// Verrouillage configuré ? L'empreinte (PBKDF2, calculée par l'interface, conservée dans le
+/// coffre de l'OS) ne quitte plus le backend : l'interface n'a besoin que de savoir qu'elle existe,
+/// et la vérification se fait ici (`app_unlock`). `None` : verrouillage désactivé.
 #[tauri::command]
 pub fn app_lock_get() -> Option<String> {
-    crate::store::secrets::get("app", "lock")
+    crate::store::secrets::get("app", "lock").filter(|s| !s.is_empty()).map(|_| "configured".into())
 }
 
 #[tauri::command]
@@ -42,18 +62,36 @@ pub fn app_lock_set(hash: String) -> Result<(), String> {
     if LOCKED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("Helm est verrouillé".into());
     }
+    if hash.is_empty() {
+        // Désactivation du verrouillage.
+        return crate::store::secrets::set("app", "lock", "");
+    }
+    check_lock_hash(&hash)?;
     crate::store::secrets::set("app", "lock", &hash)
+}
+
+/// Refuse une empreinte mal formée ou trop faible (peu d'itérations, sel court).
+fn check_lock_hash(stored: &str) -> Result<(), String> {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let parts: Vec<&str> = stored.split('$').collect();
+    let [kind, iter, salt, hash] = parts.as_slice() else { return Err("Empreinte de mot de passe invalide".into()) };
+    let ok = *kind == "pbkdf2"
+        && iter.parse::<u32>().is_ok_and(|n| n >= MIN_LOCK_ITERATIONS)
+        && b64.decode(salt).is_ok_and(|s| s.len() >= 16)
+        && b64.decode(hash).is_ok_and(|h| h.len() == 32);
+    if ok { Ok(()) } else { Err("Empreinte de mot de passe refusée : format ou paramètres trop faibles".into()) }
 }
 
 /// État du verrouillage (relu au démarrage de l'interface).
 #[tauri::command]
 pub fn app_is_locked() -> bool {
-    LOCKED.load(std::sync::atomic::Ordering::SeqCst) && crate::store::secrets::get("app", "lock").is_some()
+    LOCKED.load(std::sync::atomic::Ordering::SeqCst) && crate::store::secrets::get("app", "lock").is_some_and(|s| !s.is_empty())
 }
 
 #[tauri::command]
 pub fn app_lock_engage() {
-    if crate::store::secrets::get("app", "lock").is_some() {
+    if crate::store::secrets::get("app", "lock").is_some_and(|s| !s.is_empty()) {
         LOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -62,11 +100,13 @@ pub fn app_lock_engage() {
 /// l'interface : `pbkdf2$itérations$sel$empreinte`, en base64).
 #[tauri::command]
 pub async fn app_unlock(password: String) -> bool {
-    let Some(stored) = crate::store::secrets::get("app", "lock") else {
+    let _gate = UNLOCK_GATE.lock().await;
+    let Some(stored) = crate::store::secrets::get("app", "lock").filter(|s| !s.is_empty()) else {
         LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
         return true;
     };
-    let ok = verify_lock_password(&password, &stored);
+    // PBKDF2 (200 000 tours) prend un moment : hors du fil des commandes.
+    let ok = tokio::task::spawn_blocking(move || verify_lock_password(&password, &stored)).await.unwrap_or(false);
     if ok {
         LOCKED.store(false, std::sync::atomic::Ordering::SeqCst);
     } else {
@@ -312,6 +352,7 @@ mod tests {
         assert!(super::verify_lock_password("secret", &stored));
         assert!(!super::verify_lock_password("Secret", &stored));
         assert!(!super::verify_lock_password("secret", "n'importe quoi"));
+        assert!(super::check_lock_hash(&stored).is_ok());
     }
 
     #[test]

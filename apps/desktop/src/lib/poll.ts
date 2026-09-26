@@ -1,9 +1,11 @@
 import { useEffect, useRef, type DependencyList } from "react";
+import { useLock } from "./lock";
 
 /**
  * Exécute `task` tout de suite puis toutes les `intervalMs` millisecondes, tant que `enabled`.
  * - Jamais deux exécutions en même temps : si la précédente n'est pas finie, le tour est sauté.
- * - En pause quand la fenêtre est réduite ou masquée ; reprise immédiate à son retour.
+ * - En pause quand la fenêtre est réduite ou masquée, ou Helm verrouillé (le backend refuserait) ;
+ *   reprise immédiate au retour.
  * `deps` relance le cycle (changement de serveur…). `task` gère lui-même ses erreurs.
  */
 export function usePolling(task: () => Promise<unknown> | void, intervalMs: number, deps: DependencyList, enabled = true) {
@@ -15,7 +17,7 @@ export function usePolling(task: () => Promise<unknown> | void, intervalMs: numb
     let busy = false;
     let stopped = false;
     const tick = async () => {
-      if (busy || stopped || document.hidden) return;
+      if (busy || stopped || document.hidden || useLock.getState().locked) return;
       busy = true;
       try {
         await ref.current();

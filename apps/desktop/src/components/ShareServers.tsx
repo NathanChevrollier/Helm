@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { Copy, FileDown, FileUp, Share2 } from "lucide-react";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, importMessage } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { useApp, useAppPick } from "../lib/store";
 import { Button, Checkbox, Field, Input, Modal, Textarea } from "./ui";
@@ -128,7 +128,7 @@ export function ReceiveShareDialog({ onClose, onDone }: { onClose: () => void; o
         password = v;
       }
       const r = await api.settingsImportText(content, password);
-      notify(`Importé : ${r.servers} serveur(s), ${r.identities} identifiant(s)`, "success");
+      notify(importMessage(r), r.duplicated || r.hostKeysKept ? "info" : "success");
       onDone();
       onClose();
     } catch (e) {

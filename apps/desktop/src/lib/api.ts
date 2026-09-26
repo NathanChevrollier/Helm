@@ -686,6 +686,27 @@ export interface DashboardSummary {
   certificates: { domains: string[]; notAfter: number }[];
 }
 
+/** Bilan d'un import de réglages ou d'un partage reçu. */
+export interface ImportSummary {
+  servers: number;
+  identities: number;
+  snippets: number;
+  tunnels: number;
+  secrets: number;
+  /** Serveurs reçus avec l'identifiant d'un serveur existant mais une autre adresse, ajoutés à côté. */
+  duplicated: number;
+  /** Empreintes de clé d'hôte reçues qui contredisaient une empreinte approuvée : ignorées. */
+  hostKeysKept: number;
+}
+
+/** Phrase de bilan, avec les avertissements de sécurité s'il y en a. */
+export function importMessage(r: ImportSummary): string {
+  let m = `Importé : ${r.servers} serveur(s), ${r.identities} identifiant(s), ${r.snippets} fragment(s), ${r.tunnels} tunnel(s), ${r.secrets} secret(s).`;
+  if (r.duplicated) m += ` ${r.duplicated} serveur(s) portaient l'identifiant d'un serveur existant avec une autre adresse : ajoutés comme nouveaux serveurs.`;
+  if (r.hostKeysKept) m += ` ${r.hostKeysKept} empreinte(s) de clé d'hôte différente(s) de celles déjà approuvées : ignorées.`;
+  return m;
+}
+
 export interface AuditEntry {
   t: number;
   origin: string;
@@ -963,7 +984,7 @@ export const api = {
   settingsExport: (path: string, password: string, includeSecrets: boolean) => invoke<void>("settings_export", { path, password, includeSecrets }),
   settingsImportEncrypted: (path: string) => invoke<boolean>("settings_import_encrypted", { path }),
   settingsImport: (path: string, password: string) =>
-    invoke<{ servers: number; identities: number; snippets: number; tunnels: number; secrets: number }>("settings_import", { path, password }),
+    invoke<ImportSummary>("settings_import", { path, password }),
   shellHistory: (serverId: string) => invoke<string[]>("shell_history", { serverId }),
   logsOpenDir: () => invoke<void>("logs_open_dir"),
   appIsLocked: () => invoke<boolean>("app_is_locked"),
@@ -1272,7 +1293,7 @@ export const api = {
   settingsShareCode: (ids: string[], password: string, includeSecrets: boolean) =>
     invoke<string>("settings_share_code", { ids, password, includeSecrets }),
   settingsImportText: (text: string, password: string) =>
-    invoke<{ servers: number; identities: number; snippets: number; tunnels: number; secrets: number }>("settings_import_text", { text, password }),
+    invoke<ImportSummary>("settings_import_text", { text, password }),
   settingsTextEncrypted: (text: string) => invoke<boolean>("settings_text_encrypted", { text }),
 };
 
