@@ -2,14 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Plus, RefreshCw, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { api, errorMessage, type ServerUser } from "../../lib/api";
 import { useAppPick } from "../../lib/store";
-import { Badge, Button, EmptyState, IconButton } from "../../components/ui";
+import { Badge, Button, ErrorState, Field, IconButton, Loading, Modal, Textarea } from "../../components/ui";
 import { useCachedState } from "../../lib/cache";
 
-export default function Access({ serverId }: { serverId: string }) {
+export default function Access({ serverId, onCount }: { serverId: string; onCount?: (n: number) => void }) {
   const { ask, notify } = useAppPick("ask", "notify");
   const [users, setUsers] = useCachedState<ServerUser[] | null>(`users:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Compte pour lequel on colle une clé publique. */
+  const [adding, setAdding] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -26,26 +28,20 @@ export default function Access({ serverId }: { serverId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  const count = users?.length;
+  useEffect(() => {
+    if (count != null) onCount?.(count);
+  }, [count, onCount]);
 
-  const addKey = async (user: string) => {
-    const key = await ask({
-      title: `Autoriser une clé SSH pour ${user}`,
-      body: "Colle la clé PUBLIQUE (une ligne commençant par ssh-ed25519, ssh-rsa ou ecdsa-…). Jamais la clé privée.",
-      input: { label: "Clé publique" },
-      confirmLabel: "Autoriser",
-    });
-    if (typeof key !== "string" || !key.trim()) return;
-    try {
-      await api.accessAddKey(serverId, user, key.trim());
-      notify(`Clé ajoutée pour ${user}`, "success");
-      await load();
-    } catch (e) {
-      notify(errorMessage(e), "error");
-    }
+  const addKey = async (user: string, key: string) => {
+    await api.accessAddKey(serverId, user, key.trim());
+    notify(`Clé ajoutée pour ${user}`, "success");
+    setAdding(null);
+    await load();
   };
 
-  if (error) return <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>;
-  if (!users) return <EmptyState icon={<UserRound size={36} className="animate-pulse" />} title="Lecture des comptes…" />;
+  if (error && !users) return <ErrorState message={error} onRetry={() => void load()} />;
+  if (!users) return <Loading label="Lecture des comptes…" rows={4} />;
 
   return (
     <div className="flex flex-col gap-4">
@@ -56,7 +52,7 @@ export default function Access({ serverId }: { serverId: string }) {
         </IconButton>
       </div>
       {users.map((u) => (
-        <section key={u.name} className="rounded-lg border border-border bg-panel">
+        <section key={u.name} className="rounded-xl border border-border bg-panel">
           <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
             <UserRound size={14} />
             <span className="font-medium">{u.name}</span>
@@ -68,8 +64,8 @@ export default function Access({ serverId }: { serverId: string }) {
             <span className="text-xs text-muted">
               {u.home} · {u.shell} · dernière connexion : {u.lastLogin || "inconnue"}
             </span>
-            <Button size="sm" className="ml-auto" icon={<Plus size={13} />} onClick={() => void addKey(u.name)}>
-              Clé
+            <Button size="sm" className="ml-auto" icon={<Plus size={13} />} onClick={() => setAdding(u.name)}>
+              Autoriser une clé
             </Button>
           </header>
           {u.keys.length === 0 ? (
@@ -116,6 +112,56 @@ export default function Access({ serverId }: { serverId: string }) {
           )}
         </section>
       ))}
+      {adding && <AddKeyDialog user={adding} onClose={() => setAdding(null)} onAdd={(k) => addKey(adding, k)} />}
     </div>
+  );
+}
+
+const KEY_RE = /^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)\s+[A-Za-z0-9+/=]{40,}(\s+.*)?$/;
+
+/** Clé publique collée dans une zone multiligne : une clé RSA ne tient pas dans un champ d'une ligne. */
+function AddKeyDialog({ user, onClose, onAdd }: { user: string; onClose: () => void; onAdd: (key: string) => Promise<void> }) {
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const clean = key.trim().replace(/\s*\n\s*/g, " ");
+  const isPrivate = /PRIVATE KEY/.test(key);
+  const valid = KEY_RE.test(clean);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onAdd(clean);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={`Autoriser une clé SSH pour ${user}`}
+      description="Colle la clé PUBLIQUE (fichier .pub). Jamais la clé privée."
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button variant="primary" disabled={!valid} loading={busy} onClick={() => void submit()}>
+            Autoriser
+          </Button>
+        </>
+      }
+    >
+      <Field
+        label="Clé publique"
+        error={isPrivate ? "C'est une clé PRIVÉE : ne la colle nulle part. Utilise le fichier .pub correspondant." : error ?? (key.trim() && !valid ? "Format attendu : ssh-ed25519 AAAA… commentaire" : null)}
+      >
+        <Textarea autoFocus rows={5} className="font-mono text-xs break-all" placeholder="ssh-ed25519 AAAAC3Nza… moi@portable" value={key} onChange={(e) => setKey(e.target.value)} />
+      </Field>
+    </Modal>
   );
 }

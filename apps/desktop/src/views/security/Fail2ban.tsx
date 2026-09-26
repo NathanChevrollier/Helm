@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Ban, Plus, RefreshCw, ShieldOff, Trash2, UserCheck } from "lucide-react";
+import { Plus, RefreshCw, ShieldOff, Trash2, UserCheck } from "lucide-react";
 import { api, errorMessage, formatDuration, type F2bState } from "../../lib/api";
 import { useAppPick } from "../../lib/store";
-import { Badge, Button, EmptyState, IconButton, Input } from "../../components/ui";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Input, Loading } from "../../components/ui";
 import { useCachedState } from "../../lib/cache";
 
 /** Adresses que Helm ajoute toujours à la liste (boucle locale). */
@@ -12,7 +12,7 @@ function duration(secs: number): string {
   return secs < 0 ? "définitif" : formatDuration(secs);
 }
 
-export default function Fail2ban({ serverId }: { serverId: string }) {
+export default function Fail2ban({ serverId, onCount, onAudit }: { serverId: string; onCount?: (n: number) => void; onAudit?: () => void }) {
   const { ask, notify } = useAppPick("ask", "notify");
   const [state, setState] = useCachedState<F2bState | null>(`fail2ban:${serverId}`, null);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +37,11 @@ export default function Fail2ban({ serverId }: { serverId: string }) {
     void load();
     void api.myPublicIp().then(setMyIp);
   }, [load]);
+
+  const bannedCount = state ? state.jails.reduce((n, j) => n + j.currentlyBanned, 0) : null;
+  useEffect(() => {
+    if (bannedCount != null) onCount?.(bannedCount);
+  }, [bannedCount, onCount]);
 
   // Liste commune à tous les jails (Helm les garde synchronisées), hors boucle locale.
   const ignored = [...new Set(state?.jails.flatMap((j) => j.ignoreip) ?? [])].filter((a) => !LOOPBACK.includes(a));
@@ -71,12 +76,16 @@ export default function Fail2ban({ serverId }: { serverId: string }) {
     }
   };
 
-  if (error) return <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>;
-  if (!state) return <EmptyState icon={<Ban size={36} className="animate-pulse" />} title="Lecture de fail2ban…" />;
+  if (error && !state) return <ErrorState message={error} onRetry={() => void load()} />;
+  if (!state) return <Loading label="Lecture de fail2ban…" rows={4} />;
   if (!state.installed || !state.running)
     return (
-      <EmptyState icon={<ShieldOff size={36} />} title={state.installed ? "fail2ban est arrêté" : "fail2ban n'est pas installé"}>
-        fail2ban bannit les adresses qui multiplient les échecs de connexion. L'onglet Audit propose de l'installer et de l'activer.
+      <EmptyState
+        icon={<ShieldOff />}
+        title={state.installed ? "fail2ban est arrêté" : "fail2ban n'est pas installé"}
+        action={onAudit && <Button onClick={onAudit}>{state.installed ? "Le démarrer depuis l'audit" : "L'installer depuis l'audit"}</Button>}
+      >
+        fail2ban bannit les adresses qui multiplient les échecs de connexion.
       </EmptyState>
     );
 
@@ -108,7 +117,7 @@ export default function Fail2ban({ serverId }: { serverId: string }) {
       )}
 
       {state.jails.map((j) => (
-        <section key={j.name} className="rounded-lg border border-border bg-panel">
+        <section key={j.name} className="rounded-xl border border-border bg-panel">
           <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
             <span className="font-medium">{j.name}</span>
             <Badge tone={j.currentlyBanned ? "danger" : "ok"}>{j.currentlyBanned} bannie(s)</Badge>
