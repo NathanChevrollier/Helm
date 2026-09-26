@@ -51,10 +51,10 @@ export default function Topbar() {
       >
         <Search size={15} className="shrink-0" />
         <span className="flex-1 truncate text-left">Rechercher, ouvrir, lancer…</span>
-        <Kbd>{display(shortcutOf("palette"))}</Kbd>
+        <Kbd className="shrink-0">{display(shortcutOf("palette"))}</Kbd>
       </button>
 
-      <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-1">
+      <div className="flex min-w-fit flex-1 basis-0 items-center justify-end gap-1">
         <RefreshButton />
         <NotificationsButton />
         <AssistantButton />
