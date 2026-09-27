@@ -6,6 +6,7 @@ mod legacy;
 mod rdp_bridge;
 mod sessions;
 mod store;
+mod tray;
 mod vnc_bridge;
 
 use commands::{
@@ -41,13 +42,9 @@ pub fn run() {
     tauri::Builder::default()
         // Une seule instance : une deuxième fenêtre se disputerait les ports des tunnels et
         // écraserait les réglages de la première. Relancer Zenytt ramène la fenêtre existante.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-        }))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
+        // Lancement à l'ouverture de session (réglage), réduit dans la zone de notification.
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec![tray::HIDDEN_ARG])))
         // Journal local de l'app (dossier de logs, 5 fichiers de 2 Mo), sans aucun secret.
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -91,14 +88,35 @@ pub fn run() {
             app.manage(assistant::Assistant::default());
             app.manage(rdp_bridge::Bridges::default());
             legacy::start(app.handle());
+            tray::setup(app.handle())?;
+            // La fenêtre est créée cachée : elle n'apparaît que si l'app n'a pas été lancée
+            // automatiquement à l'ouverture de session (elle reste alors dans la zone de notification).
+            if !std::env::args().any(|a| a == tray::HIDDEN_ARG) {
+                tray::show_main(app.handle());
+            }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<tunnels::Tunnels>().autostart(&handle).await;
             });
             Ok(())
         })
+        // Fermer la fenêtre ne quitte pas forcément : l'interface propose de réduire dans la zone
+        // de notification (ou applique le choix retenu).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && tray::on_close_requested(window.app_handle()) {
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(guarded(tauri::generate_handler![
             app_version,
+            tray::app_ui_ready,
+            tray::tray_update,
+            tray::app_hide,
+            tray::app_quit,
+            tray::autostart_get,
+            tray::autostart_set,
             servers::servers_list,
             servers::server_save,
             servers::server_delete,

@@ -236,6 +236,12 @@ export default function ServerForm({ server, folders, onClose, onSaved }: { serv
           <Field label="Mot de passe sudo (optionnel)" hint={keptHint(server?.hasSudoPassword) ?? "Pour les actions d'administration (nginx, services…) si tu ne te connectes pas en root."}>
             <Input type="password" value={sudo} onChange={(e) => setSudo(e.target.value)} />
           </Field>
+          <Checkbox
+            checked={p.autoConnect ?? false}
+            onChange={(v) => set("autoConnect", v)}
+            label="Se connecter au démarrage de Zenytt"
+            hint="En arrière-plan, sans aucune fenêtre. Un échec d'authentification suspend les nouvelles tentatives (pour ne pas être banni par fail2ban)."
+          />
         </section>
 
         <section className="flex flex-col gap-3">

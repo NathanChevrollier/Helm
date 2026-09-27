@@ -14,6 +14,7 @@ import { useRdp } from "./lib/rdp";
 import { useLock, watchInactivity } from "./lib/lock";
 import { watchAlerts } from "./lib/alerts";
 import { watchSync } from "./lib/sync";
+import { autoConnect, quitApp, useCloseDialog, watchDesktop } from "./lib/desktop";
 import { checkForUpdate } from "./lib/updater";
 import { applyTheme } from "./lib/theme";
 import { matches } from "./lib/shortcuts";
@@ -29,6 +30,7 @@ const AssistantPanel = lazy(() => import("./components/AssistantPanel"));
 const GuideDialog = lazy(() => import("./components/GuideDialog"));
 const ShortcutsHelp = lazy(() => import("./components/shell/ShortcutsHelp"));
 const HomeView = lazy(() => import("./views/Home"));
+const CloseDialog = lazy(() => import("./components/CloseDialog"));
 
 // Chargé à part : xterm pèse un tiers de l'app et n'est pas nécessaire pour afficher l'accueil.
 const TerminalView = lazy(() => import("./views/Terminal"));
@@ -92,6 +94,16 @@ export default function App() {
     return watchInactivity(() => useApp.getState().settings.lockMinutes);
   }, []);
   useEffect(() => watchAlerts(), []);
+  useEffect(() => watchDesktop(), []);
+  // Connexions automatiques : une fois l'espace de travail restauré et l'app déverrouillée, une
+  // seule fois par lancement.
+  const [autoConnected, setAutoConnected] = useState(false);
+  useEffect(() => {
+    if (!hydrated || locked || autoConnected) return;
+    setAutoConnected(true);
+    void autoConnect();
+  }, [hydrated, locked, autoConnected]);
+  const closeDialogOpen = useCloseDialog((s) => s.open);
   // Reprise automatique d'une installation précédente (profils, serveurs) : le moteur prévient
   // l'interface de ce qu'il a fait, y compris avant qu'elle n'écoute.
   useEffect(() => {
@@ -170,6 +182,9 @@ export default function App() {
         e.preventDefault();
         const assistant = useAssistant.getState();
         assistant.setOpen(!assistant.open);
+      } else if (matches(e, "quit")) {
+        e.preventDefault();
+        void quitApp();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -231,6 +246,11 @@ export default function App() {
         {guideDialogOpen && <GuideDialog />}
       </Suspense>
       <ConnectionDoctor />
+      {closeDialogOpen && (
+        <Suspense fallback={null}>
+          <CloseDialog />
+        </Suspense>
+      )}
       <DialogHost />
       <Toasts />
       {locked && <LockScreen />}

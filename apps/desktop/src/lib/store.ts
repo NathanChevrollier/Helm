@@ -88,7 +88,11 @@ export interface Settings {
   autoRefreshSecs: number;
   /** Afficher les fichiers et dossiers dont le nom commence par un point. */
   showHiddenFiles: boolean;
+  /** Fermeture de la fenêtre : demander, réduire dans la zone de notification, ou quitter. */
+  closeAction: CloseAction;
 }
+
+export type CloseAction = "ask" | "tray" | "quit";
 
 /** Partie de l'état sauvegardée dans zenytt.json et restaurée au démarrage. */
 interface Persisted {
@@ -288,7 +292,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15, showHiddenFiles: false },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15, showHiddenFiles: false, closeAction: "ask" },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],

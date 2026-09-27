@@ -57,6 +57,9 @@ pub struct ServerProfile {
     /// le type d'authentification, la clé et les secrets du profil.
     #[serde(default)]
     pub identity_id: Option<String>,
+    /// Se connecter automatiquement au démarrage de Zenytt (une fois déverrouillé).
+    #[serde(default)]
+    pub auto_connect: bool,
 }
 
 /// Identifiant réutilisable (banque de logins) : utilisateur + mot de passe ou clé, partagé
@@ -458,6 +461,7 @@ mod tests {
             ai_access: false,
             jump_id: jump.map(str::to_string),
             identity_id: None,
+            auto_connect: false,
         };
         s.write(|d| d.servers.extend([p("a", Some("b")), p("b", Some("c")), p("c", None), p("x", Some("y")), p("y", Some("x"))])).unwrap();
         assert_eq!(s.jump_chain("a").unwrap(), vec!["b", "c"]);
@@ -490,6 +494,7 @@ mod tests {
                 ai_access: false,
                 jump_id: None,
                 identity_id: Some("i".into()),
+                auto_connect: false,
             });
         })
         .unwrap();

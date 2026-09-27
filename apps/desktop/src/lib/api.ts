@@ -18,6 +18,8 @@ export interface ServerProfile {
   jumpId?: string | null;
   /** Identifiant de la banque utilisé à la place de l'utilisateur et des secrets du profil. */
   identityId?: string | null;
+  /** Se connecter automatiquement au démarrage de Zenytt (une fois déverrouillé). */
+  autoConnect?: boolean;
 }
 
 /** Identifiant réutilisable (banque de logins). */
@@ -1028,6 +1030,15 @@ export const api = {
   storeWarning: () => invoke<string | null>("store_warning"),
   /** Messages de la reprise automatique d'une installation précédente, produits avant l'ouverture de l'interface. */
   appNotices: () => invoke<AppNotice[]>("app_notices"),
+  /** L'interface prend en charge les demandes de fermeture (sinon la fenêtre se ferme directement). */
+  appUiReady: () => invoke<void>("app_ui_ready"),
+  trayUpdate: (servers: { id: string; name: string; connected: boolean; alerts: number }[]) => invoke<void>("tray_update", { servers }),
+  /** Réduit dans la zone de notification. */
+  appHide: () => invoke<void>("app_hide"),
+  /** Quitte vraiment : tunnels, terminaux et transferts s'arrêtent. */
+  appQuit: () => invoke<void>("app_quit"),
+  autostartGet: () => invoke<boolean>("autostart_get"),
+  autostartSet: (enabled: boolean) => invoke<void>("autostart_set", { enabled }),
   f2bState: (serverId: string) => invoke<F2bState>("f2b_state", { serverId }),
   f2bUnban: (serverId: string, jail: string, ip: string) => invoke<void>("f2b_unban", { serverId, jail, ip }),
   f2bSetIgnore: (serverId: string, addresses: string[]) => invoke<string>("f2b_set_ignore", { serverId, addresses }),

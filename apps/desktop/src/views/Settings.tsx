@@ -141,9 +141,41 @@ export default function SettingsView() {
 }
 
 function General() {
-  const { settings, setSettings } = useAppPick("settings", "setSettings");
+  const { settings, setSettings, notify } = useAppPick("settings", "setSettings", "notify");
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  useEffect(() => {
+    api.autostartGet().then(setAutostart, () => setAutostart(null));
+  }, []);
+  const toggleAutostart = async (enabled: boolean) => {
+    try {
+      await api.autostartSet(enabled);
+      setAutostart(enabled);
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
   return (
     <>
+      <Group title="Démarrage et fermeture">
+        <Toggle
+          title="Lancer Zenytt à l'ouverture de ma session"
+          description="Zenytt démarre discrètement dans la zone de notification. Les serveurs marqués « Se connecter au démarrage » (dans leur profil) se connectent, une fois Zenytt déverrouillé si tu as défini un mot de passe."
+          checked={autostart ?? false}
+          onChange={(v) => void toggleAutostart(v)}
+        />
+        <Setting title="Quand je ferme la fenêtre" description="Réduit, Zenytt continue en arrière-plan : tunnels, transferts, synchronisation et alertes. « Quitter » (menu de l'icône ou Ctrl+Q) arrête tout.">
+          <Select
+            className="w-64"
+            value={settings.closeAction}
+            onChange={(closeAction) => setSettings({ closeAction })}
+            options={[
+              { value: "ask", label: "Me demander" },
+              { value: "tray", label: "Réduire dans la zone de notification" },
+              { value: "quit", label: "Quitter Zenytt" },
+            ]}
+          />
+        </Setting>
+      </Group>
       <Group title="Affichage">
         <Setting title="Thème" description={`« Système » suit le thème clair ou sombre de ${OS_NAME}.`}>
           <Segmented

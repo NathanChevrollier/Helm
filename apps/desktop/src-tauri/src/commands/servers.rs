@@ -248,6 +248,7 @@ fn read_putty_sessions() -> Option<Vec<ServerProfile>> {
             ai_access: false,
             jump_id: None,
             identity_id: None,
+            auto_connect: false,
         });
     }
     Some(out)

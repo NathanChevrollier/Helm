@@ -38,7 +38,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Écrit CONTENT en root dans un fichier propre à chaque cas, puis le relit tel qu'il est sur le disque.
     async fn write_and_read(c: &Connection, pw: Option<&str>, file: &str) -> Result<String, String> {
         c.write_file_sudo(file, CONTENT, pw).await.map_err(|e| e.to_string())?;
-        c.exec_sudo(&format!("cat {file}"), pw, None).await.map_err(|e| e.to_string())?.into_result().map(|o| o.stdout).map_err(|e| e.to_string())
+        c.exec_sudo(&format!("cat {file}"), pw, None)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_result()
+            .map(|o| o.stdout)
+            .map_err(|e| e.to_string())
     }
 
     for (user, login_pw, sudo_pw, label) in [

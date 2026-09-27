@@ -33,8 +33,19 @@ static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 /// Commandes permises quand Zenytt est verrouillé : de quoi afficher l'écran de verrouillage et
 /// le lever. Tout le reste est refusé par `lib.rs` avant d'atteindre la commande : sans cela, le
 /// verrou ne serait qu'un calque d'interface, contournable depuis les outils de développement.
-pub const ALLOWED_WHILE_LOCKED: &[&str] =
-    &["app_version", "app_is_locked", "app_unlock", "app_lock_engage", "ui_state_get", "store_warning", "app_notices", "term_resize"];
+pub const ALLOWED_WHILE_LOCKED: &[&str] = &[
+    "app_version",
+    "app_is_locked",
+    "app_unlock",
+    "app_lock_engage",
+    "ui_state_get",
+    "store_warning",
+    "app_notices",
+    "term_resize",
+    "app_ui_ready",
+    "app_hide",
+    "app_quit",
+];
 
 /// Vrai si Zenytt est verrouillé (mot de passe défini et verrou engagé).
 pub fn is_locked() -> bool {

@@ -449,6 +449,7 @@ mod tests {
             ai_access: false,
             jump_id: None,
             identity_id: None,
+            auto_connect: false,
         }
     }
 

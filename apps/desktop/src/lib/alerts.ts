@@ -1,5 +1,6 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { fetchHealth } from "./health";
+import { setServerAlerts } from "./desktop";
 import { useApp } from "./store";
 
 const INTERVAL_MS = 60_000;
@@ -29,6 +30,7 @@ export function watchAlerts(): () => void {
     for (const s of servers.filter((x) => x.connected)) {
       const summary = await fetchHealth(s.id, 20_000).catch(() => null);
       if (!summary?.connected) continue;
+      setServerAlerts(s.id, summary.alerts.length);
       const keys = new Set(summary.alerts.map((a) => a.key));
       const before = seen.get(s.id);
       seen.set(s.id, keys);

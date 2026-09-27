@@ -13,6 +13,7 @@ export const SHORTCUTS = {
   termSearch: { label: "Rechercher dans le terminal", default: "Ctrl+Shift+F" },
   termHistory: { label: "Historique des commandes du serveur", default: "Ctrl+Shift+R" },
   assistant: { label: "Ouvrir l'assistant IA", default: "Ctrl+I" },
+  quit: { label: "Quitter Zenytt", default: "Ctrl+Q" },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;
