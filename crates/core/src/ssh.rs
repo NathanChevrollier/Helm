@@ -244,7 +244,13 @@ impl Connection {
             Some(pw) => {
                 let mut input = format!("{pw}\n").into_bytes();
                 input.extend_from_slice(stdin.unwrap_or_default());
-                let cmd = format!("if [ \"$(id -u)\" = 0 ]; then read -r _; sh -c {q}; else sudo -S -p '' sh -c {q}; fi");
+                // Le mot de passe occupe la première ligne de l'entrée. Quand sudo n'en a pas besoin
+                // (root, règle NOPASSWD, autorisation encore en cache), il ne la lirait pas et elle
+                // arriverait en tête des données de la commande (en tête d'un fichier écrit, par
+                // exemple) : elle est alors consommée avant.
+                let cmd = format!(
+                    "if [ \"$(id -u)\" = 0 ]; then read -r _; sh -c {q}; elif sudo -n true 2>/dev/null; then read -r _; sudo -n sh -c {q}; else sudo -S -p '' sh -c {q}; fi"
+                );
                 self.exec(&cmd, Some(&input)).await?
             }
             None => {
