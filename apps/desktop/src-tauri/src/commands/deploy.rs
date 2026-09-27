@@ -1,9 +1,9 @@
 //! Déploiement des projets compose : bouton « Déployer » et clés restreintes pour GitHub Actions.
 
-use helm_core::deploy::{self, DeployKey};
-use helm_core::docker::{self, Access, ComposeProject};
-use helm_core::nginx;
 use tauri::State;
+use zenytt_core::deploy::{self, DeployKey};
+use zenytt_core::docker::{self, Access, ComposeProject};
+use zenytt_core::nginx;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;

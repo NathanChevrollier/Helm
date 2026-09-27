@@ -1,4 +1,4 @@
-# Projet de démo : le port 8082 est publié sur toutes les interfaces, pour tester « Restreindre » dans Helm.
+# Projet de démo : le port 8082 est publié sur toutes les interfaces, pour tester « Restreindre » dans Zenytt.
 services:
   whoami:
     image: traefik/whoami

@@ -68,7 +68,7 @@ export function DesktopsPanel({ creating, onCreatingChange }: { creating: boolea
             </Button>
           }
         >
-          Bureaux Windows (RDP) et Linux, Raspberry Pi ou macOS (VNC) ouverts dans Helm, consoles de VM QEMU/KVM (SPICE) dans remote-viewer. Via un serveur SSH, Helm ouvre un tunnel le temps de la session : ni le port 3389 ni le 5900 n'ont besoin d'être exposés.
+          Bureaux Windows (RDP) et Linux, Raspberry Pi ou macOS (VNC) ouverts dans Zenytt, consoles de VM QEMU/KVM (SPICE) dans remote-viewer. Via un serveur SSH, Zenytt ouvre un tunnel le temps de la session : ni le port 3389 ni le 5900 n'ont besoin d'être exposés.
         </EmptyState>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
@@ -103,7 +103,7 @@ export function DesktopsPanel({ creating, onCreatingChange }: { creating: boolea
                   {protocolOf(d) === "rdp" && d.redirectDrives && <Badge>disques partagés</Badge>}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {/* Dans Helm par défaut : le client externe reste accessible juste à côté. */}
+                  {/* Dans Zenytt par défaut : le client externe reste accessible juste à côté. */}
                   {protocolOf(d) === "spice" ? (
                     <Button
                       size="sm"
@@ -124,7 +124,7 @@ export function DesktopsPanel({ creating, onCreatingChange }: { creating: boolea
                     size="sm"
                     variant="primary"
                     disabled={protocolOf(d) === "rdp" && !d.hasPassword}
-                    title={protocolOf(d) === "rdp" && !d.hasPassword ? "Enregistre un mot de passe pour ouvrir la session dans Helm" : undefined}
+                    title={protocolOf(d) === "rdp" && !d.hasPassword ? "Enregistre un mot de passe pour ouvrir la session dans Zenytt" : undefined}
                     icon={<MonitorPlay size={13} />}
                     onClick={() => void useRdp.getState().open(d)}
                   >
@@ -148,7 +148,7 @@ export function DesktopsPanel({ creating, onCreatingChange }: { creating: boolea
                   )}
                 </div>
                 {protocolOf(d) === "rdp" && !d.hasPassword && (
-                  <p className="mt-2.5 text-xs text-faint">Enregistre un mot de passe dans le profil pour ouvrir la session dans Helm.</p>
+                  <p className="mt-2.5 text-xs text-faint">Enregistre un mot de passe dans le profil pour ouvrir la session dans Zenytt.</p>
                 )}
               </Card>
             );
@@ -334,7 +334,7 @@ function DesktopForm({ desktop, onClose, onSaved }: { desktop: DesktopView | nul
         {protocol === "spice" && (
           <p className="col-span-6 rounded-lg border border-border bg-subtle p-3 text-xs text-muted">
             SPICE s'ouvre dans remote-viewer (paquet virt-viewer), le client de référence : à installer sur ce PC. Pour une VM Proxmox, le VNC intégré à
-            Helm suffit souvent — c'est ce qu'utilise sa console web.
+            Zenytt suffit souvent — c'est ce qu'utilise sa console web.
           </p>
         )}
         {protocol !== "rdp" && !d.viaServerId && (

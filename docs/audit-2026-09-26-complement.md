@@ -2,7 +2,7 @@
 
 Ce document complète [audit-2026-09-26.md](audit-2026-09-26.md). Il n'en reprend pas les points déjà corrigés. Il couvre :
 - le code modifié depuis : la refonte graphique, et le suivi du dossier du terminal (lecture de l'invite, resynchronisation à l'Entrée) ;
-- une revue systématique de toutes les commandes shell construites par Helm ;
+- une revue systématique de toutes les commandes shell construites par Zenytt ;
 - les frontières de confiance que l'audit précédent n'avait pas entièrement fermées.
 
 Niveaux : 🔴 critique · 🟠 élevé · 🟡 moyen · ⚪ faible / à décider.
@@ -24,11 +24,11 @@ Niveaux : 🔴 critique · 🟠 élevé · 🟡 moyen · ⚪ faible / à décide
 ## Revu et sain
 
 - **Commandes shell envoyées aux serveurs** : docker, compose, déploiement, sauvegardes restic, bases SQL, Redis, nginx et Apache, fail2ban, ufw, cron et timers, services, archives, recherche, tmux. Le mot de passe sudo passe par stdin, jamais par la ligne de commande.
-- **Fichiers générés côté serveur** (`/etc/helm-deploy/*.conf`, environnement restic, exceptions fail2ban) : valeurs validées puis entre apostrophes. Les apostrophes et retours à la ligne sont refusés.
+- **Fichiers générés côté serveur** (`/etc/zenytt-deploy/*.conf`, environnement restic, exceptions fail2ban) : valeurs validées puis entre apostrophes. Les apostrophes et retours à la ligne sont refusés.
 - **Téléchargements vers le PC** : `local_name` neutralise `\`, `/`, `:` et les noms réservés de Windows. Les liens symboliques ne sont pas suivis.
 - **Front** : aucun `dangerouslySetInnerHTML` ni `innerHTML`. Les liens ne s'ouvrent qu'en `http(s)`. La CSP et les permissions Tauri sont minimales et inchangées.
 - **Mises à jour** : signées (clé publique dans `tauri.conf.json`), récupérées en HTTPS.
-- **helm-sync** : jetons hachés en SHA-256 et comparés par table, taille des requêtes limitée.
+- **zenytt-sync** : jetons hachés en SHA-256 et comparés par table, taille des requêtes limitée.
 - **Dépendances** : `pnpm audit --prod` (app et bot) ne trouve aucune vulnérabilité. `cargo audit` ne trouve aucune vulnérabilité exploitable. Il signale seulement des crates non maintenues et un défaut de `glib`, tirés indirectement par Tauri sous Linux.
 - **Suivi du dossier du terminal** (nouveau) : le chemin lu dans l'invite vient de la sortie du terminal, donc potentiellement d'un programme distant. Il ne sert qu'à **lister** un dossier en SFTP avec les droits de l'utilisateur SSH : aucune commande, aucune écriture. Le PID transmis au serveur est un entier typé.
 
@@ -44,7 +44,7 @@ Niveaux : 🔴 critique · 🟠 élevé · 🟡 moyen · ⚪ faible / à décide
 
 ## 🟠 2. Import : emprunt d'un identifiant de la banque
 
-- **Constat** : un identifiant de la banque porte un utilisateur et un mot de passe, mais pas d'adresse. Ce sont les serveurs et bureaux qui le référencent qui décident où ce mot de passe part. Il suffisait d'un partage contenant un serveur `attaquant.example` avec `identityId` égal à l'identifiant d'un des tiens. Helm s'y connectait alors avec ton mot de passe. Un identifiant reçu avec le même identifiant que le tien remplaçait aussi le tien (changement d'utilisateur).
+- **Constat** : un identifiant de la banque porte un utilisateur et un mot de passe, mais pas d'adresse. Ce sont les serveurs et bureaux qui le référencent qui décident où ce mot de passe part. Il suffisait d'un partage contenant un serveur `attaquant.example` avec `identityId` égal à l'identifiant d'un des tiens. Zenytt s'y connectait alors avec ton mot de passe. Un identifiant reçu avec le même identifiant que le tien remplaçait aussi le tien (changement d'utilisateur).
 - **Correctif** : `protect_identities`. Si le contenu reçu référence un de tes identifiants **sans en fournir le secret** :
   - ton identifiant n'est pas modifié ;
   - le lien est retiré, sauf s'il existait déjà à l'identique chez toi (même serveur, même adresse, même identifiant), ce qui couvre le réimport de ses propres réglages.
@@ -75,9 +75,9 @@ Niveaux : 🔴 critique · 🟠 élevé · 🟡 moyen · ⚪ faible / à décide
 ## Points à décider
 
 5. **Règle `NOPASSWD` du déploiement GitHub** (`deploy::create_key`, utilisateur non root) — traité.
-   - Constat : la clé GitHub est bien restreinte (commande forcée, `restrict`). En revanche, la règle sudoers ajoutée permet à **quiconque contrôle le compte SSH** de lancer `helm-deploy` en root sans mot de passe. Si les fichiers compose du projet sont modifiables par ce compte (projet créé à la main dans son dossier personnel), un `volumes: - /:/host` donne root. Pour un utilisateur déjà membre du groupe `docker`, rien ne change : ce groupe équivaut à root. Sinon, c'est un chemin vers root qui n'existait pas.
-   - Les projets créés par Helm (`NewComposeProject`, catalogue) appartiennent à root et ne sont pas concernés.
-   - **Décision : avertir.** Avant de créer la clé, Helm évalue le risque sur le serveur (`deploy::sudo_risk`) : compte root ou non, membre du groupe `docker` ou non, dossier du projet, fichiers compose et `.env` modifiables par le compte (`test -w`).
+   - Constat : la clé GitHub est bien restreinte (commande forcée, `restrict`). En revanche, la règle sudoers ajoutée permet à **quiconque contrôle le compte SSH** de lancer `zenytt-deploy` en root sans mot de passe. Si les fichiers compose du projet sont modifiables par ce compte (projet créé à la main dans son dossier personnel), un `volumes: - /:/host` donne root. Pour un utilisateur déjà membre du groupe `docker`, rien ne change : ce groupe équivaut à root. Sinon, c'est un chemin vers root qui n'existait pas.
+   - Les projets créés par Zenytt (`NewComposeProject`, catalogue) appartiennent à root et ne sont pas concernés.
+   - **Décision : avertir.** Avant de créer la clé, Zenytt évalue le risque sur le serveur (`deploy::sudo_risk`) : compte root ou non, membre du groupe `docker` ou non, dossier du projet, fichiers compose et `.env` modifiables par le compte (`test -w`).
    - Le risque existe seulement si le compte n'est pas root, n'est pas dans le groupe `docker` et peut modifier au moins un de ces éléments. Dans ce cas, le dialogue GitHub affiche :
      - les éléments concernés ;
      - la commande qui les rend modifiables par root seulement (`chown root:root` + `chmod go-w`, sans toucher aux données du projet) ;
@@ -93,7 +93,7 @@ Niveaux : 🔴 critique · 🟠 élevé · 🟡 moyen · ⚪ faible / à décide
 ## Vérifier soi-même
 
 ```sh
-pnpm typecheck && pnpm --filter helm-desktop test
+pnpm typecheck && pnpm --filter zenytt-desktop test
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 cargo audit && pnpm audit --prod
 ```

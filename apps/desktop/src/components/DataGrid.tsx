@@ -1,5 +1,5 @@
 // Tableau de résultats SQL : tri et filtres posés depuis l'en-tête, édition d'une cellule sur
-// double-clic. L'édition n'est proposée que si Helm connaît la clé primaire de la table affichée —
+// double-clic. L'édition n'est proposée que si Zenytt connaît la clé primaire de la table affichée —
 // sans elle, aucune ligne n'est identifiable de façon sûre et le tableau reste en lecture seule.
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, Filter as FilterIcon, KeyRound, ListFilter, Maximize2, Trash2, X } from "lucide-react";

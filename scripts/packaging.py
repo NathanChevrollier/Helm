@@ -28,11 +28,11 @@ PACKAGING = ROOT / "packaging"
 
 # Asset attendu pour chaque rôle, d'après la version. Les noms sont ceux que produit tauri-action.
 ASSETS = {
-    "windows": "Helm_{v}_x64-setup.exe",
-    "mac_arm": "Helm_{v}_aarch64.dmg",
-    "mac_intel": "Helm_{v}_x64.dmg",
-    "deb": "Helm_{v}_amd64.deb",
-    "appimage": "Helm_{v}_amd64.AppImage",
+    "windows": "Zenytt_{v}_x64-setup.exe",
+    "mac_arm": "Zenytt_{v}_aarch64.dmg",
+    "mac_intel": "Zenytt_{v}_x64.dmg",
+    "deb": "Zenytt_{v}_amd64.deb",
+    "appimage": "Zenytt_{v}_amd64.AppImage",
 }
 
 SHA_RE = r"[0-9a-f]{64}"
@@ -85,7 +85,7 @@ def update_winget(v: str, sha: dict[str, str], today: str) -> None:
             text = sub_once(text, r"^ReleaseDate: .*$", f"ReleaseDate: {today}", "winget ReleaseDate")
             text = sub_once(
                 text,
-                r"(InstallerUrl: https://github\.com/NathanChevrollier/Helm/releases/download/)v[^/]+/Helm_[^_]+_x64-setup\.exe",
+                r"(InstallerUrl: https://github\.com/NathanChevrollier/Zenytt/releases/download/)v[^/]+/Zenytt_[^_]+_x64-setup\.exe",
                 rf"\g<1>v{v}/{ASSETS['windows'].format(v=v)}",
                 "winget InstallerUrl",
             )
@@ -96,7 +96,7 @@ def update_winget(v: str, sha: dict[str, str], today: str) -> None:
 
 
 def update_homebrew(v: str, sha: dict[str, str]) -> None:
-    path = PACKAGING / "homebrew" / "helm-desktop.rb"
+    path = PACKAGING / "homebrew" / "zenytt-desktop.rb"
     text = path.read_text(encoding="utf-8")
     text = sub_once(text, r'^  version ".*"$', f'  version "{v}"', "cask version")
     # Deux blocs : on_arm puis on_intel, chacun avec sa propre empreinte, dans cet ordre.
@@ -120,18 +120,18 @@ def update_aur(v: str, sha: dict[str, str]) -> None:
 
 
 def update_flatpak(v: str, sha: dict[str, str], today: str) -> None:
-    path = PACKAGING / "flatpak" / "dev.helm.desktop.yml"
+    path = PACKAGING / "flatpak" / "dev.zenytt.desktop.yml"
     text = path.read_text(encoding="utf-8")
     text = sub_once(
         text,
-        r"(url: https://github\.com/NathanChevrollier/Helm/releases/download/)v[^/]+/Helm_[^_]+_amd64\.AppImage",
+        r"(url: https://github\.com/NathanChevrollier/Zenytt/releases/download/)v[^/]+/Zenytt_[^_]+_amd64\.AppImage",
         rf"\g<1>v{v}/{ASSETS['appimage'].format(v=v)}",
         "flatpak url",
     )
     text = sub_once(text, rf"(        sha256: ){SHA_RE}", rf"\g<1>{sha['appimage']}", "flatpak sha256")
     path.write_text(text, encoding="utf-8")
 
-    meta = PACKAGING / "flatpak" / "dev.helm.desktop.metainfo.xml"
+    meta = PACKAGING / "flatpak" / "dev.zenytt.desktop.metainfo.xml"
     xml = meta.read_text(encoding="utf-8")
     if f'<release version="{v}"' not in xml:
         # La plus récente en tête : c'est l'ordre attendu par AppStream.

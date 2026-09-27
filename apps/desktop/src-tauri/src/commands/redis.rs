@@ -4,9 +4,9 @@
 //! (`redis-cli`) : aucun port n'a besoin d'être ouvert. Les écritures (suppression, changement de
 //! valeur ou de durée de vie) sont inscrites au journal d'actions.
 
-use helm_core::docker::{self, Access};
-use helm_core::redis::{self, KeyPage, KeyValue, Overview, Server};
 use tauri::State;
+use zenytt_core::docker::{self, Access};
+use zenytt_core::redis::{self, KeyPage, KeyValue, Overview, Server};
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -159,7 +159,7 @@ pub async fn redis_expire(
 }
 
 /// Commande libre de la console. Les commandes qui bloquent le serveur ou effacent tout sont
-/// refusées côté Rust (voir `helm_core::redis::BLOCKED`).
+/// refusées côté Rust (voir `zenytt_core::redis::BLOCKED`).
 #[tauri::command]
 pub async fn redis_command(
     audit: State<'_, AuditLog>,

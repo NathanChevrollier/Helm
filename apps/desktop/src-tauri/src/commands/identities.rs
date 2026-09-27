@@ -1,9 +1,9 @@
 //! Banque d'identifiants : logins (utilisateur + mot de passe ou clé) réutilisables par
 //! plusieurs serveurs. Les secrets restent dans le keyring de l'OS.
 
-use helm_profiles::{AuthKind, Identity};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use zenytt_profiles::{AuthKind, Identity};
 
 use crate::sessions::Sessions;
 use crate::store::{secrets, Store};

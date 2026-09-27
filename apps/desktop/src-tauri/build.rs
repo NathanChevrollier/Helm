@@ -7,10 +7,10 @@ fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     for arch in ["x86_64", "aarch64"] {
-        let src = manifest.join(format!("../../../target/{arch}-unknown-linux-musl/release/helmd"));
-        let dst = out.join(format!("helmd-{arch}"));
+        let src = manifest.join(format!("../../../target/{arch}-unknown-linux-musl/release/zenyttd"));
+        let dst = out.join(format!("zenyttd-{arch}"));
         if src.exists() {
-            std::fs::copy(&src, &dst).expect("copie du binaire helmd");
+            std::fs::copy(&src, &dst).expect("copie du binaire zenyttd");
         } else {
             std::fs::write(&dst, b"").unwrap();
         }

@@ -38,7 +38,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         with:
-          identifier: NathanChevrollier.Helm
+          identifier: NathanChevrollier.Zenytt
           # Seul l'installeur NSIS est concerné ; les .sig et latest.json ne sont pas des installeurs.
           installers-regex: '_x64-setup\.exe$'
           release-tag: ${{ inputs.tag || github.event.release.tag_name }}

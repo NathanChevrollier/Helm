@@ -17,7 +17,7 @@ import "@fontsource/jetbrains-mono/latin-ext-600.css";
 import "./index.css";
 import { error as logError } from "@tauri-apps/plugin-log";
 
-// Erreurs de l'interface inscrites dans le journal local de Helm, pour pouvoir les diagnostiquer.
+// Erreurs de l'interface inscrites dans le journal local de Zenytt, pour pouvoir les diagnostiquer.
 window.addEventListener("error", (e) => void logError(`interface : ${e.message} (${e.filename}:${e.lineno})`).catch(() => {}));
 window.addEventListener("unhandledrejection", (e) => void logError(`interface : ${String(e.reason)}`).catch(() => {}));
 

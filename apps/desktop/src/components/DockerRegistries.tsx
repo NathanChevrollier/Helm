@@ -1,4 +1,4 @@
-// Registres d'images privés : identifiants rangés dans le coffre de Helm, connexion d'un serveur
+// Registres d'images privés : identifiants rangés dans le coffre de Zenytt, connexion d'un serveur
 // en un clic. Le jeton ne quitte le coffre que pour l'entrée standard de `docker login`.
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound, LogIn, LogOut, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
@@ -87,7 +87,7 @@ export default function DockerRegistries({ serverId }: { serverId: string }) {
   const remove = async (r: RegistryView) => {
     const ok = await ask({
       title: `Supprimer le registre ${r.name} ?`,
-      body: "Son jeton est retiré du coffre de Helm. Les serveurs déjà connectés le restent : utilise « Déconnecter » pour effacer le jeton côté serveur.",
+      body: "Son jeton est retiré du coffre de Zenytt. Les serveurs déjà connectés le restent : utilise « Déconnecter » pour effacer le jeton côté serveur.",
       confirmLabel: "Supprimer",
       danger: true,
     });
@@ -103,7 +103,7 @@ export default function DockerRegistries({ serverId }: { serverId: string }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <p className="max-w-3xl text-sm text-muted">
-          Les identifiants sont rangés dans le coffre du système, pas dans la configuration de Helm. À la connexion, le jeton part sur l'entrée standard de{" "}
+          Les identifiants sont rangés dans le coffre du système, pas dans la configuration de Zenytt. À la connexion, le jeton part sur l'entrée standard de{" "}
           <span className="font-mono">docker login</span> : il n'apparaît jamais dans une ligne de commande visible des autres utilisateurs du serveur.
         </p>
         <Button
@@ -198,7 +198,7 @@ export default function DockerRegistries({ serverId }: { serverId: string }) {
 
       {unknownSessions.length > 0 && (
         <div className="rounded-lg border border-border p-3">
-          <p className="mb-2 text-xs text-muted">Ce serveur est aussi connecté à des registres que Helm ne gère pas :</p>
+          <p className="mb-2 text-xs text-muted">Ce serveur est aussi connecté à des registres que Zenytt ne gère pas :</p>
           <ul className="flex flex-col gap-1">
             {unknownSessions.map((s) => (
               <li key={s.server} className="flex items-center gap-2 text-xs">

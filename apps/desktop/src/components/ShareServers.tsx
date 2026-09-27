@@ -40,7 +40,7 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
 
   const saveFile = async () => {
     if (!check()) return;
-    const path = await saveDialog({ defaultPath: `partage-helm-${new Date().toISOString().slice(0, 10)}.helm`, filters: [{ name: "Partage Helm", extensions: ["helm"] }] });
+    const path = await saveDialog({ defaultPath: `partage-zenytt-${new Date().toISOString().slice(0, 10)}.zenytt`, filters: [{ name: "Partage Zenytt", extensions: ["zenytt"] }] });
     if (!path) return;
     setBusy(true);
     try {
@@ -139,7 +139,7 @@ export function ReceiveShareDialog({ onClose, onDone }: { onClose: () => void; o
   };
 
   const fromFile = async () => {
-    const path = await openDialog({ multiple: false, filters: [{ name: "Partage Helm", extensions: ["helm", "json"] }] });
+    const path = await openDialog({ multiple: false, filters: [{ name: "Partage Zenytt", extensions: ["zenytt", "json"] }] });
     if (typeof path !== "string") return;
     try {
       await load(await api.readTextFile(path));
@@ -167,11 +167,11 @@ export function ReceiveShareDialog({ onClose, onDone }: { onClose: () => void; o
       }
     >
       <p className="mb-3 text-sm text-muted">
-        Colle ici le code reçu (il commence par <span className="font-mono">helm-share:</span>), ou ouvre le fichier de partage. Les profils existants de même identifiant sont remplacés ; rien n'est supprimé.
+        Colle ici le code reçu (il commence par <span className="font-mono">zenytt-share:</span>), ou ouvre le fichier de partage. Les profils existants de même identifiant sont remplacés ; rien n'est supprimé.
       </p>
       <Textarea
         className="h-40 resize-none font-mono text-xs"
-        placeholder="helm-share:…"
+        placeholder="zenytt-share:…"
         value={text}
         onChange={(e) => setText(e.target.value)}
       />

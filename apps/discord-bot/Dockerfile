@@ -5,10 +5,10 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/discord-bot/package.json apps/discord-bot/package.json
-RUN pnpm install --frozen-lockfile --filter helm-discord-bot...
+RUN pnpm install --frozen-lockfile --filter zenytt-discord-bot...
 
 COPY apps/discord-bot apps/discord-bot
-RUN pnpm --filter helm-discord-bot build
+RUN pnpm --filter zenytt-discord-bot build
 
 FROM node:22-alpine AS production
 
@@ -18,10 +18,10 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/discord-bot/package.json apps/discord-bot/package.json
-RUN pnpm install --prod --frozen-lockfile --filter helm-discord-bot...
+RUN pnpm install --prod --frozen-lockfile --filter zenytt-discord-bot...
 COPY --from=build /app/apps/discord-bot/dist apps/discord-bot/dist
 
-RUN addgroup -S helm && adduser -S helm -G helm
-USER helm
+RUN addgroup -S zenytt && adduser -S zenytt -G zenytt
+USER zenytt
 
 CMD ["node", "apps/discord-bot/dist/index.js"]

@@ -3,15 +3,15 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use helm_core::docker::{self, Access};
-use helm_core::russh::client::Msg;
-use helm_core::russh::{ChannelMsg, ChannelWriteHalf};
-use helm_core::ssh::shell_quote;
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::Mutex;
+use zenytt_core::docker::{self, Access};
+use zenytt_core::russh::client::Msg;
+use zenytt_core::russh::{ChannelMsg, ChannelWriteHalf};
+use zenytt_core::ssh::shell_quote;
 
 use crate::commands::admin;
 use crate::sessions::Sessions;
@@ -71,7 +71,7 @@ fn safe_log_file(p: &str) -> bool {
     p.starts_with("/var/log/") && !p.contains("..") && p.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
 }
 
-const FILES_COMMAND: &str = "ls -1 /var/log/nginx/*.log /var/log/syslog /var/log/auth.log /var/log/kern.log /var/log/messages /var/log/secure /var/log/fail2ban.log /var/log/helm-deploy.log 2>/dev/null";
+const FILES_COMMAND: &str = "ls -1 /var/log/nginx/*.log /var/log/syslog /var/log/auth.log /var/log/kern.log /var/log/messages /var/log/secure /var/log/fail2ban.log /var/log/zenytt-deploy.log 2>/dev/null";
 
 #[tauri::command]
 pub async fn logs_sources(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Sources, String> {
@@ -85,7 +85,7 @@ pub async fn logs_sources(store: State<'_, Store>, sessions: State<'_, Sessions>
                 .unwrap_or_default();
         }
     }
-    if let Ok(Some(units)) = helm_core::system::services(&conn).await {
+    if let Ok(Some(units)) = zenytt_core::system::services(&conn).await {
         out.units = units.into_iter().filter(|u| u.active == "active" || u.active == "failed").map(|u| u.unit).collect();
     }
     let files = conn.exec(FILES_COMMAND, None).await.map_err(err)?;

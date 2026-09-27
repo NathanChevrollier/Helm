@@ -41,7 +41,7 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
 
   const uninstall = async () => {
     const ok = await ask({
-      title: "Désinstaller l'agent helmd ?",
+      title: "Désinstaller l'agent zenyttd ?",
       body: "Le service, sa configuration et tout l'historique des métriques seront supprimés du serveur.",
       confirmLabel: "Désinstaller",
       danger: true,
@@ -57,13 +57,13 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
         <div className="flex items-center gap-3">
           <ShieldCheck size={28} className="text-accent" />
           <div>
-            <h2 className="font-semibold">{agent.installed ? "L'agent helmd ne répond pas" : "Installer l'agent helmd"}</h2>
+            <h2 className="font-semibold">{agent.installed ? "L'agent zenyttd ne répond pas" : "Installer l'agent zenyttd"}</h2>
             <p className="text-sm text-muted">Historique sur 30 jours et alertes, même quand ton PC est éteint.</p>
           </div>
         </div>
         {agent.error && <pre className="rounded-lg border border-warn/35 bg-warn/8 p-3 font-mono text-xs whitespace-pre-wrap text-warn">{agent.error}</pre>}
         <ul className="flex flex-col gap-1.5 text-sm text-muted">
-          <li>• Binaire statique d'environ 2 Mo, installé dans /usr/local/bin/helmd.</li>
+          <li>• Binaire statique d'environ 2 Mo, installé dans /usr/local/bin/zenyttd.</li>
           <li>• Tourne sous un utilisateur système dédié, avec un service systemd durci et limité à 64 Mo de RAM.</li>
           <li>• N'ouvre <strong className="text-fg">aucun port</strong> : il ne répond que sur un socket local, joint à travers ta connexion SSH.</li>
           <li>• Ne touche ni à nginx, ni à Docker, ni à tes sites.</li>
@@ -93,7 +93,7 @@ export default function Agent({ serverId, agent, reload }: { serverId: string; a
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-panel px-4 py-3 text-[13px]">
         <CheckCircle2 size={16} className="text-ok" />
         <span>
-          helmd {st.version} actif sur <span className="font-mono">{st.hostname}</span>
+          zenyttd {st.version} actif sur <span className="font-mono">{st.hostname}</span>
         </span>
         <span className="text-muted">démarré le {new Date(st.startedAt).toLocaleString("fr-FR")}</span>
         <div className="ml-auto flex gap-2">

@@ -50,7 +50,7 @@ export interface RemoteDesktop {
   username: string;
   domain?: string | null;
   identityId?: string | null;
-  /** Serveur SSH de Helm à traverser (tunnel), sinon connexion directe. */
+  /** Serveur SSH de Zenytt à traverser (tunnel), sinon connexion directe. */
   viaServerId?: string | null;
   fullscreen: boolean;
   width?: number | null;
@@ -61,7 +61,7 @@ export interface RemoteDesktop {
   group?: string | null;
 }
 
-/** Session RDP ouverte dans Helm : pont local, identifiants et taille d'écran. */
+/** Session RDP ouverte dans Zenytt : pont local, identifiants et taille d'écran. */
 export interface RdpSessionInfo {
   proxyUrl: string;
   token: string;
@@ -74,7 +74,7 @@ export interface RdpSessionInfo {
   viaTunnel: boolean;
 }
 
-/** Session VNC ouverte dans Helm (client noVNC intégré). */
+/** Session VNC ouverte dans Zenytt (client noVNC intégré). */
 export interface VncSessionInfo {
   /** Adresse du pont local (WebSocket), jeton compris. */
   url: string;
@@ -816,7 +816,7 @@ export interface CatalogVariable {
   default: string;
 }
 
-/** Application du catalogue Docker Compose intégré à Helm. */
+/** Application du catalogue Docker Compose intégré à Zenytt. */
 export interface CatalogApp {
   id: string;
   name: string;
@@ -842,7 +842,7 @@ export interface CatalogRendered {
 /** Famille de registre d'images privé. */
 export type RegistryKind = "dockerhub" | "ghcr" | "gitlab" | "ecr" | "custom";
 
-/** Registre enregistré dans Helm ; le jeton reste dans le coffre du système. */
+/** Registre enregistré dans Zenytt ; le jeton reste dans le coffre du système. */
 export interface Registry {
   id: string;
   name: string;
@@ -982,11 +982,18 @@ export interface TmuxSession {
   command: string;
 }
 
+export interface AppNotice {
+  kind: "info" | "error" | "success";
+  message: string;
+}
+
 export const api = {
   version: () => invoke<string>("app_version"),
 
   uiStateGet: () => invoke<unknown>("ui_state_get"),
   storeWarning: () => invoke<string | null>("store_warning"),
+  /** Messages de la reprise automatique d'une installation précédente, produits avant l'ouverture de l'interface. */
+  appNotices: () => invoke<AppNotice[]>("app_notices"),
   f2bState: (serverId: string) => invoke<F2bState>("f2b_state", { serverId }),
   f2bUnban: (serverId: string, jail: string, ip: string) => invoke<void>("f2b_unban", { serverId, jail, ip }),
   f2bSetIgnore: (serverId: string, addresses: string[]) => invoke<string>("f2b_set_ignore", { serverId, addresses }),

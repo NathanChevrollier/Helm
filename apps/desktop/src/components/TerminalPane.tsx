@@ -263,9 +263,9 @@ export default function TerminalPane({
     // En développement, les terminaux sont joignables depuis la console : le rendu WebGL n'est pas
     // lisible dans le DOM, et les tests d'interface ont besoin de leur contenu.
     if (import.meta.env.DEV) {
-      const bag = (window as unknown as { __helmTerms?: Record<string, Terminal> }).__helmTerms ?? {};
+      const bag = (window as unknown as { __zenyttTerms?: Record<string, Terminal> }).__zenyttTerms ?? {};
       bag[paneId] = term;
-      (window as unknown as { __helmTerms?: Record<string, Terminal> }).__helmTerms = bag;
+      (window as unknown as { __zenyttTerms?: Record<string, Terminal> }).__zenyttTerms = bag;
     }
 
     let disposed = false;
@@ -495,7 +495,7 @@ export default function TerminalPane({
         openHistoryRef.current();
         return false;
       }
-      // Raccourcis de l'app (palette, onglets, verrouillage…) : pour Helm, pas pour le shell.
+      // Raccourcis de l'app (palette, onglets, verrouillage…) : pour Zenytt, pas pour le shell.
       if (isAppShortcut(e)) return false;
       if (!e.ctrlKey) return true;
       if (!e.shiftKey && !e.altKey) {
@@ -589,7 +589,7 @@ export default function TerminalPane({
       // Le panneau peut être reconstruit (changement de serveur, rechargement à chaud) : sans
       // cette remise à zéro, le terminal suivant resterait vide, faute de démarrer.
       started.current = false;
-      if (import.meta.env.DEV) delete (window as unknown as { __helmTerms?: Record<string, Terminal> }).__helmTerms?.[paneId];
+      if (import.meta.env.DEV) delete (window as unknown as { __zenyttTerms?: Record<string, Terminal> }).__zenyttTerms?.[paneId];
       clearTimeout(retryTimer);
       observer.disconnect();
       hostEl.removeEventListener("paste", onPaste, true);
@@ -645,7 +645,7 @@ export default function TerminalPane({
   };
 
   /**
-   * Échec repéré dans ce qui s'affiche. Helm n'installe rien sur le serveur pour cela : le code de
+   * Échec repéré dans ce qui s'affiche. Zenytt n'installe rien sur le serveur pour cela : le code de
    * retour n'est donc pas lisible, et la détection se fait sur le texte (voir lib/terminal-errors).
    * Le tampon n'est relu qu'au repos, une demi-seconde après la dernière sortie : le relire à chaque
    * octet reçu coûterait cher pendant un « tail -f ».
@@ -1011,7 +1011,7 @@ function SharePicker({ onClose, onPick }: { onClose: () => void; onPick: (mode: 
       }
     >
       <p className="text-sm text-muted">
-        Helm crée une session sur ton serveur de synchronisation, qui ne fait que relayer : ce qui s'affiche et ce qui est tapé sont chiffrés
+        Zenytt crée une session sur ton serveur de synchronisation, qui ne fait que relayer : ce qui s'affiche et ce qui est tapé sont chiffrés
         de bout en bout, avec une clé présente uniquement dans l'invitation. Elle est copiée dans ton presse-papiers ; transmets-la à la
         personne, qui la colle dans Terminal → Rejoindre.
       </p>

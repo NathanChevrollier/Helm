@@ -1,7 +1,7 @@
 //! Relevé des compteurs système en lisant directement `/proc` (et `df` pour les disques).
 
-use helm_protocol::proc as p;
-use helm_protocol::RawSample;
+use zenytt_protocol::proc as p;
+use zenytt_protocol::RawSample;
 
 fn read(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_default()

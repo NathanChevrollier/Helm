@@ -152,7 +152,7 @@ export default function ConfigWizard({ serverId, data, onClose, onSaved }: { ser
                 set(
                   "destination",
                   k === "local"
-                    ? { kind: "local", path: existing?.destination.kind === "local" ? existing.destination.path : "/var/backups/helm/restic" }
+                    ? { kind: "local", path: existing?.destination.kind === "local" ? existing.destination.path : "/var/backups/zenytt/restic" }
                     : existing?.destination.kind === "s3"
                       ? existing.destination
                       : { kind: "s3", endpoint: "https://", bucket: "", prefix: "", accessKeyId: "" },
@@ -284,7 +284,7 @@ export default function ConfigWizard({ serverId, data, onClose, onSaved }: { ser
           <div className="flex flex-col gap-4">
             <ResultBanner tone="accent" title="Le mot de passe est la seule clé de tes sauvegardes">
               <span className="text-xs text-muted">
-                Tout est chiffré sur le serveur avant d'être écrit. Sans ce mot de passe, personne ne peut relire les sauvegardes, pas même toi. Helm en garde une copie dans le coffre-fort
+                Tout est chiffré sur le serveur avant d'être écrit. Sans ce mot de passe, personne ne peut relire les sauvegardes, pas même toi. Zenytt en garde une copie dans le coffre-fort
                 de ce PC{data.passwordInKeyring ? " (déjà présente)" : ""}.
               </span>
             </ResultBanner>

@@ -1,6 +1,6 @@
 //! Relais de terminaux partagés : un hôte (celui qui partage) et des invités s'échangent des
 //! messages par WebSocket. Le serveur ne fait que transmettre : le contenu est chiffré de bout en
-//! bout par Helm avec une clé qui ne figure que dans le lien d'invitation, jamais ici.
+//! bout par Zenytt avec une clé qui ne figure que dans le lien d'invitation, jamais ici.
 //!
 //! - `POST /v1/relay` (jeton requis) ouvre une session et renvoie son identifiant ;
 //! - `GET  /v1/relay/{session}?role=host` connecte celui qui partage (un seul à la fois) ;

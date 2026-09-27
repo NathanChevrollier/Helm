@@ -237,7 +237,7 @@ pub async fn write_text(sftp: &SftpSession, conn: Option<&Connection>, path: &st
     let Some(existing) = sftp.metadata(&target).await.ok() else {
         return write_in_place(sftp, &target, content).await;
     };
-    let tmp = format!("{}/.{}.helm-tmp", parent(&target), target.rsplit('/').next().unwrap_or("fichier"));
+    let tmp = format!("{}/.{}.zenytt-tmp", parent(&target), target.rsplit('/').next().unwrap_or("fichier"));
     write_in_place(sftp, &tmp, content).await?;
     let mut attrs = FileAttributes::empty();
     attrs.permissions = existing.permissions.map(|p| p & 0o7777);

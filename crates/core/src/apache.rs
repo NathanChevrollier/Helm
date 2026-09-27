@@ -181,7 +181,7 @@ pub const PROXY_MODULES: &str = "command -v a2enmod >/dev/null 2>&1 && a2enmod -
 /// vhost HTTP en reverse proxy vers un port local, prêt à recevoir HTTPS via certbot.
 pub fn proxy_vhost(domain: &str, port: u16) -> String {
     format!(
-        r#"# Généré par Helm
+        r#"# Généré par Zenytt
 <VirtualHost *:80>
     ServerName {domain}
 

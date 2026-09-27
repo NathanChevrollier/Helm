@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use helm_protocol::{AgentConfig, AgentStatus, AlertEvent, RawSample};
+use zenytt_protocol::{AgentConfig, AgentStatus, AlertEvent, RawSample};
 
 use crate::alerts::{Evaluator, Transition};
 use crate::collector::{self, now_ms};
@@ -37,7 +37,7 @@ impl State {
     pub fn status(&self) -> AgentStatus {
         AgentStatus {
             version: env!("CARGO_PKG_VERSION").into(),
-            protocol: helm_protocol::PROTOCOL_VERSION,
+            protocol: zenytt_protocol::PROTOCOL_VERSION,
             started_at: self.started_at,
             hostname: self.hostname.clone(),
             config: self.config.clone(),
@@ -149,8 +149,8 @@ pub fn start(paths: Paths) -> Result<(), String> {
                     transitions.push(t);
                 }
             }
-            // Résultat de la dernière sauvegarde Helm, s'il y en a une de configurée.
-            let last = std::fs::read_to_string("/var/lib/helm-backup/last.json")
+            // Résultat de la dernière sauvegarde Zenytt, s'il y en a une de configurée.
+            let last = std::fs::read_to_string("/var/lib/zenytt-backup/last.json")
                 .ok()
                 .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
                 .map(|v| {
@@ -168,7 +168,7 @@ pub fn start(paths: Paths) -> Result<(), String> {
         });
     }
 
-    eprintln!("helmd {} démarré, socket {}", env!("CARGO_PKG_VERSION"), paths.socket.display());
+    eprintln!("zenyttd {} démarré, socket {}", env!("CARGO_PKG_VERSION"), paths.socket.display());
     let mut prev: Option<RawSample> = None;
     let mut last_save = now_ms();
     loop {
@@ -176,7 +176,7 @@ pub fn start(paths: Paths) -> Result<(), String> {
         let transitions = {
             let mut s = state.lock().unwrap();
             s.reload_config(&paths.config);
-            let metrics = helm_protocol::compute(prev.as_ref(), &raw);
+            let metrics = zenytt_protocol::compute(prev.as_ref(), &raw);
             // Le premier relevé n'a pas de CPU calculable : on ne l'enregistre pas.
             if prev.is_some() {
                 s.history.push(metrics.clone());
@@ -212,7 +212,7 @@ pub fn test_notify(state: &Shared) -> Result<String, String> {
     if !notify::any_configured(&notifiers) {
         return Err("aucun canal de notification configuré".into());
     }
-    let errors = notify::send(&notifiers, &format!("{server} : notification de test"), "Helm est bien configuré pour t'alerter.", true);
+    let errors = notify::send(&notifiers, &format!("{server} : notification de test"), "Zenytt est bien configuré pour t'alerter.", true);
     if errors.is_empty() {
         Ok("notification envoyée".into())
     } else {

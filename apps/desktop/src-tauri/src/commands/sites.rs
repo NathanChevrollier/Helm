@@ -1,12 +1,12 @@
 //! Sites : vhosts nginx ou Apache, certificats, et assistant de création d'un nouveau site.
 //! Chaque commande prend le serveur web visé (`engine`, nginx par défaut).
 
-use helm_core::apache;
-use helm_core::docker::{self, Access};
-use helm_core::nginx::{self, ApplyResult, Engine, NginxState};
-use helm_core::ssh::shell_quote;
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use zenytt_core::apache;
+use zenytt_core::docker::{self, Access};
+use zenytt_core::nginx::{self, ApplyResult, Engine, NginxState};
+use zenytt_core::ssh::shell_quote;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -254,7 +254,7 @@ pub async fn sites_create_app(
         let compose = nginx::site_compose(&spec.name, &spec.image, spec.host_port, spec.container_port, &spec.env);
         conn.write_file_sudo(&file, &compose, pw.as_deref()).await.map_err(err)?;
         // Premier démarrage : le téléchargement de l'image peut être long.
-        let out = helm_core::ssh::long(docker::run(
+        let out = zenytt_core::ssh::long(docker::run(
             &conn,
             access,
             pw.as_deref(),
@@ -400,7 +400,7 @@ pub async fn domains_check(
     sessions: State<'_, Sessions>,
     server_id: String,
     domains: Vec<String>,
-) -> Result<Vec<helm_core::domains::DomainInfo>, String> {
+) -> Result<Vec<zenytt_core::domains::DomainInfo>, String> {
     let host = store.server(&server_id)?.host;
     let mut ips: Vec<std::net::IpAddr> =
         tokio::net::lookup_host((host.as_str(), 22)).await.map(|a| a.map(|a| a.ip()).collect()).unwrap_or_default();
@@ -411,5 +411,5 @@ pub async fn domains_check(
         }
     }
     let domains: Vec<String> = domains.into_iter().filter(|d| d.contains('.') && !d.starts_with('*')).take(100).collect();
-    Ok(helm_core::domains::check(&domains, &ips).await)
+    Ok(zenytt_core::domains::check(&domains, &ips).await)
 }

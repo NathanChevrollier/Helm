@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use helm_core::sftp::{self, Listing, Progress};
-use helm_core::ssh::shell_quote;
-use helm_core::{archive, search};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+use zenytt_core::sftp::{self, Listing, Progress};
+use zenytt_core::ssh::shell_quote;
+use zenytt_core::{archive, search};
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -53,7 +53,7 @@ pub async fn fs_exec(
     server_id: String,
     cwd: String,
     command: String,
-) -> Result<helm_core::ExecOutput, String> {
+) -> Result<zenytt_core::ExecOutput, String> {
     let cwd = if cwd.trim().is_empty() { "/" } else { cwd.trim() };
     let command = command.trim();
     if command.is_empty() {
@@ -65,11 +65,11 @@ pub async fn fs_exec(
 
 /// Lit en root : taille du fichier sur la première ligne, puis `len` octets à partir de `offset`
 /// en base64 (les octets arrivent intacts, quel que soit l'encodage du fichier).
-async fn sudo_read(conn: &helm_core::Connection, pw: Option<&str>, path: &str, offset: u64, len: u64) -> Result<(u64, Vec<u8>), String> {
+async fn sudo_read(conn: &zenytt_core::Connection, pw: Option<&str>, path: &str, offset: u64, len: u64) -> Result<(u64, Vec<u8>), String> {
     use base64::Engine;
     let q = shell_quote(path);
     let cmd = format!("stat -Lc %s -- {q} && tail -c +{} -- {q} | head -c {len} | base64 -w0", offset + 1);
-    let out = helm_core::ssh::long(conn.exec_sudo(&cmd, pw, None)).await.map_err(err)?.into_result().map_err(err)?.stdout;
+    let out = zenytt_core::ssh::long(conn.exec_sudo(&cmd, pw, None)).await.map_err(err)?.into_result().map_err(err)?.stdout;
     let (size, b64) = out.split_once('\n').unwrap_or((&out, ""));
     let size = size.trim().parse().map_err(|_| format!("taille illisible pour {path}"))?;
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim()).map_err(err)?;

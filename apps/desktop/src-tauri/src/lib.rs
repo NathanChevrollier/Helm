@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod commands;
+mod legacy;
 mod rdp_bridge;
 mod sessions;
 mod store;
@@ -20,7 +21,7 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Refuse toute commande quand Helm est verrouillé, sauf celles de l'écran de verrouillage.
+/// Refuse toute commande quand Zenytt est verrouillé, sauf celles de l'écran de verrouillage.
 /// Le contrôle est fait ici, une fois pour toutes, plutôt que dans chaque commande : une commande
 /// ajoutée plus tard est protégée d'office.
 fn guarded<R: tauri::Runtime>(
@@ -28,7 +29,7 @@ fn guarded<R: tauri::Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
         if workspace::is_locked() && !workspace::ALLOWED_WHILE_LOCKED.contains(&invoke.message.command()) {
-            invoke.resolver.reject("Helm est verrouillé");
+            invoke.resolver.reject("Zenytt est verrouillé");
             return true;
         }
         handler(invoke)
@@ -39,7 +40,7 @@ fn guarded<R: tauri::Runtime>(
 pub fn run() {
     tauri::Builder::default()
         // Une seule instance : une deuxième fenêtre se disputerait les ports des tunnels et
-        // écraserait les réglages de la première. Relancer Helm ramène la fenêtre existante.
+        // écraserait les réglages de la première. Relancer Zenytt ramène la fenêtre existante.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
@@ -51,7 +52,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .clear_targets()
-                .target(Target::new(TargetKind::LogDir { file_name: Some("helm".into()) }))
+                .target(Target::new(TargetKind::LogDir { file_name: Some("zenytt".into()) }))
                 .target(Target::new(TargetKind::Stdout))
                 .level(log::LevelFilter::Info)
                 .level_for("russh", log::LevelFilter::Warn)
@@ -70,11 +71,13 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_config_dir()?;
+            // Installation de la version précédente : profils repris avant la première lecture.
+            legacy::migrate_local(&dir);
             let store = store::Store::open(&dir);
             if let Some(w) = store.warning() {
                 log::warn!("{w}");
             }
-            log::info!("Helm {} démarré", env!("CARGO_PKG_VERSION"));
+            log::info!("Zenytt {} démarré", env!("CARGO_PKG_VERSION"));
             app.manage(store);
             app.manage(store::AuditLog::new(&dir, "app"));
             app.manage(sessions::Sessions::new());
@@ -87,6 +90,7 @@ pub fn run() {
             app.manage(share::Shares::default());
             app.manage(assistant::Assistant::default());
             app.manage(rdp_bridge::Bridges::default());
+            legacy::start(app.handle());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<tunnels::Tunnels>().autostart(&handle).await;
@@ -245,6 +249,7 @@ pub fn run() {
             workspace::ui_state_get,
             workspace::ui_state_set,
             workspace::store_warning,
+            legacy::app_notices,
             workspace::app_lock_get,
             workspace::app_lock_set,
             workspace::app_is_locked,

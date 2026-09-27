@@ -74,7 +74,7 @@ export interface Settings {
   lockMinutes: number;
   /** Taille de police des terminaux (Ctrl+= / Ctrl+- / Ctrl+0). */
   terminalFontSize: number;
-  /** Notifications Windows pour les nouvelles alertes, tant que Helm est ouvert. */
+  /** Notifications Windows pour les nouvelles alertes, tant que Zenytt est ouvert. */
   alertNotifications: boolean;
   /** Thème de l'interface. */
   theme: ThemeSetting;
@@ -90,7 +90,7 @@ export interface Settings {
   showHiddenFiles: boolean;
 }
 
-/** Partie de l'état sauvegardée dans helm.json et restaurée au démarrage. */
+/** Partie de l'état sauvegardée dans zenytt.json et restaurée au démarrage. */
 interface Persisted {
   v: 1;
   section: SectionId;
@@ -183,7 +183,7 @@ interface State {
   setFolders: (update: (f: Folders) => Folders) => void;
 }
 
-const ACTIVE_SERVER_KEY = "helm.activeServer";
+const ACTIVE_SERVER_KEY = "zenytt.activeServer";
 let toastSeq = 0;
 
 function newId(): string {
@@ -191,7 +191,7 @@ function newId(): string {
 }
 
 export function newTmuxName(): string {
-  return `helm-${newId()}`;
+  return `zenytt-${newId()}`;
 }
 
 function readActiveServer(): string | null {

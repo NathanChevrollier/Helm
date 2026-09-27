@@ -112,7 +112,7 @@ export default function ServersView() {
     tab === "servers"
       ? "Profils de connexion · secrets dans le coffre-fort du système"
       : tab === "desktops"
-        ? "RDP et VNC dans Helm, SPICE dans remote-viewer · tunnel SSH le temps de la session"
+        ? "RDP et VNC dans Zenytt, SPICE dans remote-viewer · tunnel SSH le temps de la session"
         : "Un utilisateur et son secret, réutilisés par plusieurs serveurs";
 
   return (

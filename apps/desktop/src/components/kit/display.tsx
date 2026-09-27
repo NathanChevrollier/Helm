@@ -222,7 +222,7 @@ export function Avatar({ name, color, size = 32 }: { name: string; color?: strin
 export function useResizable(key: string, initial: number, min: number, max: number, side: "left" | "right" = "left") {
   const [size, setSize] = useState(() => {
     try {
-      const v = Number(localStorage.getItem(`helm.size.${key}`));
+      const v = Number(localStorage.getItem(`zenytt.size.${key}`));
       return v >= min && v <= max ? v : initial;
     } catch {
       return initial;
@@ -232,7 +232,7 @@ export function useResizable(key: string, initial: number, min: number, max: num
   sizeRef.current = size;
   useEffect(() => {
     try {
-      localStorage.setItem(`helm.size.${key}`, String(size));
+      localStorage.setItem(`zenytt.size.${key}`, String(size));
     } catch {
       /* stockage indisponible : la largeur ne sera pas retenue */
     }

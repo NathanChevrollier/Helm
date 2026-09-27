@@ -3,8 +3,8 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use helm_protocol::{downsample, AlertEvent, HistoryPoint, Metrics};
 use serde::{Deserialize, Serialize};
+use zenytt_protocol::{downsample, AlertEvent, HistoryPoint, Metrics};
 
 /// Minutes conservées : 30 jours.
 pub const MINUTES_KEPT: usize = 30 * 24 * 60;

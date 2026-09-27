@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use helm_protocol::{Request, Response};
+use zenytt_protocol::{Request, Response};
 
 use crate::collector::now_ms;
 use crate::state::{self, Shared};
@@ -19,7 +19,7 @@ pub fn serve(path: &Path, state: Shared) -> std::io::Result<()> {
     }
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
-    // Métriques lisibles par tout utilisateur local (Helm s'y connecte sans sudo). Les URL de
+    // Métriques lisibles par tout utilisateur local (Zenytt s'y connecte sans sudo). Les URL de
     // notification et l'envoi de test sont réservés à root, vérifié sur l'identité du client.
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666))?;
     let active = Arc::new(AtomicUsize::new(0));

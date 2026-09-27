@@ -8,7 +8,7 @@ map $http_upgrade $connection_upgrade {
 }
 
 # Certificat : sudo certbot certonly --nginx -d sync.exemple.fr
-# (ou « Sites » → nouveau site dans Helm, qui s'occupe du vhost et du certificat).
+# (ou « Sites » → nouveau site dans Zenytt, qui s'occupe du vhost et du certificat).
 server {
     listen 80;
     listen [::]:80;

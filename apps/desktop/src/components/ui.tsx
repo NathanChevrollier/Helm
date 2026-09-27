@@ -1,4 +1,4 @@
-// Kit de composants de Helm. Tout ce qui se dessine dans une page passe par ici : un seul style de
+// Kit de composants de Zenytt. Tout ce qui se dessine dans une page passe par ici : un seul style de
 // bouton, de champ, de tableau et d'état (vide, chargement, erreur), pour que chaque section parle
 // la même langue. Les composants vivent dans `kit/`, ce fichier les rassemble.
 export * from "./kit/base";

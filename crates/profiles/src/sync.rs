@@ -1,6 +1,6 @@
 //! Synchronisation des réglages entre plusieurs PC (profils, identifiants, clés d'hôte approuvées,
 //! snippets, tunnels et, au choix, secrets), via un fichier partagé (dossier OneDrive, Dropbox,
-//! partage réseau…) ou un petit serveur auto-hébergé (`helm-sync`, dans Docker).
+//! partage réseau…) ou un petit serveur auto-hébergé (`zenytt-sync`, dans Docker).
 //!
 //! Le contenu est chiffré de bout en bout avec la phrase de passe de synchronisation (même format
 //! que l'export) : ni le fichier ni le serveur ne voient les réglages en clair. Chaque envoi porte
@@ -33,7 +33,7 @@ pub struct SyncConfig {
     /// Fichier partagé (mode fichier).
     #[serde(default)]
     pub path: Option<String>,
-    /// Adresse du serveur `helm-sync` (mode serveur), par ex. `https://sync.exemple.fr`.
+    /// Adresse du serveur `zenytt-sync` (mode serveur), par ex. `https://sync.exemple.fr`.
     #[serde(default)]
     pub url: Option<String>,
     /// Synchroniser aussi les mots de passe, passphrases et mots de passe sudo.
@@ -303,7 +303,7 @@ struct SyncFile {
     data: String,
 }
 
-const FILE_FORMAT: &str = "helm-sync";
+const FILE_FORMAT: &str = "zenytt-sync";
 
 /// Synchronisation par fichier partagé (dossier synchronisé par OneDrive, Dropbox, Syncthing…).
 pub struct FileTransport {
@@ -318,9 +318,9 @@ impl Transport for FileTransport {
             Err(e) => return Err(format!("lecture de {} : {e}", self.path.display())),
         };
         let f: SyncFile =
-            serde_json::from_str(&text).map_err(|_| format!("{} n'est pas un fichier de synchronisation Helm", self.path.display()))?;
-        if f.format != FILE_FORMAT {
-            return Err(format!("{} n'est pas un fichier de synchronisation Helm", self.path.display()));
+            serde_json::from_str(&text).map_err(|_| format!("{} n'est pas un fichier de synchronisation Zenytt", self.path.display()))?;
+        if f.format != FILE_FORMAT && f.format != crate::legacy::OLD_SYNC_FORMAT {
+            return Err(format!("{} n'est pas un fichier de synchronisation Zenytt", self.path.display()));
         }
         Ok(Some(Remote { rev: f.rev, data: f.data }))
     }
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn two_pcs_converge() {
         let (a_dir, b_dir, shared) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let t = FileTransport { path: shared.path().join("helm-sync.json") };
+        let t = FileTransport { path: shared.path().join("zenytt-sync.json") };
         let (a, b) = (store(a_dir.path()), store(b_dir.path()));
         let pass = "phrase de passe";
 
@@ -431,7 +431,7 @@ mod tests {
         crate::Registry {
             id: id.into(),
             name: id.into(),
-            kind: helm_core::registry::Kind::Ghcr,
+            kind: zenytt_core::registry::Kind::Ghcr,
             server: "ghcr.io".into(),
             username: "alice".into(),
         }

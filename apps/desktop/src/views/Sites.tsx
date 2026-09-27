@@ -23,7 +23,7 @@ export default function SitesView() {
   return <ServerGate title="Sites" guide="sites">{(serverId) => <Sites key={serverId} serverId={serverId} />}</ServerGate>;
 }
 
-const EMAIL_KEY = "helm.certbotEmail";
+const EMAIL_KEY = "zenytt.certbotEmail";
 
 const DAY = 86400;
 function certTone(c: Certificate): "ok" | "warn" | "danger" {
@@ -199,7 +199,7 @@ function Sites({ serverId }: { serverId: string }) {
         action={engine === "apache" ? <Button onClick={() => setEngine("nginx")}>Revenir à nginx</Button> : undefined}
       >
         {state.others.length > 0
-          ? `Serveur web détecté : ${state.others.join(", ")}. Helm gère nginx et Apache ; les autres sections (Docker, Pare-feu, Journaux…) restent utilisables.`
+          ? `Serveur web détecté : ${state.others.join(", ")}. Zenytt gère nginx et Apache ; les autres sections (Docker, Pare-feu, Journaux…) restent utilisables.`
           : "Aucun serveur web détecté."}
       </EmptyState>,
     );

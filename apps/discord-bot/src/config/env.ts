@@ -18,6 +18,8 @@ const envSchema = z.object({
   GITHUB_OWNER: z.string().regex(/^[A-Za-z0-9_.-]+$/),
   GITHUB_REPO: z.string().regex(/^[A-Za-z0-9_.-]+$/),
   GITHUB_PROJECT_NUMBER: optionalProjectNumber,
+  // Jeton « classic » limité à read:project : un jeton fine-grained ne lit pas les projets d'un compte personnel.
+  GITHUB_PROJECT_TOKEN: z.preprocess((value) => (value === "" ? undefined : value), z.string().min(1).optional()),
   SUGGESTION_CHANNEL_ID: z.string().regex(/^\d{17,20}$/, "SUGGESTION_CHANNEL_ID doit être un identifiant Discord valide"),
   BUG_CHANNEL_ID: z.string().regex(/^\d{17,20}$/, "BUG_CHANNEL_ID doit être un identifiant Discord valide"),
   ROADMAP_CHANNEL_ID: optionalDiscordId,

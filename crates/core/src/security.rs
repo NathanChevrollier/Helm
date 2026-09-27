@@ -285,7 +285,7 @@ pub fn parse_report(out: &str) -> Report {
                     "xrdp-bpp",
                     Severity::Low,
                     &format!("Bureau à distance xrdp limité à {} bits", bpp.unwrap_or(16)),
-                    "Les clients RDP (Helm compris) reçoivent alors une image rayée et des couleurs dégradées. Passer max_bpp à 32 dans /etc/xrdp/xrdp.ini corrige l'affichage.",
+                    "Les clients RDP (Zenytt compris) reçoivent alors une image rayée et des couleurs dégradées. Passer max_bpp à 32 dans /etc/xrdp/xrdp.ini corrige l'affichage.",
                     Some(("xrdp-32bpp", "Passer xrdp en couleurs 32 bits")),
                 ));
             }
@@ -301,14 +301,14 @@ pub async fn audit(conn: &Connection, sudo: Option<&str>) -> Result<Report> {
     Ok(parse_report(&out.stdout))
 }
 
-/// Modification de sshd : drop-in `00-helm.conf` (lu en premier, donc prioritaire sur
+/// Modification de sshd : drop-in `00-zenytt.conf` (lu en premier, donc prioritaire sur
 /// `50-cloud-init.conf`) si sshd_config inclut le dossier, sinon directive en tête du fichier.
 /// `$1` = directives (une par ligne). Sauvegarde, `sshd -t`, puis reload.
 const SSHD_SCRIPT: &str = r#"set -u
 CONF=/etc/ssh/sshd_config
-BK=/var/backups/helm/sshd_config.$(date +%Y%m%d-%H%M%S)
-mkdir -p /var/backups/helm && cp -a "$CONF" "$BK" || { echo "@@FAILED sauvegarde"; exit 1; }
-DROP=/etc/ssh/sshd_config.d/00-helm.conf
+BK=/var/backups/zenytt/sshd_config.$(date +%Y%m%d-%H%M%S)
+mkdir -p /var/backups/zenytt && cp -a "$CONF" "$BK" || { echo "@@FAILED sauvegarde"; exit 1; }
+DROP=/etc/ssh/sshd_config.d/00-zenytt.conf
 [ -f "$DROP" ] && cp -a "$DROP" "$BK.drop"
 if grep -Eqi '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$CONF"; then
   touch "$DROP"
@@ -321,7 +321,7 @@ if grep -Eqi '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' 
 else
   printf '%s\n' "$1" | while IFS=' ' read -r key val; do
     [ -n "$key" ] || continue
-    sed -i "s/^[[:space:]]*$key[[:space:]].*/# & (désactivé par Helm)/I" "$CONF"
+    sed -i "s/^[[:space:]]*$key[[:space:]].*/# & (désactivé par Zenytt)/I" "$CONF"
     sed -i "1i $key $val" "$CONF"
   done
 fi
@@ -338,7 +338,7 @@ echo "@@OK $BK"
 /// Restaure sshd_config (et le drop-in) depuis la sauvegarde `$1`.
 const SSHD_ROLLBACK: &str = r#"BK="$1"
 cp -a "$BK" /etc/ssh/sshd_config
-if [ -f "$BK.drop" ]; then cp -a "$BK.drop" /etc/ssh/sshd_config.d/00-helm.conf; else rm -f /etc/ssh/sshd_config.d/00-helm.conf; fi
+if [ -f "$BK.drop" ]; then cp -a "$BK.drop" /etc/ssh/sshd_config.d/00-zenytt.conf; else rm -f /etc/ssh/sshd_config.d/00-zenytt.conf; fi
 sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || service ssh reload; }
 echo "@@ROLLEDBACK"
 "#;
@@ -380,7 +380,7 @@ if ! command -v fail2ban-client >/dev/null; then
 fi
 PORTS=$(sshd -T 2>/dev/null | awk '/^port /{print $2}' | paste -sd, -)
 # jail.d/*.local est lu après jail.local : seuls « enabled » et « port » sont redéfinis.
-printf '# Géré par Helm : protection SSH sur le port réellement utilisé.\n[sshd]\nenabled = true\nport = %s\n' "${PORTS:-ssh}" > /etc/fail2ban/jail.d/helm-sshd.local
+printf '# Géré par Zenytt : protection SSH sur le port réellement utilisé.\n[sshd]\nenabled = true\nport = %s\n' "${PORTS:-ssh}" > /etc/fail2ban/jail.d/zenytt-sshd.local
 systemctl enable --now fail2ban 2>/dev/null || fail2ban-client ping >/dev/null 2>&1 || fail2ban-client start
 fail2ban-client reload >/dev/null 2>&1 || true
 echo '@@OK fail2ban'
@@ -404,7 +404,7 @@ echo '@@OK unattended'
 const XRDP_32BPP_SCRIPT: &str = r#"set -e
 F=/etc/xrdp/xrdp.ini
 [ -f "$F" ] || { echo "@@FAILED xrdp n'est pas installé"; exit 1; }
-mkdir -p /var/backups/helm && cp -a "$F" "/var/backups/helm/xrdp.ini.$(date +%Y%m%d-%H%M%S)"
+mkdir -p /var/backups/zenytt && cp -a "$F" "/var/backups/zenytt/xrdp.ini.$(date +%Y%m%d-%H%M%S)"
 if grep -Eq '^[[:space:]]*max_bpp[[:space:]]*=' "$F"; then
   sed -i -E 's/^[[:space:]]*max_bpp[[:space:]]*=.*/max_bpp=32/' "$F"
 else
@@ -460,7 +460,7 @@ pub fn fix_plan(id: &str) -> Result<FixPlan> {
             false,
         ),
         "xrdp-32bpp" => plan(
-            "Règle xrdp en couleurs 32 bits (max_bpp=32, xrdp.ini sauvegardé dans /var/backups/helm), puis redémarre xrdp. Les sessions de bureau à distance ouvertes sur ce serveur seront coupées.",
+            "Règle xrdp en couleurs 32 bits (max_bpp=32, xrdp.ini sauvegardé dans /var/backups/zenytt), puis redémarre xrdp. Les sessions de bureau à distance ouvertes sur ce serveur seront coupées.",
             XRDP_32BPP_SCRIPT.to_string(),
             false,
         ),
@@ -480,7 +480,7 @@ pub struct FixOutcome {
 pub async fn apply_fix(conn: &Connection, sudo: Option<&str>, id: &str) -> Result<FixOutcome> {
     crate::ssh::long(async move {
         let plan = fix_plan(id)?;
-        let out = conn.exec_sudo(&format!("bash -c {} helm-fix", crate::ssh::shell_quote(&plan.script)), sudo, None).await?;
+        let out = conn.exec_sudo(&format!("bash -c {} zenytt-fix", crate::ssh::shell_quote(&plan.script)), sudo, None).await?;
         let text = format!("{}{}", out.stdout, out.stderr);
         let ok = out.success() && text.contains("@@OK");
         let rollback = text
@@ -499,8 +499,8 @@ pub async fn rollback(conn: &Connection, sudo: Option<&str>, token: &str) -> Res
         "ufw --force disable && echo @@ROLLEDBACK".to_string()
     } else if token == "firewalld" {
         "systemctl disable --now firewalld && echo @@ROLLEDBACK".to_string()
-    } else if token.starts_with("/var/backups/helm/sshd_config.") && !token.contains("..") && !token.contains(' ') {
-        format!("bash -c {} helm-rollback {}", crate::ssh::shell_quote(SSHD_ROLLBACK), crate::ssh::shell_quote(token))
+    } else if token.starts_with("/var/backups/zenytt/sshd_config.") && !token.contains("..") && !token.contains(' ') {
+        format!("bash -c {} zenytt-rollback {}", crate::ssh::shell_quote(SSHD_ROLLBACK), crate::ssh::shell_quote(token))
     } else {
         return Err(Error::Other("jeton de retour arrière invalide".into()));
     };
@@ -583,7 +583,7 @@ Rocky
         }
         assert!(!parse_report(base).findings.iter().any(|f| f.id == "xrdp-bpp"));
         let p = fix_plan("xrdp-32bpp").unwrap();
-        assert!(p.script.contains("max_bpp=32") && p.script.contains("/var/backups/helm/xrdp.ini"));
+        assert!(p.script.contains("max_bpp=32") && p.script.contains("/var/backups/zenytt/xrdp.ini"));
         assert!(!p.needs_verification);
     }
 
@@ -592,7 +592,7 @@ Rocky
         let p = fix_plan("disable-password-auth").unwrap();
         assert!(p.needs_verification);
         assert!(p.script.contains("PasswordAuthentication no"));
-        assert!(p.script.contains("00-helm.conf"));
+        assert!(p.script.contains("00-zenytt.conf"));
         assert!(fix_plan("rm-rf").is_err());
     }
 }

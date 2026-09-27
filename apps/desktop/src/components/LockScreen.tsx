@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Lock } from "lucide-react";
-import { HelmLogo } from "./HelmLogo";
+import { AppLogo } from "./AppLogo";
 import { useLock } from "../lib/lock";
 import { Button, Input } from "./ui";
 
@@ -71,10 +71,10 @@ export default function LockScreen() {
             void submit();
           }}
         >
-          <HelmLogo size={52} className="drop-shadow-md" />
+          <AppLogo size={52} className="drop-shadow-md" />
           <div className="text-center">
             <h1 className="flex items-center justify-center gap-2 text-base font-semibold">
-              <Lock size={14} /> Helm est verrouillé
+              <Lock size={14} /> Zenytt est verrouillé
             </h1>
             <p className="mt-1 text-xs text-muted">Les connexions et les terminaux continuent en arrière-plan.</p>
           </div>
@@ -82,8 +82,8 @@ export default function LockScreen() {
             ref={input}
             type="password"
             className="h-9"
-            aria-label="Mot de passe de Helm"
-            placeholder="Mot de passe de Helm"
+            aria-label="Mot de passe de Zenytt"
+            placeholder="Mot de passe de Zenytt"
             value={password}
             onKeyUp={(e) => setCaps(e.getModifierState("CapsLock"))}
             onChange={(e) => {

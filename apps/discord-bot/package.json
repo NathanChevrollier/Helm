@@ -1,9 +1,9 @@
 {
-  "name": "helm-discord-bot",
+  "name": "zenytt-discord-bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Bot Discord autonome pour collecter les retours Helm et créer des issues GitHub.",
+  "description": "Bot Discord autonome pour collecter les retours Zenytt et créer des issues GitHub.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",

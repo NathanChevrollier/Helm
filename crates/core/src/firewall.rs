@@ -213,7 +213,7 @@ pub async fn delete(conn: &Connection, sudo: Option<&str>, num: u32) -> Result<S
     let ssh = if st.ssh_ports.is_empty() { vec![22] } else { st.ssh_ports.clone() };
     if ssh.iter().any(|p| rule_allows(rule, *p, "tcp")) || rule.to.to_lowercase().contains("ssh") {
         return Err(Error::Other(format!(
-            "la règle {num} ({}) autorise l'accès SSH : Helm refuse de la supprimer pour ne pas te couper l'accès.",
+            "la règle {num} ({}) autorise l'accès SSH : Zenytt refuse de la supprimer pour ne pas te couper l'accès.",
             rule.to
         )));
     }

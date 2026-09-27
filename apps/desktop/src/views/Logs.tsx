@@ -28,7 +28,7 @@ interface Line {
   text: string;
   at: number;
   level: 0 | 1 | 2;
-  /** Ligne insérée par Helm (relance du flux), pas par le serveur. */
+  /** Ligne insérée par Zenytt (relance du flux), pas par le serveur. */
   marker?: boolean;
 }
 
@@ -72,7 +72,7 @@ function Logs({ serverId }: { serverId: string }) {
   const notify = useApp((s) => s.notify);
   const ask = useApp((s) => s.ask);
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
-  const presetKey = `helm.logPresets.${serverId}`;
+  const presetKey = `zenytt.logPresets.${serverId}`;
 
   const [available, setAvailable] = useState<{ containers: string[]; units: string[]; files: string[] } | null>(null);
   const [sourcesError, setSourcesError] = useState<string | null>(null);
@@ -85,8 +85,8 @@ function Logs({ serverId }: { serverId: string }) {
   const [filter, setFilter] = useState("");
   const [sourceQuery, setSourceQuery] = useState("");
   const [level, setLevel] = useState<Level>("all");
-  const [showTime, setShowTime] = useState(() => readLocal("helm.logs.time", true));
-  const [wrap, setWrap] = useState(() => readLocal("helm.logs.wrap", true));
+  const [showTime, setShowTime] = useState(() => readLocal("zenytt.logs.time", true));
+  const [wrap, setWrap] = useState(() => readLocal("zenytt.logs.wrap", true));
   /** Colle à la fin tant que l'utilisateur ne remonte pas dans le flux. */
   const [follow, setFollow] = useState(true);
 
@@ -142,7 +142,7 @@ function Logs({ serverId }: { serverId: string }) {
         // Les sources déjà suivies renverraient leurs 200 dernières lignes : on repart d'une liste
         // propre plutôt que de mélanger doublons et nouvelles lignes.
         buffer.current = [];
-        setLines([{ id: ++seq.current, tag: "helm", color: "", text: `Sources modifiées : ${sources.map(label).join(", ")}`, at: Date.now(), level: 0, marker: true }]);
+        setLines([{ id: ++seq.current, tag: "zenytt", color: "", text: `Sources modifiées : ${sources.map(label).join(", ")}`, at: Date.now(), level: 0, marker: true }]);
       } else {
         buffer.current = [];
         setLines([]);
@@ -345,8 +345,8 @@ function Logs({ serverId }: { serverId: string }) {
             ]}
           />
           <ToolbarSep />
-          <Checkbox className="text-xs" checked={showTime} onChange={(v) => (setShowTime(v), writeLocal("helm.logs.time", v))} label="Heure" />
-          <Checkbox className="text-xs" checked={wrap} onChange={(v) => (setWrap(v), writeLocal("helm.logs.wrap", v))} label="Retour à la ligne" />
+          <Checkbox className="text-xs" checked={showTime} onChange={(v) => (setShowTime(v), writeLocal("zenytt.logs.time", v))} label="Heure" />
+          <Checkbox className="text-xs" checked={wrap} onChange={(v) => (setWrap(v), writeLocal("zenytt.logs.wrap", v))} label="Retour à la ligne" />
           <span className="ml-auto text-xs text-muted tabular-nums">
             {visible.length.toLocaleString("fr-FR")} ligne{visible.length > 1 ? "s" : ""}
             {lines.length > visible.length ? ` sur ${lines.length.toLocaleString("fr-FR")}` : ""}

@@ -25,6 +25,7 @@ import { hashPassword, useLock } from "../lib/lock";
 import type { ThemeSetting } from "../lib/theme";
 import { comboOf, display, SHORTCUTS, shortcutOf, type ShortcutId } from "../lib/shortcuts";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Badge, Button, Card, Checkbox, CodeBlock, DataTable, Field, IconButton, Input, Loading, Segmented, Select, Switch, type Column } from "../components/ui";
 import PageLayout from "../components/PageLayout";
 import { checkForUpdate } from "../lib/updater";
@@ -40,12 +41,12 @@ const NAV: { id: TabId; label: string; icon: LucideIcon; description: string }[]
   { id: "general", label: "Général", icon: Monitor, description: "Thème, actualisation, notifications et fichiers." },
   { id: "terminal", label: "Terminal", icon: SquareTerminal, description: "Sessions persistantes, police, clic droit, monitoring." },
   { id: "shortcuts", label: "Raccourcis", icon: Keyboard, description: "Tous modifiables : clique sur un raccourci puis tape la combinaison voulue." },
-  { id: "lock", label: "Sécurité de l'app", icon: Lock, description: "Verrouillage de Helm sur ce poste." },
+  { id: "lock", label: "Sécurité de l'app", icon: Lock, description: "Verrouillage de Zenytt sur ce poste." },
   { id: "ai", label: "Assistant IA", icon: Bot, description: "Fournisseur, modèle, clé et ce que l'assistant a le droit de consulter." },
   { id: "mcp", label: "Accès IA (MCP)", icon: Plug, description: "Serveurs lisibles par l'IA et branchement de Claude Code ou Claude Desktop." },
   { id: "sync", label: "Synchronisation", icon: RefreshCw, description: "Retrouver sa configuration sur un autre poste, ou l'exporter dans un fichier chiffré." },
   { id: "maintenance", label: "Maintenance", icon: Wrench, description: "Mises à jour et journaux de l'app." },
-  { id: "journal", label: "Journal d'actions", icon: History, description: "Chaque modification faite par Helm sur un serveur, et chaque lecture de l'IA via MCP." },
+  { id: "journal", label: "Journal d'actions", icon: History, description: "Chaque modification faite par Zenytt sur un serveur, et chaque lecture de l'IA via MCP." },
 ];
 
 /** Groupe de réglages : un titre, puis des lignes dans une même carte. */
@@ -175,7 +176,7 @@ function General() {
       <Group title="Notifications et fichiers">
         <Toggle
           title={`Notifications ${OS_NAME} pour les alertes`}
-          description="Tant que Helm est ouvert, une notification apparaît dès qu'une alerte se déclenche (CPU, mémoire, disque, site injoignable…). Helm fermé, c'est l'agent qui prévient (Discord, ntfy, webhook)."
+          description="Tant que Zenytt est ouvert, une notification apparaît dès qu'une alerte se déclenche (CPU, mémoire, disque, site injoignable…). Zenytt fermé, c'est l'agent qui prévient (Discord, ntfy, webhook)."
           checked={settings.alertNotifications}
           onChange={(alertNotifications) => setSettings({ alertNotifications })}
         />
@@ -200,7 +201,7 @@ function TerminalPrefs() {
       <Group>
         <Toggle
           title="Sessions persistantes (tmux)"
-          description="Les nouveaux terminaux tournent dans une session tmux : ils survivent aux coupures réseau et à la fermeture de Helm, et se rattachent automatiquement."
+          description="Les nouveaux terminaux tournent dans une session tmux : ils survivent aux coupures réseau et à la fermeture de Zenytt, et se rattachent automatiquement."
           checked={settings.persistentSessions}
           onChange={(persistentSessions) => setSettings({ persistentSessions })}
         />
@@ -250,7 +251,7 @@ function Maintenance() {
   const [checking, setChecking] = useState(false);
   return (
     <Group>
-      <Setting title="Mises à jour" description="Helm vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.">
+      <Setting title="Mises à jour" description="Zenytt vérifie au démarrage si une nouvelle version est publiée sur GitHub. Les mises à jour sont signées : une version modifiée est refusée.">
         <Button
           size="sm"
           loading={checking}
@@ -262,14 +263,32 @@ function Maintenance() {
           Rechercher
         </Button>
       </Setting>
-      <Setting title="Journaux de Helm" description="Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.">
+      <Setting title="Journaux de Zenytt" description="Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.">
         <Button size="sm" onClick={() => void api.logsOpenDir().catch((e) => notify(errorMessage(e), "error"))}>
           Ouvrir le dossier
         </Button>
       </Setting>
+      <Setting title="Licence et confidentialité" description="Zenytt n'envoie aucune télémétrie : tes données restent sur ton ordinateur. © 2026 Nathan Chevrollier, licence PolyForm Shield 1.0.0.">
+        <div className="flex flex-wrap justify-end gap-2">
+          {LEGAL_DOCS.map(([label, path]) => (
+            <Button key={path} size="sm" onClick={() => void openUrl(`${REPO_BLOB}/${path}`)}>
+              {label}
+            </Button>
+          ))}
+        </div>
+      </Setting>
     </Group>
   );
 }
+
+const REPO_BLOB = "https://github.com/NathanChevrollier/Zenytt/blob/main";
+const LEGAL_DOCS = [
+  ["Confidentialité", "docs/legal/confidentialite.md"],
+  ["Conditions", "docs/legal/conditions-utilisation.md"],
+  ["Licence", "LICENSE"],
+  ["Composants tiers", "THIRD_PARTY_NOTICES.md"],
+  ["Mentions légales", "docs/legal/mentions-legales.md"],
+] as const;
 
 const PERIODS = [
   { value: "1", label: "24 dernières heures" },
@@ -316,7 +335,7 @@ function Journal() {
   }, [entries, filter, origin, period, failedOnly]);
 
   const exportCsv = async () => {
-    const path = await saveDialog({ title: "Exporter le journal", defaultPath: `helm-journal-${new Date().toISOString().slice(0, 10)}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+    const path = await saveDialog({ title: "Exporter le journal", defaultPath: `zenytt-journal-${new Date().toISOString().slice(0, 10)}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (!path) return;
     const cell = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const lines = [
@@ -334,7 +353,7 @@ function Journal() {
 
   const columns: Column<AuditEntry>[] = [
     { key: "t", header: "Date", width: "150px", sortValue: (e) => e.t, render: (e) => <span className="text-xs text-muted tabular-nums">{new Date(e.t).toLocaleString("fr-FR")}</span> },
-    { key: "origin", header: "Origine", width: "80px", sortValue: (e) => e.origin, render: (e) => (e.origin === "mcp" ? <Badge tone="accent">IA</Badge> : <Badge>Helm</Badge>) },
+    { key: "origin", header: "Origine", width: "80px", sortValue: (e) => e.origin, render: (e) => (e.origin === "mcp" ? <Badge tone="accent">IA</Badge> : <Badge>Zenytt</Badge>) },
     { key: "server", header: "Serveur", width: "130px", sortValue: (e) => e.serverName, render: (e) => <span className="truncate text-xs">{e.serverName}</span> },
     { key: "action", header: "Action", width: "170px", sortValue: (e) => e.action, render: (e) => <span className="truncate font-mono text-xs">{e.action}</span> },
     {
@@ -377,7 +396,7 @@ function Journal() {
           onChange={setOrigin}
           options={[
             { value: "all", label: "Tout" },
-            { value: "app", label: "Helm" },
+            { value: "app", label: "Zenytt" },
             { value: "mcp", label: "IA" },
           ]}
         />
@@ -458,7 +477,7 @@ function AiAccess() {
           <Field label="Claude Desktop (fichier claude_desktop_config.json)">
             <CodeBlock code={config.claudeDesktop} />
           </Field>
-          <p className="text-xs text-muted">Le serveur MCP est l'app Helm elle-même, lancée avec l'option --mcp (sans fenêtre). Réinstalle la config si tu déplaces Helm.</p>
+          <p className="text-xs text-muted">Le serveur MCP est l'app Zenytt elle-même, lancée avec l'option --mcp (sans fenêtre). Réinstalle la config si tu déplaces Zenytt.</p>
         </section>
       )}
     </div>
@@ -473,7 +492,7 @@ const LOCK_DELAYS = [
   { minutes: 60, label: "Après 1 heure d'inactivité" },
 ];
 
-/** Mot de passe de verrouillage de Helm et délai de verrouillage automatique. */
+/** Mot de passe de verrouillage de Zenytt et délai de verrouillage automatique. */
 function AppLock() {
   const { settings, setSettings, notify, ask } = useAppPick("settings", "setSettings", "notify", "ask");
   const configured = useLock((s) => s.configured);
@@ -501,7 +520,7 @@ function AppLock() {
   };
 
   const remove = async () => {
-    if (!(await ask({ title: "Désactiver le verrouillage ?", body: "Helm ne sera plus protégé par un mot de passe.", confirmLabel: "Désactiver", danger: true }))) return;
+    if (!(await ask({ title: "Désactiver le verrouillage ?", body: "Zenytt ne sera plus protégé par un mot de passe.", confirmLabel: "Désactiver", danger: true }))) return;
     await api.appLockSet("");
     setSettings({ lockMinutes: 0 });
     await useLock.getState().refresh();
@@ -511,10 +530,10 @@ function AppLock() {
     <Card className="flex flex-col gap-4">
       <div>
         <span className="flex items-center gap-2 text-[13px] font-medium">
-          <Lock size={14} /> Verrouillage de Helm {configured ? <Badge tone="ok">activé</Badge> : <Badge>désactivé</Badge>}
+          <Lock size={14} /> Verrouillage de Zenytt {configured ? <Badge tone="ok">activé</Badge> : <Badge>désactivé</Badge>}
         </span>
         <span className="mt-0.5 block text-xs leading-relaxed text-muted">
-          Helm ouvert donne accès à tous tes serveurs. Un mot de passe masque l'interface quand tu t'absentes ; connexions et terminaux continuent en arrière-plan. Seule son empreinte est conservée, dans le {VAULT}.
+          Zenytt ouvert donne accès à tous tes serveurs. Un mot de passe masque l'interface quand tu t'absentes ; connexions et terminaux continuent en arrière-plan. Seule son empreinte est conservée, dans le {VAULT}.
         </span>
       </div>
       {configured && !editing && (
@@ -573,7 +592,7 @@ function ExportImport() {
 
   const doExport = async () => {
     if (withSecrets && pw.length < 8) return notify("Avec les secrets, choisis un mot de passe d'au moins 8 caractères.", "error");
-    const path = await saveDialog({ defaultPath: `helm-reglages-${new Date().toISOString().slice(0, 10)}.helm`, filters: [{ name: "Réglages Helm", extensions: ["helm"] }] });
+    const path = await saveDialog({ defaultPath: `zenytt-reglages-${new Date().toISOString().slice(0, 10)}.zenytt`, filters: [{ name: "Réglages Zenytt", extensions: ["zenytt"] }] });
     if (!path) return;
     try {
       await api.settingsExport(path, pw, withSecrets);
@@ -586,7 +605,7 @@ function ExportImport() {
   };
 
   const doImport = async () => {
-    const path = await openDialog({ multiple: false, filters: [{ name: "Réglages Helm", extensions: ["helm", "json"] }] });
+    const path = await openDialog({ multiple: false, filters: [{ name: "Réglages Zenytt", extensions: ["zenytt", "json"] }] });
     if (typeof path !== "string") return;
     try {
       let password = "";

@@ -1,8 +1,8 @@
-# Helm
+# Zenytt
 
-[![CI](https://github.com/NathanChevrollier/Helm/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Helm/actions/workflows/ci.yml)
-[![Dernière version](https://img.shields.io/github/v/release/NathanChevrollier/Helm?label=version)](https://github.com/NathanChevrollier/Helm/releases/latest)
-[![Licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
+[![CI](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml)
+[![Dernière version](https://img.shields.io/github/v/release/NathanChevrollier/Zenytt?label=version)](https://github.com/NathanChevrollier/Zenytt/releases/latest)
+[![Licence PolyForm Shield](https://img.shields.io/badge/licence-PolyForm%20Shield%201.0.0-blue)](LICENSE)
 
 *[English version](README.en.md)*
 
@@ -10,7 +10,7 @@ Application de bureau (Windows, macOS, Linux) pour administrer ses serveurs Linu
 fichiers, supervision, Docker, bases de données, sites web, sauvegardes et audit de sécurité dans
 une seule fenêtre.
 
-**Tout passe par SSH.** Helm n'installe aucun panneau web, n'ouvre aucun port sur le serveur et ne
+**Tout passe par SSH.** Zenytt n'installe aucun panneau web, n'ouvre aucun port sur le serveur et ne
 dépend d'aucun service tiers. Les identifiants restent dans le coffre-fort du système
 d'exploitation, et tout ce qui transite par un serveur de relais est chiffré de bout en bout.
 
@@ -22,37 +22,37 @@ d'exploitation, et tout ce qui transite par un serveur de relais est chiffré de
 - [Assistant IA](#assistant-ia)
 - [Partage et synchronisation](#partage-et-synchronisation)
 - [Serveur MCP (lecture seule)](#serveur-mcp-lecture-seule)
-- [Agent `helmd`](#agent-helmd)
+- [Agent `zenyttd`](#agent-zenyttd)
 - [Modèle de sécurité](#modèle-de-sécurité)
 - [Compatibilité serveur](#compatibilité-serveur)
 - [Raccourcis clavier](#raccourcis-clavier)
 - [Architecture du dépôt](#architecture-du-dépôt)
 - [Développement](#développement)
 - [Intégration continue et publication](#intégration-continue-et-publication)
-- [Licence](#licence)
+- [Licence et mentions légales](#licence-et-mentions-légales)
 
 ## Installation
 
 Par le gestionnaire de paquets de ton système :
 
 ```sh
-winget install NathanChevrollier.Helm                              # Windows
-brew tap NathanChevrollier/tap && brew install --cask helm-desktop # macOS
-yay -S helm-desktop-bin                                            # Arch Linux (AUR)
-flatpak install flathub dev.helm.desktop                           # Linux (Flatpak)
+winget install NathanChevrollier.Zenytt                              # Windows
+brew tap NathanChevrollier/tap && brew install --cask zenytt-desktop # macOS
+yay -S zenytt-desktop-bin                                            # Arch Linux (AUR)
+flatpak install flathub dev.zenytt.desktop                           # Linux (Flatpak)
 ```
 
 Les manifestes de chaque canal sont dans [`packaging/`](packaging/). Sinon, les installeurs sont
-publiés sur la page [Releases](https://github.com/NathanChevrollier/Helm/releases/latest).
+publiés sur la page [Releases](https://github.com/NathanChevrollier/Zenytt/releases/latest).
 
 | Système | Fichier |
 | --- | --- |
-| Windows 10/11 | `Helm_x.y.z_x64-setup.exe` |
-| macOS Apple Silicon | `Helm_x.y.z_aarch64.dmg` |
-| macOS Intel | `Helm_x.y.z_x64.dmg` |
+| Windows 10/11 | `Zenytt_x.y.z_x64-setup.exe` |
+| macOS Apple Silicon | `Zenytt_x.y.z_aarch64.dmg` |
+| macOS Intel | `Zenytt_x.y.z_x64.dmg` |
 | Linux | `.AppImage` (mises à jour automatiques), `.deb` ou `.rpm` |
 
-Helm vérifie au démarrage si une nouvelle version existe et propose de l'installer
+Zenytt vérifie au démarrage si une nouvelle version existe et propose de l'installer
 (Réglages → Maintenance → Mises à jour). Les paquets sont signés : une version altérée est refusée.
 
 > **Windows** — tant que la signature de code SignPath n'est pas active, SmartScreen affiche
@@ -63,7 +63,7 @@ Helm vérifie au démarrage si une nouvelle version existe et propose de l'insta
 > **macOS** — l'app n'est pas notariée par Apple. Au premier lancement :
 > *Réglages Système* → *Confidentialité et sécurité* → *Ouvrir quand même*. Si macOS indique que
 > l'app « est endommagée », lancer une fois
-> `xattr -dr com.apple.quarantine /Applications/Helm.app`.
+> `xattr -dr com.apple.quarantine /Applications/Zenytt.app`.
 
 ## Premiers pas
 
@@ -88,7 +88,7 @@ du système (Windows Credential Manager, Trousseau macOS, Secret Service sous Li
 | **Serveurs** | Profils SSH, dossiers de rangement, banque d'identifiants réutilisables, serveurs de rebond, import PuTTY et `ssh_config`, vérification de la clé d'hôte, **bureaux à distance ouverts dans l'app** : RDP (avec transfert de fichiers par le presse-papiers) et **VNC** (qualité d'image réglable, lecture seule) dans des clients intégrés, consoles de VM **SPICE** dans remote-viewer — le tout à travers un tunnel SSH quand la machine n'est joignable que depuis un serveur. |
 | **Terminal** | Sessions **tmux persistantes** qui survivent aux coupures et à la fermeture de l'app. Onglets, division horizontale ou verticale réglable, panneau de fichiers qui suit le dossier courant, dépôt de fichiers Windows directement dans le dossier courant, **diffusion de la saisie** à plusieurs serveurs avec confirmation des commandes sensibles, **bouton « Pourquoi cette commande a échoué ? »** qui ouvre l'assistant sur l'erreur, **historique du serveur** en recherche approximative (Ctrl+Maj+R), fragments **à paramètres** (`{{conteneur}}`, `{{lignes:100}}`), enregistrement de session (asciicast). |
 | **Fichiers** | Explorateur SFTP, **recherche par nom et grep distants** (Ctrl+P, rien n'est téléchargé), **compression et extraction côté serveur** (tar.gz, zip, tar.zst), **comparaison de deux fichiers**, **double panneau** pour copier d'un serveur à l'autre, glisser-déposer, transferts annulables, édition distante dans Monaco, repli sudo. |
-| **Supervision** | CPU, mémoire, disques, réseau, processus, services systemd. Avec l'agent `helmd` : 30 jours d'historique et alertes (seuils, sites injoignables, sauvegardes en échec) vers Discord, ntfy ou webhook, même PC éteint. |
+| **Supervision** | CPU, mémoire, disques, réseau, processus, services systemd. Avec l'agent `zenyttd` : 30 jours d'historique et alertes (seuils, sites injoignables, sauvegardes en échec) vers Discord, ntfy ou webhook, même PC éteint. |
 | **Docker** | Conteneurs, statistiques, logs en direct, shell dans un conteneur, projets compose (création assistée depuis l'interface), **catalogue d'applications en un clic** (Nextcloud, Vaultwarden, Uptime Kuma, Gitea, n8n, Plausible…, mots de passe générés, ports sur 127.0.0.1 seulement), images, **volumes avec leur taille réelle et détection des orphelins**, nettoyage chiffré en octets avant suppression, **registres privés** (Docker Hub, GitHub Packages, GitLab, AWS ECR, registre auto-hébergé) avec identifiants dans le coffre du système. **Déploiement** (pull → up → vérification → retour arrière automatique), **déploiement depuis GitHub** par clé restreinte, **restriction des ports publiés** à 127.0.0.1, accès local par tunnel. |
 | **Bases de données** | MySQL/MariaDB, PostgreSQL et **SQLite**, en conteneur ou installés sur l'hôte : bases, tables, éditeur SQL avec **autocomplétion des tables et colonnes**, exécution (Ctrl+Entrée), **tri et filtres depuis l'en-tête**, **édition en cellule** avec aperçu du `UPDATE` avant exécution (clé primaire exigée), ajout et suppression de ligne, export CSV. **Explorateur Redis / Valkey** : clés par pages (SCAN), tous les types, durée de vie, console. |
 | **Sites** | Domaine → nginx ou Apache → port → conteneur, certificats TLS, éditeur de vhost sécurisé, assistant « Nouveau site », **historique des configurations** avec comparaison et restauration. |
@@ -118,10 +118,10 @@ coffre-fort du système et chaque appel apparaît au journal d'actions.
 
 ## Partage et synchronisation
 
-- **Terminal partagé** — une invitation `helm-term:…` donne un accès en lecture seule ou avec le
+- **Terminal partagé** — une invitation `zenytt-term:…` donne un accès en lecture seule ou avec le
   contrôle à un terminal, sans créer de compte sur le serveur ni ouvrir de port.
-- **Partage de configuration** — un code `helm-share:…` transmet un profil de serveur (et, si vous
-  le voulez, ses secrets) à une autre installation de Helm.
+- **Partage de configuration** — un code `zenytt-share:…` transmet un profil de serveur (et, si vous
+  le voulez, ses secrets) à une autre installation de Zenytt.
 - **Synchronisation multi-postes** — serveurs, identifiants, clés d'hôte approuvées, snippets et
   tunnels, soit par **fichier** (dossier OneDrive, Dropbox, Syncthing, partage réseau), soit par le
   petit serveur [`sync-server/`](sync-server/) à héberger soi-même.
@@ -131,7 +131,7 @@ passe) : le relais ne voit jamais rien en clair et refuse tout contenu non chiff
 
 ## Serveur MCP (lecture seule)
 
-`Helm --mcp` expose aux assistants compatibles (Claude Code, Claude Desktop…) **14 outils en
+`Zenytt --mcp` expose aux assistants compatibles (Claude Code, Claude Desktop…) **14 outils en
 lecture seule** : état, historique, alertes, conteneurs, journaux, sites, configuration nginx,
 audit, sauvegardes, processus, fichiers de configuration.
 
@@ -142,17 +142,17 @@ audit, sauvegardes, processus, fichiers de configuration.
 
 La configuration à copier se trouve dans Réglages → Accès IA (MCP).
 
-## Agent `helmd`
+## Agent `zenyttd`
 
-Optionnel : Helm fonctionne sans lui, mais l'agent apporte l'historique et les alertes hors ligne.
+Optionnel : Zenytt fonctionne sans lui, mais l'agent apporte l'historique et les alertes hors ligne.
 
 - Binaire Linux statique d'environ 2 Mo (x86_64 et arm64), embarqué dans l'app et installé en un
   clic depuis Supervision → Alertes et agent.
 - Tourne sous un utilisateur système dédié, avec un service systemd durci (`ProtectSystem=strict`,
   `NoNewPrivileges`, 64 Mo de RAM maximum).
-- **N'écoute que sur un socket unix** (`/run/helmd/helmd.sock`) : l'app l'interroge à travers la
+- **N'écoute que sur un socket unix** (`/run/zenyttd/zenyttd.sock`) : l'app l'interroge à travers la
   connexion SSH, aucun port n'est ouvert.
-- Configuration : `/etc/helmd/config.json` (`root:helmd`, `0640`), rechargée à chaud.
+- Configuration : `/etc/zenyttd/config.json` (`root:zenyttd`, `0640`), rechargée à chaud.
 
 ## Modèle de sécurité
 
@@ -162,7 +162,7 @@ Optionnel : Helm fonctionne sans lui, mais l'agent apporte l'historique et les a
 - **Clé d'hôte vérifiée** à chaque connexion ; un changement d'empreinte bloque et prévient.
 - **Modifications de configuration réversibles.** Chaque écriture nginx ou Apache suit le même
   déroulé, exécuté côté serveur par un seul script :
-  1. sauvegarde complète de la configuration dans `/var/backups/helm/…` (30 dernières conservées) ;
+  1. sauvegarde complète de la configuration dans `/var/backups/zenytt/…` (30 dernières conservées) ;
   2. écriture du fichier ;
   3. test de configuration (`nginx -t`, `apachectl configtest`) ;
   4. rechargement ;
@@ -184,7 +184,7 @@ Optionnel : Helm fonctionne sans lui, mais l'agent apporte l'historique et les a
 | Sites | nginx ou Apache |
 | Bases de données | MySQL/MariaDB, PostgreSQL (hôte ou conteneur), `sqlite3` pour SQLite, `redis-cli` pour Redis |
 | Sauvegardes | restic (installé depuis l'app si absent) |
-| Supervision étendue | agent `helmd` (facultatif) |
+| Supervision étendue | agent `zenyttd` (facultatif) |
 
 Les fonctions non disponibles sur un serveur sont signalées dans l'interface plutôt que masquées.
 
@@ -198,7 +198,7 @@ Tous modifiables dans Réglages → Raccourcis (F1 affiche l'aide-mémoire).
 | Changer de serveur | `Ctrl+Shift+S` |
 | Aide-mémoire des raccourcis | `F1` |
 | Assistant IA | `Ctrl+I` |
-| Verrouiller Helm | `Ctrl+Shift+L` |
+| Verrouiller Zenytt | `Ctrl+Shift+L` |
 | Nouvel onglet de terminal | `Ctrl+Shift+T` |
 | Fermer l'onglet | `Ctrl+Shift+W` |
 | Onglet suivant / précédent | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
@@ -217,7 +217,7 @@ Monorepo pnpm + cargo.
 | `apps/desktop` | Application Tauri 2 : interface React/TypeScript (`src/`) et commandes Rust (`src-tauri/`) |
 | `crates/core` | SSH, SFTP, tmux, Docker, nginx, Apache, bases de données, systemd, audit, sauvegardes, déploiement |
 | `crates/protocol` | Analyseurs `/proc`, types et protocole partagés entre l'app et l'agent |
-| `crates/agent` | `helmd`, l'agent de supervision installé sur le serveur |
+| `crates/agent` | `zenyttd`, l'agent de supervision installé sur le serveur |
 | `crates/profiles` | Profils, secrets (keyring), journal d'actions, export et synchronisation |
 | `crates/mcp` | Serveur MCP en lecture seule, intégré à l'app via `--mcp` |
 | `crates/ai` | Client des fournisseurs d'IA (Anthropic, compatible OpenAI, local) |
@@ -226,7 +226,7 @@ Monorepo pnpm + cargo.
 | `docs/` | Notes d'architecture, audits et plans de travail |
 
 L'interface ne parle jamais directement à un serveur : elle appelle des commandes Tauri, qui
-s'appuient sur `helm-core` pour toute opération distante. Les secrets restent côté Rust.
+s'appuient sur `zenytt-core` pour toute opération distante. Les secrets restent côté Rust.
 
 ## Développement
 
@@ -236,7 +236,7 @@ Pour compiler l'agent : `pip install ziglang`, `cargo install cargo-zigbuild`, p
 
 ```sh
 pnpm install
-pnpm build:agent   # binaires helmd, embarqués dans l'app au build suivant
+pnpm build:agent   # binaires zenyttd, embarqués dans l'app au build suivant
 pnpm dev           # app en mode développement
 pnpm build         # installeurs dans target/release/bundle/
 pnpm typecheck     # TypeScript
@@ -249,10 +249,10 @@ construit.
 ### Environnement de test
 
 ```sh
-pnpm testenv       # faux VPS sur 127.0.0.1:2222 (root/helm, deploy/deploy)
-cargo run -p helm-core --example smoke        # SSH, sudo, SFTP, shell
-cargo run -p helm-core --example nginx_smoke  # écriture nginx sûre (valide, cassée, restauration)
-cargo run -p helm-core --example cwd_smoke    # suivi du dossier courant du terminal
+pnpm testenv       # faux VPS sur 127.0.0.1:2222 (root/zenytt, deploy/deploy)
+cargo run -p zenytt-core --example smoke        # SSH, sudo, SFTP, shell
+cargo run -p zenytt-core --example nginx_smoke  # écriture nginx sûre (valide, cassée, restauration)
+cargo run -p zenytt-core --example cwd_smoke    # suivi du dossier courant du terminal
 ```
 
 Le faux VPS a son propre démon Docker (Docker-in-Docker) : il ne voit jamais les conteneurs de la
@@ -295,6 +295,15 @@ La clé de signature des mises à jour est dans les secrets du dépôt
 `tauri.conf.json`. Si elle est perdue, les versions déjà installées ne pourront plus se mettre à
 jour automatiquement.
 
-## Licence
+## Licence et mentions légales
 
-MIT — voir [LICENSE](LICENSE). © 2026 Nathan Chevrollier.
+© 2026 Nathan Chevrollier. Zenytt est un logiciel à **source disponible** sous licence
+[PolyForm Shield 1.0.0](LICENSE) : tu peux l'utiliser gratuitement, y compris au travail, lire et
+modifier son code, mais pas t'en servir pour proposer un produit ou service concurrent. Les
+versions jusqu'à la 1.1.1 incluse restent sous licence MIT.
+
+- [Conditions d'utilisation](docs/legal/conditions-utilisation.md)
+- [Politique de confidentialité](docs/legal/confidentialite.md) : aucune télémétrie, tout reste sur ton ordinateur
+- [Mentions légales](docs/legal/mentions-legales.md)
+- [Composants tiers et leurs licences](THIRD_PARTY_NOTICES.md) (régénérer avec `python scripts/third-party-notices.py` quand les dépendances changent)
+- [Signaler une faille de sécurité](SECURITY.md) · [Contribuer](CONTRIBUTING.md)

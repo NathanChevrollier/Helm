@@ -34,6 +34,6 @@ export function formatIssueBody(input: FeedbackInput, author: DiscordAuthor): st
     `- Profil : <@${author.id}>`,
     `- Avatar : ${author.avatarUrl}`,
     "",
-    "_Issue créée automatiquement par Helm Community Bot._",
+    "_Issue créée automatiquement par Zenytt Community Bot._",
   ].join("\n");
 }

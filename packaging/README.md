@@ -1,14 +1,14 @@
-# Distribution de Helm
+# Distribution de Zenytt
 
-Ce dossier rassemble ce qui permet d'installer Helm autrement qu'en téléchargeant l'installeur à la
+Ce dossier rassemble ce qui permet d'installer Zenytt autrement qu'en téléchargeant l'installeur à la
 main : gestionnaires de paquets officiels de chaque système, et signature de code Windows.
 
 | Système | Commande | Fichier de référence | État |
 | --- | --- | --- | --- |
-| Windows | `winget install NathanChevrollier.Helm` | [`winget/`](winget/) | soumission à `microsoft/winget-pkgs` (workflow `winget.yml`) |
-| macOS | `brew install --cask helm-desktop` | [`homebrew/helm-desktop.rb`](homebrew/helm-desktop.rb) | demande un tap (`NathanChevrollier/homebrew-tap`) |
-| Arch Linux | `yay -S helm-desktop-bin` | [`aur/PKGBUILD`](aur/PKGBUILD) | demande un dépôt AUR |
-| Flatpak | `flatpak install flathub dev.helm.desktop` | [`flatpak/dev.helm.desktop.yml`](flatpak/dev.helm.desktop.yml) | soumission à Flathub |
+| Windows | `winget install NathanChevrollier.Zenytt` | [`winget/`](winget/) | soumission à `microsoft/winget-pkgs` (workflow `winget.yml`) |
+| macOS | `brew install --cask zenytt-desktop` | [`homebrew/zenytt-desktop.rb`](homebrew/zenytt-desktop.rb) | demande un tap (`NathanChevrollier/homebrew-tap`) |
+| Arch Linux | `yay -S zenytt-desktop-bin` | [`aur/PKGBUILD`](aur/PKGBUILD) | demande un dépôt AUR |
+| Flatpak | `flatpak install flathub dev.zenytt.desktop` | [`flatpak/dev.zenytt.desktop.yml`](flatpak/dev.zenytt.desktop.yml) | soumission à Flathub |
 
 Tous ces fichiers pointent vers les installeurs d'une release GitHub et se régénèrent d'une commande :
 
@@ -23,7 +23,7 @@ vérifie rien.
 
 ## Signature de code Windows (SignPath)
 
-Sans signature, SmartScreen affiche « Éditeur inconnu » à la première exécution. Helm demande un
+Sans signature, SmartScreen affiche « Éditeur inconnu » à la première exécution. Zenytt demande un
 certificat gratuit à la [SignPath Foundation](https://signpath.org/apply), réservé aux projets
 libres.
 
@@ -35,7 +35,7 @@ l'approbation :
 | --- | --- |
 | `SIGNPATH_API_TOKEN` | SignPath → *User settings* → *API tokens* |
 | `SIGNPATH_ORGANIZATION_ID` | SignPath → *Organization* → identifiant affiché dans l'URL |
-| `SIGNPATH_PROJECT_SLUG` | nom du projet créé dans SignPath (`helm`) |
+| `SIGNPATH_PROJECT_SLUG` | nom du projet créé dans SignPath (`zenytt`) |
 
 **Point d'attention** : signer l'installeur modifie ses octets, donc *invalide* la signature de mise
 à jour de Tauri (`.sig`). Le job recalcule donc cette signature après la signature de code, avec la
@@ -50,8 +50,8 @@ signature. Inverser cet ordre livrerait une release dont les mises à jour autom
   chaque release publiée, avec un jeton personnel (`WINGET_TOKEN`, portée `public_repo`) sur un fork
   du dépôt. La première soumission est relue par un humain ; les suivantes sont automatiques.
 * **Homebrew Cask** : un tap personnel suffit (`brew tap NathanChevrollier/tap`). Entrer dans
-  `homebrew/homebrew-cask` demande une notarisation Apple, que Helm n'a pas encore.
-* **AUR** : un dépôt Git `ssh://aur@aur.archlinux.org/helm-desktop-bin.git`, avec `PKGBUILD` et
+  `homebrew/homebrew-cask` demande une notarisation Apple, que Zenytt n'a pas encore.
+* **AUR** : un dépôt Git `ssh://aur@aur.archlinux.org/zenytt-desktop-bin.git`, avec `PKGBUILD` et
   `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
 * **Flathub** : une pull request sur `flathub/flathub`. Le manifeste part de l'AppImage plutôt que
   des sources : reconstruire Tauri dans le bac à sable de Flatpak demanderait d'y embarquer toute la

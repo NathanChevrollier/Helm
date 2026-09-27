@@ -8,7 +8,7 @@ use crate::sessions::Sessions;
 use crate::store::AuditLog;
 use crate::store::{secrets, ServerProfile, Snippet, Store};
 #[cfg(windows)]
-use helm_profiles::AuthKind;
+use zenytt_profiles::AuthKind;
 
 /// Secrets transmis avec un profil : `None` = inchangé, `Some("")` = supprimé.
 #[derive(Deserialize)]
@@ -160,9 +160,9 @@ pub async fn ssh_connect(
 
 /// Diagnostic réseau d'un serveur injoignable, sans tentative d'authentification.
 #[tauri::command]
-pub async fn ssh_diagnose(store: State<'_, Store>, id: String) -> Result<helm_core::diagnose::Diagnosis, String> {
+pub async fn ssh_diagnose(store: State<'_, Store>, id: String) -> Result<zenytt_core::diagnose::Diagnosis, String> {
     let p = store.server(&id)?;
-    let d = helm_core::diagnose::diagnose(&p.host, p.port).await;
+    let d = zenytt_core::diagnose::diagnose(&p.host, p.port).await;
     log::info!("diagnostic de {} : {}", p.host, d.verdict);
     Ok(d)
 }
@@ -197,7 +197,7 @@ pub fn snippet_delete(store: State<'_, Store>, id: String) -> Result<(), String>
 /// Serveurs déclarés dans `~/.ssh/config` (OpenSSH), prêts à être importés.
 #[tauri::command]
 pub fn ssh_config_sessions() -> Vec<ServerProfile> {
-    helm_profiles::ssh_config::read_user_config()
+    zenytt_profiles::ssh_config::read_user_config()
 }
 
 /// Sessions SSH enregistrées dans PuTTY (Windows uniquement), prêtes à être importées.

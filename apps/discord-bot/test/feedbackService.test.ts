@@ -20,7 +20,7 @@ describe("feedbackService", () => {
 
   it("formats roadmap issues with links and assignees", () => {
     expect(formatIssueTable([{ number: 12, title: "Synchroniser les profils", url: "https://github.com/example/12", assignees: ["natha"], state: "open" }])).toBe(
-      "| # | Issue | Assigné |\n|---|---|---|\n| [#12](https://github.com/example/12) | Synchroniser les profils | @natha |",
+      "• [#12](https://github.com/example/12) Synchroniser les profils — @natha",
     );
   });
 });

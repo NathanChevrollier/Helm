@@ -2,13 +2,13 @@
 
 use std::time::Duration;
 
-use helm_protocol::Notifiers;
+use zenytt_protocol::Notifiers;
 
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(10)))
         .http_status_as_error(false)
-        .user_agent(concat!("helmd/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("zenyttd/", env!("CARGO_PKG_VERSION")))
         .build()
         .into()
 }
@@ -29,7 +29,7 @@ pub fn send(n: &Notifiers, title: &str, message: &str, resolved: bool) -> Vec<St
 
     if let Some(url) = nonempty(&n.discord_webhook) {
         let body = serde_json::json!({
-            "username": "Helm",
+            "username": "Zenytt",
             "embeds": [{
                 "title": title,
                 "description": message,

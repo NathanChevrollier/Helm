@@ -2,22 +2,22 @@
 //! les conteneurs, volumes Docker et dossiers, vers un dossier du serveur ou un stockage S3.
 //!
 //! Fichiers sur le serveur (root uniquement) :
-//! - `/etc/helm-backup/config.json` (0600) : configuration sans secret, relue par l'app ;
-//! - `/etc/helm-backup/env` (0600) : dépôt, mot de passe restic, clés S3 ;
-//! - `/etc/helm-backup/run.sh` (0700) : script généré ;
-//! - `/var/lib/helm-backup/last.json` (0644) : résultat de la dernière sauvegarde (sans secret),
-//!   lu par l'agent helmd pour alerter en cas d'échec.
+//! - `/etc/zenytt-backup/config.json` (0600) : configuration sans secret, relue par l'app ;
+//! - `/etc/zenytt-backup/env` (0600) : dépôt, mot de passe restic, clés S3 ;
+//! - `/etc/zenytt-backup/run.sh` (0700) : script généré ;
+//! - `/var/lib/zenytt-backup/last.json` (0644) : résultat de la dernière sauvegarde (sans secret),
+//!   lu par l'agent zenyttd pour alerter en cas d'échec.
 
 use serde::{Deserialize, Serialize};
 
 use crate::ssh::shell_quote;
 use crate::{Connection, Error, Result};
 
-pub const CONFIG_PATH: &str = "/etc/helm-backup/config.json";
-pub const ENV_PATH: &str = "/etc/helm-backup/env";
-pub const SCRIPT_PATH: &str = "/etc/helm-backup/run.sh";
-pub const LAST_PATH: &str = "/var/lib/helm-backup/last.json";
-pub const RESTORE_ROOT: &str = "/var/lib/helm-backup/restore";
+pub const CONFIG_PATH: &str = "/etc/zenytt-backup/config.json";
+pub const ENV_PATH: &str = "/etc/zenytt-backup/env";
+pub const SCRIPT_PATH: &str = "/etc/zenytt-backup/run.sh";
+pub const LAST_PATH: &str = "/var/lib/zenytt-backup/last.json";
+pub const RESTORE_ROOT: &str = "/var/lib/zenytt-backup/restore";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -53,7 +53,7 @@ pub struct BackupConfig {
 impl Default for BackupConfig {
     fn default() -> Self {
         Self {
-            destination: Destination::Local { path: "/var/backups/helm/restic".into() },
+            destination: Destination::Local { path: "/var/backups/zenytt/restic".into() },
             schedule: "03:00".into(),
             keep_daily: 7,
             keep_weekly: 4,
@@ -141,11 +141,11 @@ pub fn env_file(cfg: &BackupConfig, restic_password: &str, s3_secret: Option<&st
 pub fn run_script(cfg: &BackupConfig) -> String {
     let mut s = String::from(
         r#"#!/bin/bash
-# Généré par Helm : ne pas modifier à la main (régénéré à chaque enregistrement).
+# Généré par Zenytt : ne pas modifier à la main (régénéré à chaque enregistrement).
 set -uo pipefail
 command -v docker >/dev/null 2>&1 || docker() { podman "$@"; }
-set -a; . /etc/helm-backup/env; set +a
-STATE=/var/lib/helm-backup; STAGE=$STATE/stage
+set -a; . /etc/zenytt-backup/env; set +a
+STATE=/var/lib/zenytt-backup; STAGE=$STATE/stage
 mkdir -p "$STATE"; chmod 755 "$STATE"
 START=$(date +%s)
 finish() {
@@ -157,7 +157,7 @@ fail() { finish false "$1"; echo "ÉCHEC : $1" >&2; rm -rf "$STAGE"; exit 1; }
 trap 'fail "sauvegarde interrompue"' INT TERM
 rm -rf "$STAGE"; mkdir -p "$STAGE/db"; chmod 700 "$STAGE"
 PATHS=("$STAGE")
-echo "Sauvegarde Helm — $(date)"
+echo "Sauvegarde Zenytt — $(date)"
 "#,
     );
     for db in &cfg.databases {
@@ -182,11 +182,11 @@ echo "Sauvegarde Helm — $(date)"
     }
     s.push_str(&format!(
         r#"restic cat config >/dev/null 2>&1 || restic init >/dev/null || fail "initialisation du dépôt impossible"
-restic backup --tag helm --host "$(hostname)" "${{PATHS[@]}}" 2>&1 | tee "$STATE/last-output.txt" | tail -n 5
+restic backup --tag zenytt --host "$(hostname)" "${{PATHS[@]}}" 2>&1 | tee "$STATE/last-output.txt" | tail -n 5
 RC=${{PIPESTATUS[0]}}
 # 3 = sauvegarde faite mais quelques fichiers illisibles : ce n'est pas un échec.
 [ "$RC" = 0 ] || [ "$RC" = 3 ] || fail "$(tail -n 3 "$STATE/last-output.txt")"
-restic forget --tag helm --prune --keep-daily {} --keep-weekly {} --keep-monthly {} >/dev/null 2>&1 || fail "rétention (forget/prune) impossible"
+restic forget --tag zenytt --prune --keep-daily {} --keep-weekly {} --keep-monthly {} >/dev/null 2>&1 || fail "rétention (forget/prune) impossible"
 if [ "$(date +%u)" = 7 ]; then restic check --read-data-subset=5% >/dev/null 2>&1 || fail "vérification du dépôt en échec"; fi
 rm -rf "$STAGE"
 finish true "$(grep -m1 '^snapshot' "$STATE/last-output.txt")"
@@ -200,8 +200,8 @@ echo "Terminé."
 }
 
 fn systemd_units(schedule: &str) -> (String, String) {
-    let service = format!("[Unit]\nDescription=Sauvegarde Helm (restic)\nAfter=network-online.target docker.service\n\n[Service]\nType=oneshot\nExecStart={SCRIPT_PATH}\nNice=10\nIOSchedulingClass=idle\n");
-    let timer = format!("[Unit]\nDescription=Sauvegarde Helm quotidienne\n\n[Timer]\nOnCalendar=*-*-* {schedule}:00\nPersistent=true\nRandomizedDelaySec=10m\n\n[Install]\nWantedBy=timers.target\n");
+    let service = format!("[Unit]\nDescription=Sauvegarde Zenytt (restic)\nAfter=network-online.target docker.service\n\n[Service]\nType=oneshot\nExecStart={SCRIPT_PATH}\nNice=10\nIOSchedulingClass=idle\n");
+    let timer = format!("[Unit]\nDescription=Sauvegarde Zenytt quotidienne\n\n[Timer]\nOnCalendar=*-*-* {schedule}:00\nPersistent=true\nRandomizedDelaySec=10m\n\n[Install]\nWantedBy=timers.target\n");
     (service, timer)
 }
 
@@ -209,7 +209,7 @@ fn systemd_units(schedule: &str) -> (String, String) {
 pub async fn install(conn: &Connection, sudo: Option<&str>, cfg: &BackupConfig, env: &str) -> Result<String> {
     crate::ssh::long(async move {
         cfg.validate()?;
-        let prep = "set -e\ncommand -v restic >/dev/null || { if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y restic; elif command -v dnf >/dev/null; then dnf install -y restic; else echo 'installe restic manuellement' >&2; exit 1; fi; }\ninstall -d -m 700 /etc/helm-backup\ninstall -d -m 755 /var/lib/helm-backup\ninstall -d -m 700 /var/lib/helm-backup/restore";
+        let prep = "set -e\ncommand -v restic >/dev/null || { if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y restic; elif command -v dnf >/dev/null; then dnf install -y restic; else echo 'installe restic manuellement' >&2; exit 1; fi; }\ninstall -d -m 700 /etc/zenytt-backup\ninstall -d -m 755 /var/lib/zenytt-backup\ninstall -d -m 700 /var/lib/zenytt-backup/restore";
         let mut log = conn.exec_sudo(prep, sudo, None).await?.into_result()?.stdout;
         if let Destination::Local { path } = &cfg.destination {
             conn.exec_sudo(&format!("install -d -m 700 {}", shell_quote(path)), sudo, None).await?.into_result()?;
@@ -229,19 +229,19 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, cfg: &BackupConfig, 
         let (service, timer) = systemd_units(&cfg.schedule);
         let systemd = conn.exec("test -d /run/systemd/system", None).await?.success();
         if systemd {
-            write("/etc/systemd/system/helm-backup.service", "644", service).await?;
-            write("/etc/systemd/system/helm-backup.timer", "644", timer).await?;
-            conn.exec_sudo("systemctl daemon-reload && systemctl enable --now helm-backup.timer", sudo, None).await?.into_result()?;
-            log.push_str("Planification : timer systemd helm-backup.timer\n");
+            write("/etc/systemd/system/zenytt-backup.service", "644", service).await?;
+            write("/etc/systemd/system/zenytt-backup.timer", "644", timer).await?;
+            conn.exec_sudo("systemctl daemon-reload && systemctl enable --now zenytt-backup.timer", sudo, None).await?.into_result()?;
+            log.push_str("Planification : timer systemd zenytt-backup.timer\n");
         } else {
             let (h, m) = cfg.schedule.split_once(':').unwrap_or(("3", "0"));
             let cron = format!(
-                "{} {} * * * root {SCRIPT_PATH} >/var/log/helm-backup.log 2>&1\n",
+                "{} {} * * * root {SCRIPT_PATH} >/var/log/zenytt-backup.log 2>&1\n",
                 m.trim_start_matches('0').parse::<u32>().unwrap_or(0),
                 h.trim_start_matches('0').parse::<u32>().unwrap_or(0)
             );
-            write("/etc/cron.d/helm-backup", "644", cron).await?;
-            log.push_str("Planification : /etc/cron.d/helm-backup (pas de systemd)\n");
+            write("/etc/cron.d/zenytt-backup", "644", cron).await?;
+            log.push_str("Planification : /etc/cron.d/zenytt-backup (pas de systemd)\n");
         }
         // Vérifie que le dépôt est accessible (et l'initialise au besoin).
         let check =
@@ -277,7 +277,8 @@ pub async fn status(conn: &Connection, sudo: Option<&str>) -> Result<Status> {
     let restic = conn.exec("restic version 2>/dev/null | head -n1", None).await?;
     let config = conn.exec_sudo(&format!("cat {CONFIG_PATH} 2>/dev/null"), sudo, None).await?;
     let last = conn.exec(&format!("cat {LAST_PATH} 2>/dev/null"), None).await?;
-    let next = conn.exec("systemctl list-timers helm-backup.timer --no-legend 2>/dev/null | awk '{print $1\" \"$2\" \"$3}'", None).await?;
+    let next =
+        conn.exec("systemctl list-timers zenytt-backup.timer --no-legend 2>/dev/null | awk '{print $1\" \"$2\" \"$3}'", None).await?;
     Ok(Status {
         restic: Some(restic.stdout.trim().to_string()).filter(|s| !s.is_empty()),
         config: serde_json::from_str(config.stdout.trim()).ok(),
@@ -307,7 +308,7 @@ pub struct Snapshot {
 
 pub async fn snapshots(conn: &Connection, sudo: Option<&str>) -> Result<Vec<Snapshot>> {
     crate::ssh::long(async move {
-        let out = conn.exec_sudo(&restic("snapshots --json --tag helm"), sudo, None).await?.into_result()?;
+        let out = conn.exec_sudo(&restic("snapshots --json --tag zenytt"), sudo, None).await?.into_result()?;
         let mut list: Vec<Snapshot> =
             serde_json::from_str(out.stdout.trim()).map_err(|e| Error::Other(format!("réponse restic illisible : {e}")))?;
         list.reverse();
@@ -373,14 +374,14 @@ pub async fn restore_to_temp(conn: &Connection, sudo: Option<&str>, snapshot: &s
     .await
 }
 
-/// Remet en place un élément restauré : l'actuel est d'abord mis de côté (`.helm-avant-restauration-…`).
+/// Remet en place un élément restauré : l'actuel est d'abord mis de côté (`.zenytt-avant-restauration-…`).
 pub async fn put_back(conn: &Connection, sudo: Option<&str>, restored: &str, original: &str) -> Result<String> {
     crate::ssh::long(async move {
         if !restored.starts_with(&format!("{RESTORE_ROOT}/")) || !safe_path(restored) || !safe_path(original) {
             return Err(Error::Other("chemins invalides".into()));
         }
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let aside = format!("{original}.helm-avant-restauration-{ts}");
+        let aside = format!("{original}.zenytt-avant-restauration-{ts}");
         let cmd = format!(
             "set -e; [ -e {o} ] && mv {o} {a}; mkdir -p \"$(dirname {o})\"; cp -a {r} {o}; echo {a}",
             o = shell_quote(original),

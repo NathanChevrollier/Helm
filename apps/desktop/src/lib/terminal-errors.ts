@@ -1,6 +1,6 @@
 // Détection d'un échec dans ce qui s'affiche au terminal, pour proposer le diagnostic de l'IA.
 //
-// Helm n'installe rien sur le serveur pour cela : pas de PROMPT_COMMAND à ajouter, pas de shell à
+// Zenytt n'installe rien sur le serveur pour cela : pas de PROMPT_COMMAND à ajouter, pas de shell à
 // modifier. Le code de retour n'est donc pas lisible directement — la détection se fait sur le
 // texte, à partir des messages d'échec que tous les outils Unix écrivent. C'est une heuristique
 // assumée : elle propose un bouton, elle ne conclut rien toute seule.

@@ -198,7 +198,7 @@ pub struct QueryResult {
     pub rows: Vec<Vec<Option<String>>>,
     /// Vrai si la limite d'affichage a coupé le résultat.
     pub truncated: bool,
-    /// Durée d'exécution mesurée par Helm (aller-retour SSH compris), en millisecondes.
+    /// Durée d'exécution mesurée par Zenytt (aller-retour SSH compris), en millisecondes.
     pub duration_ms: u64,
 }
 

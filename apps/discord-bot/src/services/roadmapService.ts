@@ -2,7 +2,9 @@ import { ChannelType, Client, EmbedBuilder, type Message, type TextChannel } fro
 import type { Env } from "../config/env.js";
 import { GitHubService, type RoadmapIssue } from "./githubService.js";
 
-const ROADMAP_TITLE = "🗺️ Helm — Tâches en cours & Roadmap";
+const ROADMAP_TITLE = "🗺️ Zenytt — Tâches en cours & Roadmap";
+/** Fin du titre, commune à toutes les versions du panneau : retrouve aussi un panneau publié sous un ancien nom. */
+const ROADMAP_TITLE_SUFFIX = "Tâches en cours & Roadmap";
 const MAX_FIELD_LENGTH = 1024;
 const MAX_REPLY_LENGTH = 1900;
 const MAX_ISSUES_PER_SECTION = 18;
@@ -51,7 +53,8 @@ export class RoadmapService {
   }
 
   public async getCurrent(): Promise<RoadmapSnapshot> {
-    const issues = this.env.GITHUB_PROJECT_NUMBER
+    // Projet GitHub dès qu'un numéro ou un jeton de lecture des projets est fourni, sinon labels.
+    const issues = this.env.GITHUB_PROJECT_NUMBER || this.env.GITHUB_PROJECT_TOKEN
       ? this.github.getProjectRoadmapIssues(this.env.GITHUB_PROJECT_NUMBER)
       : this.github.getRoadmapIssues({
           brainstorming: this.env.GITHUB_BRAINSTORMING_LABEL,
@@ -118,7 +121,7 @@ export class RoadmapService {
     }
 
     const messages = await channel.messages.fetch({ limit: 50 });
-    return messages.find((message) => message.author.id === this.client.user?.id && message.embeds.some((embed) => embed.title === ROADMAP_TITLE));
+    return messages.find((message) => message.author.id === this.client.user?.id && message.embeds.some((embed) => embed.title?.endsWith(ROADMAP_TITLE_SUFFIX)));
   }
 }
 
@@ -136,19 +139,22 @@ export function buildRoadmapEmbed(snapshot: RoadmapSnapshot): EmbedBuilder {
     .setFooter({ text: `Dernière synchronisation automatique : ${snapshot.updatedAt.toLocaleString("fr-FR")} · Consultez ces tâches avant de soumettre une nouvelle suggestion` });
 }
 
+/** Une ligne par chantier (Discord n'affiche pas les tableaux Markdown dans un embed). */
 export function formatIssueTable(issues: RoadmapIssue[]): string {
   if (issues.length === 0) return "Aucun chantier dans cette catégorie.";
-  const lines = ["| # | Issue | Assigné |", "|---|---|---|"];
-  for (const issue of issues.slice(0, MAX_ISSUES_PER_SECTION)) {
-    const assignees = issue.assignees.length > 0 ? issue.assignees.map((assignee) => `@${assignee}`).join(", ") : "—";
-    lines.push(`| [#${issue.number}](${issue.url}) | ${escapeTableCell(issue.title)} | ${escapeTableCell(assignees)} |`);
-  }
-  if (issues.length > MAX_ISSUES_PER_SECTION) lines.push(`| … | ${issues.length - MAX_ISSUES_PER_SECTION} autre(s) | — |`);
+  const lines = issues.slice(0, MAX_ISSUES_PER_SECTION).map((issue) => {
+    const title = escapeText(issue.title);
+    const label = issue.number !== undefined && issue.url ? `[#${issue.number}](${issue.url}) ${title}` : title;
+    const assignees = issue.assignees.length > 0 ? ` — ${issue.assignees.map((assignee) => `@${assignee}`).join(", ")}` : "";
+    return `• ${label}${assignees}`;
+  });
+  if (issues.length > MAX_ISSUES_PER_SECTION) lines.push(`• … et ${issues.length - MAX_ISSUES_PER_SECTION} autre(s)`);
   return truncate(lines.join("\n"), MAX_FIELD_LENGTH);
 }
 
-function escapeTableCell(value: string): string {
-  return value.replaceAll("|", "\\|").replaceAll("\n", " ");
+/** Neutralise la mise en forme Markdown de Discord dans un titre. */
+function escapeText(value: string): string {
+  return value.replace(/[\\*_`~|[\]]/g, "\\$&").replaceAll("\n", " ");
 }
 
 function truncate(value: string, maxLength: number): string {

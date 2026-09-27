@@ -425,8 +425,8 @@ mod tests {
         let headers = c.headers("sk-test");
         assert!(headers.contains(&("x-api-key", "sk-test".into())) && headers.contains(&("anthropic-version", "2023-06-01".into())));
 
-        let body = build_request(&c, "tu es helm", &history(), &tools());
-        assert_eq!(body["system"], "tu es helm");
+        let body = build_request(&c, "tu es zenytt", &history(), &tools());
+        assert_eq!(body["system"], "tu es zenytt");
         assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 3);
@@ -472,7 +472,7 @@ mod tests {
         // Modèle local : aucune clé, donc aucun en-tête d'autorisation.
         assert!(!c.headers("").iter().any(|(n, _)| *n == "authorization"));
 
-        let body = build_request(&c, "tu es helm", &history(), &tools());
+        let body = build_request(&c, "tu es zenytt", &history(), &tools());
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(body["tools"][0]["function"]["name"], "server_status");
@@ -536,7 +536,7 @@ mod tests {
             model: "modele-local".into(),
             max_tokens: 100,
         };
-        let body = build_request(&config, "tu es helm", &[Message::User("pourquoi ?".into())], &[]);
+        let body = build_request(&config, "tu es zenytt", &[Message::User("pourquoi ?".into())], &[]);
         let reply = send(&config, "cle-test", &body, Duration::from_secs(10)).unwrap();
         assert_eq!(reply.text, "Le disque est plein.");
         assert_eq!((reply.stop, reply.input_tokens, reply.output_tokens), (Stop::End, 42, 7));
@@ -544,7 +544,7 @@ mod tests {
         let (request, sent) = server.join().unwrap();
         assert!(request.starts_with("POST /v1/chat/completions "), "{request}");
         assert!(request.to_ascii_lowercase().contains("authorization: bearer cle-test"));
-        assert!(sent.contains("modele-local") && sent.contains("tu es helm") && sent.contains("pourquoi ?"));
+        assert!(sent.contains("modele-local") && sent.contains("tu es zenytt") && sent.contains("pourquoi ?"));
     }
 
     #[test]

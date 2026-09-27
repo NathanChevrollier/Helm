@@ -162,7 +162,7 @@ export default function NewComposeProject({
         )}
         {error && <ErrorState message={<pre className="font-mono text-xs whitespace-pre-wrap">{error}</pre>} />}
         <p className="text-xs text-muted">
-          Helm vérifie le fichier avec <span className="font-mono">docker compose config</span> avant de démarrer quoi que ce soit. Pense à ne publier les ports que sur 127.0.0.1 et à passer par un site (nginx ou Apache) pour l'exposer.
+          Zenytt vérifie le fichier avec <span className="font-mono">docker compose config</span> avant de démarrer quoi que ce soit. Pense à ne publier les ports que sur 127.0.0.1 et à passer par un site (nginx ou Apache) pour l'exposer.
         </p>
       </div>
     </Modal>

@@ -210,7 +210,7 @@ export default function RedisPanel({ serverId }: { serverId: string }) {
   if (servers && servers.length === 0) {
     return (
       <EmptyState icon={<Database />} title="Aucun serveur Redis trouvé">
-        Helm cherche les conteneurs Redis, Valkey et KeyDB en cours, ainsi que le service installé sur la machine.
+        Zenytt cherche les conteneurs Redis, Valkey et KeyDB en cours, ainsi que le service installé sur la machine.
       </EmptyState>
     );
   }

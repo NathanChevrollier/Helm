@@ -475,7 +475,7 @@ impl Engine {
     pub fn backup_root(self) -> &'static str {
         match self {
             Engine::Nginx => BACKUP_ROOT,
-            Engine::Apache => "/var/backups/helm/apache",
+            Engine::Apache => "/var/backups/zenytt/apache",
         }
     }
 
@@ -524,8 +524,8 @@ TARGET="$1"; LINK="${2:-}"; MODE="${3:-write}"; PRE="${4:-}"
 DIR=$(basename "$CONF")
 TS=$(date +%Y%m%d-%H%M%S)
 # Deux modifications dans la même seconde ne partagent pas une sauvegarde.
-while [ -e "/var/backups/helm/$NAME/$TS" ]; do sleep 1; TS=$(date +%Y%m%d-%H%M%S); done
-BK="/var/backups/helm/$NAME/$TS"
+while [ -e "/var/backups/zenytt/$NAME/$TS" ]; do sleep 1; TS=$(date +%Y%m%d-%H%M%S); done
+BK="/var/backups/zenytt/$NAME/$TS"
 mkdir -p "$BK" && cp -a "$CONF" "$BK/" || { echo "sauvegarde impossible"; exit 1; }
 existed=0; [ -e "$TARGET" ] && existed=1
 link_existed=0; [ -n "$LINK" ] && [ -e "$LINK" -o -L "$LINK" ] && link_existed=1
@@ -558,7 +558,7 @@ if ! reload_conf > "$BK/reload.log" 2>&1; then
   exit 3
 fi
 # On ne garde que les 30 dernières sauvegardes.
-ls -1d /var/backups/helm/$NAME/* 2>/dev/null | head -n -30 | xargs -r rm -rf
+ls -1d /var/backups/zenytt/$NAME/* 2>/dev/null | head -n -30 | xargs -r rm -rf
 echo "@@OK $BK"
 cat "$BK/test.log"
 "#;
@@ -609,7 +609,7 @@ async fn apply_script(
         engine.valid_conf_path(link)?;
     }
     let cmd = format!(
-        "bash -c {} helm-web {} {} {} {}",
+        "bash -c {} zenytt-web {} {} {} {}",
         shell_quote(&full_script(engine, APPLY_SCRIPT)),
         shell_quote(target),
         shell_quote(link),
@@ -636,7 +636,7 @@ pub async fn write_config(
 }
 
 /// Écrit un fichier de configuration du serveur web `engine`, après la commande préalable `pre`
-/// (constante choisie par Helm, jamais une saisie de l'utilisateur).
+/// (constante choisie par Zenytt, jamais une saisie de l'utilisateur).
 pub async fn write_config_for(
     conn: &Connection,
     sudo: Option<&str>,
@@ -695,7 +695,7 @@ pub async fn reload_for(conn: &Connection, sudo: Option<&str>, engine: Engine) -
 
 // ---------- Historique des sauvegardes ----------
 
-pub const BACKUP_ROOT: &str = "/var/backups/helm/nginx";
+pub const BACKUP_ROOT: &str = "/var/backups/zenytt/nginx";
 
 /// Nom de sauvegarde valide (`AAAAMMJJ-HHMMSS`), seul format accepté dans les chemins.
 pub fn valid_backup_name(name: &str) -> bool {
@@ -724,7 +724,7 @@ pub async fn backup_diff_for(conn: &Connection, sudo: Option<&str>, engine: Engi
         return Err(Error::Other("nom de sauvegarde invalide".into()));
     }
     // `diff` renvoie 1 quand il trouve des différences : ce n'est pas une erreur.
-    let body = format!("diff -ruN /var/backups/helm/$NAME/{name}/$(basename \"$CONF\") \"$CONF\" | head -c 800000; true\n");
+    let body = format!("diff -ruN /var/backups/zenytt/$NAME/{name}/$(basename \"$CONF\") \"$CONF\" | head -c 800000; true\n");
     let out = conn.exec_sudo(&format!("bash -c {}", shell_quote(&full_script(engine, &body))), sudo, None).await?;
     Ok(out.stdout)
 }
@@ -734,23 +734,23 @@ pub async fn backup_diff_for(conn: &Connection, sudo: Option<&str>, engine: Engi
 /// reload échoue.
 pub const RESTORE_SCRIPT: &str = r#"set -u
 DIR=$(basename "$CONF")
-SRC="/var/backups/helm/$NAME/$1/$DIR"
+SRC="/var/backups/zenytt/$NAME/$1/$DIR"
 [ -d "$SRC" ] || { echo "@@FAILED sauvegarde introuvable"; exit 1; }
 TS=$(date +%Y%m%d-%H%M%S)
 # Deux modifications dans la même seconde ne partagent pas une sauvegarde.
-while [ -e "/var/backups/helm/$NAME/$TS" ]; do sleep 1; TS=$(date +%Y%m%d-%H%M%S); done
-BK="/var/backups/helm/$NAME/$TS"
+while [ -e "/var/backups/zenytt/$NAME/$TS" ]; do sleep 1; TS=$(date +%Y%m%d-%H%M%S); done
+BK="/var/backups/zenytt/$NAME/$TS"
 mkdir -p "$BK" && cp -a "$CONF" "$BK/" || { echo "@@FAILED sauvegarde de l'état actuel impossible"; exit 1; }
-rm -rf "$CONF.helm-restore" "$CONF.helm-old"
-cp -a "$SRC" "$CONF.helm-restore" || { echo "@@FAILED copie impossible"; exit 1; }
-mv "$CONF" "$CONF.helm-old" && mv "$CONF.helm-restore" "$CONF"
+rm -rf "$CONF.zenytt-restore" "$CONF.zenytt-old"
+cp -a "$SRC" "$CONF.zenytt-restore" || { echo "@@FAILED copie impossible"; exit 1; }
+mv "$CONF" "$CONF.zenytt-old" && mv "$CONF.zenytt-restore" "$CONF"
 if test_conf > "$BK/test.log" 2>&1 && reload_conf >> "$BK/test.log" 2>&1; then
-  rm -rf "$CONF.helm-old"
+  rm -rf "$CONF.zenytt-old"
   echo "@@OK $BK"
   cat "$BK/test.log"
 else
   rm -rf "$CONF"
-  mv "$CONF.helm-old" "$CONF"
+  mv "$CONF.zenytt-old" "$CONF"
   test_conf >/dev/null 2>&1 && reload_conf
   echo "@@FAILED test"
   cat "$BK/test.log"
@@ -766,7 +766,7 @@ pub async fn restore_backup_for(conn: &Connection, sudo: Option<&str>, engine: E
     if !valid_backup_name(name) {
         return Err(Error::Other("nom de sauvegarde invalide".into()));
     }
-    let cmd = format!("bash -c {} helm-restore {name}", shell_quote(&full_script(engine, RESTORE_SCRIPT)));
+    let cmd = format!("bash -c {} zenytt-restore {name}", shell_quote(&full_script(engine, RESTORE_SCRIPT)));
     let out = conn.exec_sudo(&cmd, sudo, None).await?;
     let text = format!("{}{}", out.stdout, out.stderr);
     if !text.contains("@@OK") && !text.contains("@@FAILED") {
@@ -780,7 +780,7 @@ pub async fn restore_backup_for(conn: &Connection, sudo: Option<&str>, engine: E
 /// vhost HTTP en reverse proxy vers un port local, prêt à recevoir HTTPS via certbot.
 pub fn proxy_vhost(domain: &str, port: u16) -> String {
     format!(
-        r#"# Généré par Helm
+        r#"# Généré par Zenytt
 server {{
     listen 80;
     listen [::]:80;
@@ -807,7 +807,7 @@ server {{
 /// Fichier docker-compose d'un site : le port n'est publié que sur 127.0.0.1 (seul nginx y accède).
 pub fn site_compose(name: &str, image: &str, host_port: u16, container_port: u16, env: &[(String, String)]) -> String {
     let mut s = format!(
-        "# Généré par Helm\nservices:\n  app:\n    image: {image}\n    container_name: {name}\n    restart: unless-stopped\n    ports:\n      - \"127.0.0.1:{host_port}:{container_port}\"\n"
+        "# Généré par Zenytt\nservices:\n  app:\n    image: {image}\n    container_name: {name}\n    restart: unless-stopped\n    ports:\n      - \"127.0.0.1:{host_port}:{container_port}\"\n"
     );
     if !env.is_empty() {
         s.push_str("    environment:\n");
@@ -977,9 +977,10 @@ server {
 
     #[test]
     fn apply_results() {
-        let ok = parse_apply("@@OK /var/backups/helm/nginx/20260921\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n");
+        let ok =
+            parse_apply("@@OK /var/backups/zenytt/nginx/20260921\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n");
         assert!(ok.ok);
-        assert_eq!(ok.backup.as_deref(), Some("/var/backups/helm/nginx/20260921"));
+        assert_eq!(ok.backup.as_deref(), Some("/var/backups/zenytt/nginx/20260921"));
         let ko = parse_apply("@@FAILED test\nnginx: [emerg] unexpected \"}\"\n");
         assert!(!ko.ok);
         assert!(ko.log.contains("emerg"));

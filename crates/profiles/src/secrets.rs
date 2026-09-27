@@ -8,7 +8,7 @@ use crate::APP_ID;
 /// Présence connue de chaque secret (`id:type` → présent ?). Lister les serveurs demande trois
 /// lectures du coffre par serveur, à chaque actualisation ; le coffre (surtout Secret Service via
 /// D-Bus) répond en plusieurs millisecondes. Le cache n'est tenu que pour les écritures faites par
-/// ce processus, seul à écrire dans le coffre de Helm.
+/// ce processus, seul à écrire dans le coffre de Zenytt.
 fn presence() -> &'static Mutex<HashMap<String, bool>> {
     static CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
@@ -23,7 +23,16 @@ fn entry(server_id: &str, kind: &str) -> Result<keyring::Entry, String> {
 }
 
 pub fn get(server_id: &str, kind: &str) -> Option<String> {
-    let value = entry(server_id, kind).ok()?.get_password().ok();
+    let mut value = entry(server_id, kind).ok()?.get_password().ok();
+    if value.is_none() {
+        // Secret enregistré par une version précédente : recopié sous le nom actuel à la première lecture.
+        value = crate::legacy::secret(server_id, kind);
+        if let Some(v) = &value {
+            if entry(server_id, kind).ok()?.set_password(v).is_ok() {
+                crate::legacy::forget_secret(server_id, kind);
+            }
+        }
+    }
     remember(server_id, kind, value.is_some());
     value
 }

@@ -72,7 +72,7 @@ function Backups({ serverId }: { serverId: string }) {
   };
 
   const runNow = () =>
-    openTab(serverId, { title: "Sauvegarde", command: "sudo /etc/helm-backup/run.sh; echo; echo 'Tu peux fermer cet onglet puis actualiser la page Sauvegardes.'; exec \"$SHELL\" -l" });
+    openTab(serverId, { title: "Sauvegarde", command: "sudo /etc/zenytt-backup/run.sh; echo; echo 'Tu peux fermer cet onglet puis actualiser la page Sauvegardes.'; exec \"$SHELL\" -l" });
 
   const context = server && <ServerContext server={server} />;
   const layout = (children: React.ReactNode) => (
@@ -134,7 +134,7 @@ function Backups({ serverId }: { serverId: string }) {
                 </Button>
               }
             >
-              Une sauvegarde quotidienne, chiffrée, avec rétention automatique. Helm installe restic si besoin et planifie tout.
+              Une sauvegarde quotidienne, chiffrée, avec rétention automatique. Zenytt installe restic si besoin et planifie tout.
             </EmptyState>
             <div className="grid gap-3 sm:grid-cols-3">
               <StatTile label="Bases de données détectées" value={data.databases.length} hint={data.databases.map((d) => d.container).join(", ") || "aucune"} />

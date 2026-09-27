@@ -1,7 +1,7 @@
 //! Terminaux partagés : diffuser un terminal à d'autres personnes (lecture seule ou avec le
 //! contrôle), et rejoindre celui de quelqu'un d'autre.
 //!
-//! Tout passe par un serveur `helm-sync` auto-hébergé, qui ne fait que relayer : le contenu est
+//! Tout passe par un serveur `zenytt-sync` auto-hébergé, qui ne fait que relayer : le contenu est
 //! chiffré de bout en bout (AES-256-GCM) avec une clé tirée au hasard, présente uniquement dans
 //! le lien d'invitation. Le relais ne voit jamais ce qui s'affiche ni ce qui est tapé.
 
@@ -25,7 +25,7 @@ use crate::sessions::{Sessions, TermEvent};
 use crate::store::{secrets, Store};
 
 /// Préfixe d'une invitation à un terminal partagé.
-pub const INVITE_PREFIX: &str = "helm-term:";
+pub const INVITE_PREFIX: &str = "zenytt-term:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,15 +56,15 @@ fn encode_invite(inv: &Invite) -> Result<String, String> {
 }
 
 fn decode_invite(code: &str) -> Result<Invite, String> {
-    let raw = code.trim().strip_prefix(INVITE_PREFIX).ok_or("ce n'est pas une invitation Helm (elle commence par helm-term:)")?;
+    let raw = code.trim().strip_prefix(INVITE_PREFIX).ok_or("ce n'est pas une invitation Zenytt (elle commence par zenytt-term:)")?;
     let bytes = B64URL.decode(raw.trim()).map_err(|_| "invitation incomplète ou abîmée".to_string())?;
     serde_json::from_slice(&bytes).map_err(|_| "invitation illisible".into())
 }
 
 /// Sens d'un message, lié au chiffrement : un message de l'hôte renvoyé à l'hôte par le relais
 /// (réflexion) ne se déchiffre pas comme une frappe d'invité.
-const TO_GUESTS: &[u8] = b"helm-term/v2/hote->invites";
-const TO_HOST: &[u8] = b"helm-term/v2/invite->hote";
+const TO_GUESTS: &[u8] = b"zenytt-term/v2/hote->invites";
+const TO_HOST: &[u8] = b"zenytt-term/v2/invite->hote";
 /// Émetteurs suivis par un récepteur (invités d'un partage) : borne la mémoire face à un relais hostile.
 const MAX_SENDERS: usize = 64;
 
@@ -215,7 +215,8 @@ fn relay_config(store: &Store) -> Result<(String, String), String> {
         .read(|d| d.sync.as_ref().and_then(|c| c.url.clone()))
         .filter(|u| !u.is_empty())
         .ok_or("configure d'abord un serveur de synchronisation (Réglages → Synchronisation) : il sert aussi de relais")?;
-    let token = secrets::get(helm_profiles::sync::SECRET_OWNER, "token").ok_or("jeton du serveur manquant (Réglages → Synchronisation)")?;
+    let token =
+        secrets::get(zenytt_profiles::sync::SECRET_OWNER, "token").ok_or("jeton du serveur manquant (Réglages → Synchronisation)")?;
     Ok((url, token))
 }
 
@@ -440,7 +441,7 @@ mod tests {
         let back = decode_invite(&format!("  {code}  ")).unwrap();
         assert_eq!((back.u, back.s, back.m), (inv.u, inv.s, ShareMode::View));
         assert!(decode_invite("bonjour").is_err());
-        assert!(decode_invite("helm-term:???").is_err());
+        assert!(decode_invite("zenytt-term:???").is_err());
     }
 
     #[test]

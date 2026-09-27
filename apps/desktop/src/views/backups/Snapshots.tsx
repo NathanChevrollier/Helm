@@ -229,7 +229,7 @@ function RestoredDialog({
     act("putback", async () => {
       const ok = await ask({
         title: `Remettre en place ${restored.node.path} ?`,
-        body: "La version actuelle sera d'abord renommée (…helm-avant-restauration-<date>), puis la version sauvegardée copiée à sa place. Un service qui utilise ce fichier devra peut-être être redémarré.",
+        body: "La version actuelle sera d'abord renommée (…zenytt-avant-restauration-<date>), puis la version sauvegardée copiée à sa place. Un service qui utilise ce fichier devra peut-être être redémarré.",
         confirmLabel: "Remettre en place",
         danger: true,
       });

@@ -167,7 +167,7 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
       {!created ? (
         <div className="flex flex-col gap-4 text-sm">
           <p className="text-muted">
-            Helm crée une clé SSH dédiée qui ne peut faire <strong className="text-fg">qu'une seule chose</strong> : lancer le déploiement de ce projet (pull, redémarrage, vérification, retour arrière). Pas de shell, pas de redirection, pas de port supplémentaire ouvert.
+            Zenytt crée une clé SSH dédiée qui ne peut faire <strong className="text-fg">qu'une seule chose</strong> : lancer le déploiement de ce projet (pull, redémarrage, vérification, retour arrière). Pas de shell, pas de redirection, pas de port supplémentaire ouvert.
           </p>
           <p className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
             À savoir : le déploiement tourne en root et démarre les images que ton dépôt désigne. Quiconque peut modifier le dépôt (ou ses secrets GitHub) peut donc faire tourner du code sur ce serveur. Protège la branche déployée, limite les collaborateurs, et régénère la clé si un accès est compromis.
@@ -177,7 +177,7 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
               <p className="flex items-start gap-2 text-danger">
                 <ShieldAlert size={15} className="mt-px shrink-0" />
                 <span>
-                  <strong>Cette clé donnerait root au compte SSH.</strong> Pour que GitHub puisse déployer, Helm autorise ce compte à lancer le déploiement en root
+                  <strong>Cette clé donnerait root au compte SSH.</strong> Pour que GitHub puisse déployer, Zenytt autorise ce compte à lancer le déploiement en root
                   sans mot de passe. Or il peut modifier les fichiers du projet : il suffirait d'y ajouter un volume <span className="font-mono">/:/host</span> pour
                   prendre la main sur tout le serveur. Quiconque obtient ce compte (mot de passe volé, clé SSH copiée) deviendrait donc root.
                 </span>
@@ -226,7 +226,7 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-muted">
             <li>Dans ton dépôt GitHub : Settings → Secrets and variables → Actions → New repository secret.</li>
             <li>
-              Nom : <span className="font-mono text-fg">HELM_DEPLOY_KEY</span>, valeur : la clé privée ci-dessous.
+              Nom : <span className="font-mono text-fg">ZENYTT_DEPLOY_KEY</span>, valeur : la clé privée ci-dessous.
             </li>
             <li>
               Ajoute le workflow ci-dessous dans <span className="font-mono text-fg">.github/workflows/deploy.yml</span>.
@@ -234,7 +234,7 @@ export function GithubDeployDialog({ serverId, project, onClose }: { serverId: s
           </ol>
           <div>
             <div className="mb-1 flex items-center justify-between text-xs text-muted">
-              Clé privée (affichée une seule fois, Helm ne la conserve pas)
+              Clé privée (affichée une seule fois, Zenytt ne la conserve pas)
               <Button size="sm" variant="ghost" icon={<Copy size={12} />} onClick={() => copy(created.privateKey, "Clé")}>
                 Copier
               </Button>

@@ -1,11 +1,11 @@
-//! Agent `helmd` : collecte des métriques, historique, alertes et supervision HTTP.
+//! Agent `zenyttd` : collecte des métriques, historique, alertes et supervision HTTP.
 //! Exposé uniquement sur un socket unix local : aucun port réseau n'est ouvert.
 //!
 //! Commandes :
-//!   helmd run [--config PATH] [--data DIR] [--socket PATH]   démarre l'agent
-//!   helmd query '<json>'                                      interroge l'agent local
-//!   helmd default-config                                      affiche la configuration par défaut
-//!   helmd version
+//!   zenyttd run [--config PATH] [--data DIR] [--socket PATH]   démarre l'agent
+//!   zenyttd query '<json>'                                      interroge l'agent local
+//!   zenyttd default-config                                      affiche la configuration par défaut
+//!   zenyttd version
 
 // Sous Windows, seul le squelette compile (pour `cargo check --workspace`) : le daemon est Linux uniquement.
 #![cfg_attr(not(unix), allow(dead_code))]
@@ -18,7 +18,7 @@ mod notify;
 mod server;
 mod state;
 
-use helm_protocol::AgentConfig;
+use zenytt_protocol::AgentConfig;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,11 +30,11 @@ fn main() {
             0
         }
         Some("version") | Some("--version") => {
-            println!("helmd {} (protocole v{})", env!("CARGO_PKG_VERSION"), helm_protocol::PROTOCOL_VERSION);
+            println!("zenyttd {} (protocole v{})", env!("CARGO_PKG_VERSION"), zenytt_protocol::PROTOCOL_VERSION);
             0
         }
         _ => {
-            eprintln!("usage : helmd run | query '<json>' | default-config | version");
+            eprintln!("usage : zenyttd run | query '<json>' | default-config | version");
             2
         }
     };
@@ -48,14 +48,14 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 #[cfg(unix)]
 fn run(args: &[String]) -> i32 {
     let paths = state::Paths {
-        config: flag(args, "--config").unwrap_or(helm_protocol::CONFIG_PATH).into(),
-        data_dir: flag(args, "--data").unwrap_or("/var/lib/helmd").into(),
-        socket: flag(args, "--socket").unwrap_or(helm_protocol::SOCKET_PATH).into(),
+        config: flag(args, "--config").unwrap_or(zenytt_protocol::CONFIG_PATH).into(),
+        data_dir: flag(args, "--data").unwrap_or("/var/lib/zenyttd").into(),
+        socket: flag(args, "--socket").unwrap_or(zenytt_protocol::SOCKET_PATH).into(),
     };
     match state::start(paths) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("helmd : {e}");
+            eprintln!("zenyttd : {e}");
             1
         }
     }
@@ -63,7 +63,7 @@ fn run(args: &[String]) -> i32 {
 
 #[cfg(not(unix))]
 fn run(_args: &[String]) -> i32 {
-    eprintln!("helmd ne fonctionne que sous Linux");
+    eprintln!("zenyttd ne fonctionne que sous Linux");
     let _ = flag;
     1
 }
@@ -71,7 +71,7 @@ fn run(_args: &[String]) -> i32 {
 #[cfg(unix)]
 fn query(request: &str) -> i32 {
     use std::io::{Read, Write};
-    let socket = std::env::var("HELMD_SOCKET").unwrap_or_else(|_| helm_protocol::SOCKET_PATH.into());
+    let socket = std::env::var("ZENYTTD_SOCKET").unwrap_or_else(|_| zenytt_protocol::SOCKET_PATH.into());
     let mut stream = match std::os::unix::net::UnixStream::connect(&socket) {
         Ok(s) => s,
         Err(e) => {
@@ -94,6 +94,6 @@ fn query(request: &str) -> i32 {
 
 #[cfg(not(unix))]
 fn query(_request: &str) -> i32 {
-    eprintln!("helmd ne fonctionne que sous Linux");
+    eprintln!("zenyttd ne fonctionne que sous Linux");
     1
 }

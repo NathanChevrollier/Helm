@@ -29,5 +29,5 @@ export function applyTheme(setting: ThemeSetting): () => void {
 
 /** Thème Monaco correspondant (défini dans lib/monaco.ts). */
 export function useMonacoTheme(): string {
-  return useTheme((s) => (s.theme === "light" ? "helm-light" : "helm-dark"));
+  return useTheme((s) => (s.theme === "light" ? "zenytt-light" : "zenytt-dark"));
 }

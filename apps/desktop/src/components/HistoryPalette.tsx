@@ -1,9 +1,9 @@
 // Recherche inversée dans l'historique du shell distant (Ctrl+R).
 //
-// Helm lit les fichiers d'historique que le shell tient déjà : rien n'est installé sur le serveur.
+// Zenytt lit les fichiers d'historique que le shell tient déjà : rien n'est installé sur le serveur.
 // La recherche est approximative (« dcps » trouve « docker compose ps »), les commandes habituelles
 // remontent, et la durée d'exécution s'affiche quand le shell l'a enregistrée — zsh en mode
-// EXTENDED_HISTORY le fait, bash jamais. Helm ne l'invente pas dans les autres cas.
+// EXTENDED_HISTORY le fait, bash jamais. Zenytt ne l'invente pas dans les autres cas.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, History, Repeat } from "lucide-react";
 import { api, errorMessage, formatDuration, type ShellHistoryEntry } from "../lib/api";
@@ -118,7 +118,7 @@ export function HistoryList({ serverId, onPick, autoFocus, compact }: { serverId
         {entries === null && !error && <p className="mt-3 text-sm text-muted">Lecture de l'historique…</p>}
         {entries !== null && entries.length === 0 && (
           <p className="mt-3 text-sm text-muted">
-            Aucun historique lisible sur ce serveur. Helm lit <span className="font-mono">~/.bash_history</span>,{" "}
+            Aucun historique lisible sur ce serveur. Zenytt lit <span className="font-mono">~/.bash_history</span>,{" "}
             <span className="font-mono">~/.zsh_history</span> et l'historique de fish ; le shell ne les écrit parfois qu'à la déconnexion.
           </p>
         )}

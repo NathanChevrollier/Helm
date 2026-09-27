@@ -5,8 +5,8 @@ import { useApp } from "./store";
 const INTERVAL_MS = 60_000;
 
 /**
- * Notifications Windows pour les nouvelles alertes des serveurs connectés, tant que Helm est
- * ouvert (quand il est fermé, c'est l'agent helmd qui prévient par Discord, ntfy ou webhook).
+ * Notifications Windows pour les nouvelles alertes des serveurs connectés, tant que Zenytt est
+ * ouvert (quand il est fermé, c'est l'agent zenyttd qui prévient par Discord, ntfy ou webhook).
  * Seuls les serveurs déjà connectés sont interrogés : aucune connexion n'est ouverte pour ça.
  */
 export function watchAlerts(): () => void {
@@ -35,7 +35,7 @@ export function watchAlerts(): () => void {
       if (!before) continue;
       const fresh = summary.alerts.filter((a) => !before.has(a.key));
       if (fresh.length && (await allowed())) {
-        for (const a of fresh) sendNotification({ title: `Helm · ${s.name} : ${a.title}`, body: a.message });
+        for (const a of fresh) sendNotification({ title: `Zenytt · ${s.name} : ${a.title}`, body: a.message });
       }
     }
   };

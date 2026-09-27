@@ -16,17 +16,17 @@ export async function checkForUpdate(manual = false): Promise<void> {
   try {
     const update = await check();
     if (!update) {
-      if (manual) notify("Helm est à jour.");
+      if (manual) notify("Zenytt est à jour.");
       return;
     }
     const notes = update.body?.trim();
     const ok = await ask({
-      title: `Helm ${update.version} est disponible`,
-      body: `Version installée : ${update.currentVersion}. Helm redémarrera après l'installation.${notes ? `\n\n${notes}` : ""}`,
+      title: `Zenytt ${update.version} est disponible`,
+      body: `Version installée : ${update.currentVersion}. Zenytt redémarrera après l'installation.${notes ? `\n\n${notes}` : ""}`,
       confirmLabel: "Installer et redémarrer",
     });
     if (!ok) return;
-    notify(`Téléchargement de Helm ${update.version}…`);
+    notify(`Téléchargement de Zenytt ${update.version}…`);
     await update.downloadAndInstall();
     await relaunch();
   } catch (e) {

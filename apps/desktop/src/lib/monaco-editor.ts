@@ -1,5 +1,5 @@
 // Monaco sans les services de langage TypeScript, CSS, HTML et JSON (≈ 9 Mo de workers jamais
-// utilisés : Helm n'en charge qu'un, le worker de base). La coloration syntaxique de tous les
+// utilisés : Zenytt n'en charge qu'un, le worker de base). La coloration syntaxique de tous les
 // langages et les fonctions de l'éditeur restent celles de `editor.main` (monaco-editor 0.56).
 // À regénérer si monaco-editor change de version majeure.
 /* eslint-disable */

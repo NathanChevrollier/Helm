@@ -49,7 +49,7 @@ jobs:
           prerelease=false
           case "$GITHUB_REF_NAME" in *-*) prerelease=true ;; esac
           # L'API renvoie directement l'id ; le rechercher ensuite dans la liste échoue parfois (brouillon pas encore listé).
-          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$GITHUB_REF_NAME" -f name="Helm $GITHUB_REF_NAME" -F draft=true -F prerelease=$prerelease -F generate_release_notes=true --jq .id)
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$GITHUB_REF_NAME" -f name="Zenytt $GITHUB_REF_NAME" -F draft=true -F prerelease=$prerelease -F generate_release_notes=true --jq .id)
           [ -n "$id" ] || { echo "::error::Release non créée"; exit 1; }
           echo "release_id=$id" >> "$GITHUB_OUTPUT"
 
@@ -77,13 +77,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: helmd
+          name: zenyttd
           path: target
-      - name: L'agent helmd est bien embarqué
+      - name: L'agent zenyttd est bien embarqué
         shell: bash
         run: |
           for arch in x86_64 aarch64; do
-            f="target/$arch-unknown-linux-musl/release/helmd"
+            f="target/$arch-unknown-linux-musl/release/zenyttd"
             [ -s "$f" ] || { echo "::error::$f absent : l'app serait publiée sans agent"; exit 1; }
           done
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4

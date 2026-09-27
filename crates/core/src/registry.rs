@@ -1,5 +1,5 @@
 //! Registres d'images privés : connexion d'un serveur à Docker Hub, GitHub Packages, GitLab,
-//! AWS ECR ou tout registre compatible, avec des identifiants tirés du coffre-fort de Helm.
+//! AWS ECR ou tout registre compatible, avec des identifiants tirés du coffre-fort de Zenytt.
 //!
 //! Le secret ne passe jamais dans une ligne de commande — il y serait visible de tous les
 //! utilisateurs du serveur (`ps`, `/proc/*/cmdline`) : il part sur l'entrée standard de
@@ -7,7 +7,7 @@
 //!
 //! Limite à connaître : une fois connecté, Docker garde lui-même le jeton sur le serveur, dans
 //! `~/.docker/config.json`, simplement encodé en base64 si aucun « credential helper » n'est
-//! installé. Helm le signale dans l'interface et recommande un jeton en lecture seule plutôt que le
+//! installé. Zenytt le signale dans l'interface et recommande un jeton en lecture seule plutôt que le
 //! mot de passe du compte.
 
 use serde::{Deserialize, Serialize};
@@ -204,7 +204,7 @@ pub fn parse_sessions(config: &str) -> Vec<Session> {
     out
 }
 
-/// Registres auxquels le serveur est connecté (compte qui lance Docker : root si Helm passe par sudo).
+/// Registres auxquels le serveur est connecté (compte qui lance Docker : root si Zenytt passe par sudo).
 pub async fn sessions(conn: &Connection, access: Access, sudo: Option<&str>) -> Result<Vec<Session>> {
     let out = match access {
         Access::Direct => conn.exec(SESSIONS_COMMAND, None).await?,

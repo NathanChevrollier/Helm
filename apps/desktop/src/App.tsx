@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
 import { ShipWheel } from "lucide-react";
-import { api } from "./lib/api";
+import { listen } from "@tauri-apps/api/event";
+import { api, type AppNotice } from "./lib/api";
 import { useApp, useAppPick } from "./lib/store";
 import type { SectionId } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
@@ -91,6 +92,14 @@ export default function App() {
     return watchInactivity(() => useApp.getState().settings.lockMinutes);
   }, []);
   useEffect(() => watchAlerts(), []);
+  // Reprise automatique d'une installation précédente (profils, serveurs) : le moteur prévient
+  // l'interface de ce qu'il a fait, y compris avant qu'elle n'écoute.
+  useEffect(() => {
+    const show = (n: AppNotice) => useApp.getState().notify(n.message, n.kind);
+    void api.appNotices().then((list) => list.forEach(show)).catch(() => {});
+    const off = listen<AppNotice>("zenytt://notice", (e) => show(e.payload));
+    return () => void off.then((stop) => stop());
+  }, []);
   // Une fois l'app affichée et au repos, précharge les écrans les plus ouverts : leur première
   // ouverture devient instantanée sans alourdir le démarrage.
   useEffect(() => {

@@ -1,11 +1,11 @@
 import { useApp } from "./store";
 
-/** Raccourcis de Helm, modifiables dans Réglages → Raccourcis clavier. */
+/** Raccourcis de Zenytt, modifiables dans Réglages → Raccourcis clavier. */
 export const SHORTCUTS = {
   palette: { label: "Palette de commandes", default: "Ctrl+K" },
   switcher: { label: "Changer de serveur", default: "Ctrl+Shift+S" },
   shortcutsHelp: { label: "Aide-mémoire des raccourcis", default: "F1" },
-  lock: { label: "Verrouiller Helm", default: "Ctrl+Shift+L" },
+  lock: { label: "Verrouiller Zenytt", default: "Ctrl+Shift+L" },
   newTab: { label: "Nouvel onglet de terminal", default: "Ctrl+Shift+T" },
   closeTab: { label: "Fermer l'onglet de terminal", default: "Ctrl+Shift+W" },
   nextTab: { label: "Onglet suivant", default: "Ctrl+Tab" },

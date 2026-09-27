@@ -1,4 +1,4 @@
-//! Lecture de `~/.ssh/config` (OpenSSH) pour importer ses serveurs dans Helm.
+//! Lecture de `~/.ssh/config` (OpenSSH) pour importer ses serveurs dans Zenytt.
 //!
 //! Seuls les blocs `Host` nommés sont repris (les motifs `*`, `?`, `!` sont des règles, pas des
 //! serveurs). `ProxyJump` est conservé sous la forme `alias:<nom>` : l'interface le relie au profil

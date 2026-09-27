@@ -1,14 +1,14 @@
 [package]
-name = "helm-mcp"
+name = "zenytt-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Serveur MCP en lecture seule : donne à une IA l'accès aux données de tes serveurs, sans aucune action possible"
 
 [dependencies]
-helm-core.workspace = true
-helm-profiles.workspace = true
-helm-protocol.workspace = true
+zenytt-core.workspace = true
+zenytt-profiles.workspace = true
+zenytt-protocol.workspace = true
 regex = "1"
 rmcp = { version = "3.4.0", features = ["server", "transport-io", "macros"] }
 serde.workspace = true

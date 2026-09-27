@@ -1,5 +1,5 @@
 // Supervision : ressources en direct ou sur l'historique de l'agent, processus, services,
-// tâches planifiées, et l'agent helmd avec ses alertes.
+// tâches planifiées, et l'agent zenyttd avec ses alertes.
 import { useCallback, useMemo, useState } from "react";
 import { api, errorMessage, type AgentInfo } from "../lib/api";
 import { useApp } from "../lib/store";
@@ -52,7 +52,7 @@ function Monitoring({ serverId }: { serverId: string }) {
       context={server && <ServerContext server={server} />}
       title="Supervision"
       guide={tab === "schedule" ? "schedule" : "agent"}
-      subtitle={agentOk ? `agent helmd ${agent?.status?.version ?? ""} actif · historique 30 jours` : "mode direct : mesures en temps réel, sans historique"}
+      subtitle={agentOk ? `agent zenyttd ${agent?.status?.version ?? ""} actif · historique 30 jours` : "mode direct : mesures en temps réel, sans historique"}
       status={alerts > 0 ? <Badge tone="danger">{alerts} alerte{alerts > 1 ? "s" : ""} en cours</Badge> : undefined}
       actions={
         tab === "overview" ? (
@@ -64,7 +64,7 @@ function Monitoring({ serverId }: { serverId: string }) {
               value: r.id,
               label: r.label,
               disabled: r.secs > 0 && !agentOk,
-              title: r.secs > 0 && !agentOk ? "Installe l'agent helmd (onglet Alertes et agent) pour conserver l'historique" : undefined,
+              title: r.secs > 0 && !agentOk ? "Installe l'agent zenyttd (onglet Alertes et agent) pour conserver l'historique" : undefined,
             }))}
           />
         ) : undefined

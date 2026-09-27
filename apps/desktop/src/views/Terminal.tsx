@@ -52,7 +52,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   /** Dock latéral : un seul panneau à la fois (fichiers, fragments, historique, enregistrements). */
   const [dock, setDock] = useState<DockTab | null>(() => {
     try {
-      const v = localStorage.getItem("helm.terminal.dock");
+      const v = localStorage.getItem("zenytt.terminal.dock");
       return v === "files" || v === "snippets" || v === "history" || v === "recordings" ? v : null;
     } catch {
       return null;
@@ -60,7 +60,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
   });
   useEffect(() => {
     try {
-      localStorage.setItem("helm.terminal.dock", dock ?? "");
+      localStorage.setItem("zenytt.terminal.dock", dock ?? "");
     } catch {
       /* préférence non retenue */
     }
@@ -270,7 +270,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
                   <span className="size-[7px] shrink-0 rounded-full" style={{ background: s?.color ?? "var(--color-accent)" }} />
                 )}
                 <span className="flex-1 truncate">{t.title}</span>
-                {t.tmux && <Badge tone="ok" className="h-4! px-1.5! text-[10px]!" title="Session persistante (tmux) : elle survit à la fermeture de Helm">tmux</Badge>}
+                {t.tmux && <Badge tone="ok" className="h-4! px-1.5! text-[10px]!" title="Session persistante (tmux) : elle survit à la fermeture de Zenytt">tmux</Badge>}
                 <button
                   type="button"
                   className={`flex size-5 shrink-0 items-center justify-center rounded hover:bg-hover-strong ${active ? "" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`}
@@ -370,7 +370,7 @@ export default function TerminalView({ visible }: { visible: boolean }) {
               }
             >
               {activeServerId
-                ? `Sessions persistantes (tmux) : elles continuent sur le serveur quand Helm est fermé. ${display(shortcutOf("newTab"))} ouvre un nouvel onglet.`
+                ? `Sessions persistantes (tmux) : elles continuent sur le serveur quand Zenytt est fermé. ${display(shortcutOf("newTab"))} ouvre un nouvel onglet.`
                 : "Ajoute d'abord un serveur dans la section Serveurs."}
             </EmptyState>
           )}
@@ -628,7 +628,7 @@ function MultiServerPicker({ onClose, onOpen }: { onClose: () => void; onOpen: (
 function JoinPicker({ onClose, onJoin }: { onClose: () => void; onJoin: (code: string, title: string) => void }) {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
-  const valid = code.trim().startsWith("helm-term:");
+  const valid = code.trim().startsWith("zenytt-term:");
   return (
     <Modal
       title="Rejoindre un terminal partagé"
@@ -645,12 +645,12 @@ function JoinPicker({ onClose, onJoin }: { onClose: () => void; onJoin: (code: s
       }
     >
       <p className="mb-3 text-sm text-muted">
-        Colle l'invitation reçue (elle commence par <span className="font-mono">helm-term:</span>). Tu verras le terminal de la personne en
+        Colle l'invitation reçue (elle commence par <span className="font-mono">zenytt-term:</span>). Tu verras le terminal de la personne en
         direct ; si elle a partagé le contrôle, tu pourras aussi y taper.
       </p>
       <Textarea
         className="h-28 resize-none font-mono text-xs"
-        placeholder="helm-term:…"
+        placeholder="zenytt-term:…"
         value={code}
         onChange={(e) => setCode(e.target.value)}
       />
@@ -744,7 +744,7 @@ function SessionsModal({
       </p>
       {error && <ErrorState message={error} onRetry={load} />}
       {!list && !error && <Skeleton rows={3} />}
-      {list && list.length === 0 && <p className="text-[13px] text-muted">Aucune session Helm sur ce serveur.</p>}
+      {list && list.length === 0 && <p className="text-[13px] text-muted">Aucune session Zenytt sur ce serveur.</p>}
       <ul className="flex flex-col gap-2">
         {list?.map((s) => (
           <li key={s.name} className="flex items-center gap-3 rounded-lg border border-border bg-subtle px-3 py-2 text-[13px]">

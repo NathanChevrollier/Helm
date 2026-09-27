@@ -1,9 +1,9 @@
 //! Bureaux à distance (RDP) : profils, et ouverture dans le client RDP du système (mstsc sous
 //! Windows), directement ou à travers un tunnel SSH ouvert pour l'occasion.
 
-use helm_profiles::{DesktopProtocol, Identity, RemoteDesktop, TunnelDef};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
+use zenytt_profiles::{DesktopProtocol, Identity, RemoteDesktop, TunnelDef};
 
 use crate::commands::tunnels::Tunnels;
 use crate::store::{secrets, Store};
@@ -59,7 +59,7 @@ pub fn desktop_save(store: State<'_, Store>, mut desktop: RemoteDesktop, passwor
     }
     if desktop.id.is_empty() {
         desktop.id = uuid::Uuid::new_v4().to_string();
-    } else if !helm_profiles::valid_id(&desktop.id) {
+    } else if !zenytt_profiles::valid_id(&desktop.id) {
         return Err("identifiant de bureau invalide".into());
     }
     let id = desktop.id.clone();
@@ -149,7 +149,7 @@ fn free_port() -> Result<u16, String> {
 pub async fn desktop_launch(app: AppHandle, store: State<'_, Store>, tunnels: State<'_, Tunnels>, id: String) -> Result<String, String> {
     let d = find_desktop(&store, &id)?;
     if d.protocol == DesktopProtocol::Vnc {
-        return Err("les bureaux VNC s'ouvrent dans Helm : utilise « Se connecter »".into());
+        return Err("les bureaux VNC s'ouvrent dans Zenytt : utilise « Se connecter »".into());
     }
     if d.protocol == DesktopProtocol::Spice {
         return spice_launch(&app, &store, &tunnels, &d).await;
@@ -256,7 +256,7 @@ pub async fn desktop_session_open(
         via_tunnel: d.via_server_id.is_some(),
     };
     bridges.keep(&id, bridge);
-    log::info!("bureau à distance « {} » ouvert dans Helm ({host}:{port})", d.name);
+    log::info!("bureau à distance « {} » ouvert dans Zenytt ({host}:{port})", d.name);
     Ok(session)
 }
 
@@ -394,7 +394,7 @@ pub struct VncSession {
     pub via_tunnel: bool,
 }
 
-/// Ouvre une session VNC dans Helm : tunnel SSH si la machine passe par un serveur, puis pont
+/// Ouvre une session VNC dans Zenytt : tunnel SSH si la machine passe par un serveur, puis pont
 /// local WebSocket ↔ TCP. Le port VNC n'a donc jamais besoin d'être exposé à Internet — c'est
 /// d'autant plus important que VNC, sans chiffrement, fait circuler l'écran en clair.
 #[tauri::command]
@@ -439,7 +439,7 @@ pub async fn vnc_session_open(
         via_tunnel: d.via_server_id.is_some(),
     };
     bridges.keep(&id, bridge);
-    log::info!("bureau VNC « {} » ouvert dans Helm ({host}:{port})", d.name);
+    log::info!("bureau VNC « {} » ouvert dans Zenytt ({host}:{port})", d.name);
     Ok(session)
 }
 
@@ -502,7 +502,7 @@ fn launch(
     // Windows App (ex-Microsoft Remote Desktop) ouvre les fichiers .rdp et demande le mot de passe.
     std::process::Command::new("open").arg(file).status().map_err(|e| e.to_string())?;
     Ok(if tunnel.is_some() {
-        "Fichier .rdp ouvert (le tunnel SSH reste actif jusqu'à la fermeture de Helm)".into()
+        "Fichier .rdp ouvert (le tunnel SSH reste actif jusqu'à la fermeture de Zenytt)".into()
     } else {
         "Fichier .rdp ouvert dans Windows App".into()
     })

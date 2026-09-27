@@ -70,7 +70,7 @@ async function handleCommand(
     case "roadmap":
       await showRoadmap(interaction, roadmap);
       break;
-    case "helm":
+    case "zenytt":
       await showStatus(interaction, client, github);
       break;
   }
@@ -147,7 +147,7 @@ async function showFeedbackModal(kind: FeedbackKind, interaction: ButtonInteract
   const context = new TextInputBuilder()
     .setCustomId("context")
     .setLabel("Contexte optionnel")
-    .setPlaceholder("Version Helm, OS, priorité, logs utiles...")
+    .setPlaceholder("Version Zenytt, OS, priorité, logs utiles...")
     .setStyle(TextInputStyle.Paragraph)
     .setMaxLength(1000)
     .setRequired(false);
@@ -196,7 +196,7 @@ async function showStatus(interaction: ChatInputCommandInteraction, client: Clie
   await interaction.deferReply({ ephemeral: true });
   const release = await github.getLatestRelease();
   const releaseText = release ? `[${release.tagName}](${release.url})` : "Aucune release publiée";
-  await interaction.editReply(`**Helm Community Bot**\nÉtat : en ligne\nPing Discord : ${client.ws.ping} ms\nUptime : ${formatDuration(client.uptime ?? 0)}\nDernière release Helm : ${releaseText}`);
+  await interaction.editReply(`**Zenytt Community Bot**\nÉtat : en ligne\nPing Discord : ${client.ws.ping} ms\nUptime : ${formatDuration(client.uptime ?? 0)}\nDernière release Zenytt : ${releaseText}`);
 }
 
 function buildPanel(kind: FeedbackKind): EmbedBuilder {
@@ -206,8 +206,8 @@ function buildPanel(kind: FeedbackKind): EmbedBuilder {
     .setTitle(isBug ? "Signaler un bug" : "Proposer une amélioration")
     .setDescription(
       isBug
-        ? "Tu as rencontré un problème dans Helm ? Décris-le avec les étapes pour le reproduire afin que l'équipe puisse l'analyser."
-        : "Une idée pour rendre Helm plus utile ? Partage-la avec la communauté et l'équipe de développement.",
+        ? "Tu as rencontré un problème dans Zenytt ? Décris-le avec les étapes pour le reproduire afin que l'équipe puisse l'analyser."
+        : "Une idée pour rendre Zenytt plus utile ? Partage-la avec la communauté et l'équipe de développement.",
     )
     .setFooter({ text: "Un formulaire Discord ouvrira les champs nécessaires." });
 }

@@ -4,7 +4,7 @@ import { useLock } from "./lock";
 /**
  * Exécute `task` tout de suite puis toutes les `intervalMs` millisecondes, tant que `enabled`.
  * - Jamais deux exécutions en même temps : si la précédente n'est pas finie, le tour est sauté.
- * - En pause quand la fenêtre est réduite ou masquée, ou Helm verrouillé (le backend refuserait) ;
+ * - En pause quand la fenêtre est réduite ou masquée, ou Zenytt verrouillé (le backend refuserait) ;
  *   reprise immédiate au retour.
  * `deps` relance le cycle (changement de serveur…). `task` gère lui-même ses erreurs.
  */

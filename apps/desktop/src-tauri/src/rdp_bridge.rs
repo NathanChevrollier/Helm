@@ -2,7 +2,7 @@
 //!
 //! Le client web d'IronRDP ne parle pas TCP : il ouvre une WebSocket vers une passerelle et y
 //! négocie la connexion avec le protocole **RDCleanPath** (la passerelle fait le TCP, l'échange
-//! X.224 et la poignée de main TLS, puis relaie les octets). Cette passerelle, ici, c'est Helm
+//! X.224 et la poignée de main TLS, puis relaie les octets). Cette passerelle, ici, c'est Zenytt
 //! lui-même : elle n'écoute que sur 127.0.0.1, n'accepte qu'une seule session, et le jeton
 //! présent dans l'adresse doit correspondre.
 //!

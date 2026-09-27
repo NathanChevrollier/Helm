@@ -181,7 +181,7 @@ function Explorer({
   const theme = useTheme((s) => s.theme);
   const [sidebarOpen, setSidebarOpenState] = useState(() => {
     try {
-      return localStorage.getItem("helm.files.sidebar") !== "closed";
+      return localStorage.getItem("zenytt.files.sidebar") !== "closed";
     } catch {
       return true;
     }
@@ -189,7 +189,7 @@ function Explorer({
   const setSidebarOpen = (v: boolean) => {
     setSidebarOpenState(v);
     try {
-      localStorage.setItem("helm.files.sidebar", v ? "open" : "closed");
+      localStorage.setItem("zenytt.files.sidebar", v ? "open" : "closed");
     } catch {
       /* préférence non retenue */
     }

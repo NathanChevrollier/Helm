@@ -2,23 +2,29 @@ import { Octokit } from "@octokit/rest";
 import type { CreatedIssue, FeedbackKind } from "../types/feedback.js";
 
 export interface RoadmapIssue {
-  number: number;
+  /** Absent pour un brouillon du projet (carte sans issue). */
+  number?: number;
   title: string;
-  url: string;
+  url?: string;
   assignees: string[];
   state: "open" | "closed";
 }
 
 export class GitHubService {
   private readonly client: Octokit;
+  /** Lecture du projet : jeton dédié si fourni (un jeton « fine-grained » ne lit pas les projets d'un compte personnel). */
+  private readonly projectClient: Octokit;
+  private projectNumber: number | undefined;
 
   public constructor(
     private readonly owner: string,
     private readonly repo: string,
     token: string,
     private readonly labels: Record<FeedbackKind, string>,
+    projectToken?: string,
   ) {
-    this.client = new Octokit({ auth: token, userAgent: "helm-discord-bot" });
+    this.client = new Octokit({ auth: token, userAgent: "zenytt-discord-bot" });
+    this.projectClient = projectToken ? new Octokit({ auth: projectToken, userAgent: "zenytt-discord-bot" }) : this.client;
   }
 
   public async createIssue(title: string, body: string, kind: FeedbackKind): Promise<CreatedIssue> {
@@ -61,8 +67,8 @@ export class GitHubService {
       this.getIssuesByLabel(labels.test),
       this.getIssuesByLabel(labels.done),
     ]);
-    const seen = new Set<number>();
-    const unique = (issues: RoadmapIssue[]) => issues.filter((issue) => !seen.has(issue.number) && seen.add(issue.number));
+    const seen = new Set<string>();
+    const unique = (issues: RoadmapIssue[]) => issues.filter((issue) => !seen.has(issue.url ?? issue.title) && seen.add(issue.url ?? issue.title));
     return {
       brainstorming: unique(brainstorming),
       inProgress: unique(inProgress),
@@ -71,85 +77,52 @@ export class GitHubService {
     };
   }
 
-  public async getProjectRoadmapIssues(projectNumber: number): Promise<{
-    brainstorming: RoadmapIssue[];
-    inProgress: RoadmapIssue[];
-    test: RoadmapIssue[];
-    done: RoadmapIssue[];
-  }> {
+  /**
+   * Cartes du GitHub Project v2 (brouillons compris), rangées par colonne selon leur statut.
+   * Sans numéro, le projet est retrouvé seul : celui dont le titre contient le nom du dépôt, ou
+   * l'unique projet ouvert du propriétaire.
+   */
+  public async getProjectRoadmapIssues(projectNumber?: number): Promise<Record<RoadmapColumn, RoadmapIssue[]>> {
     try {
-      const response = await this.client.graphql<{
-        repository: {
-          projectV2: {
-            items: {
-              nodes: Array<{
-                content: {
-                  number?: number;
-                  title?: string;
-                  url?: string;
-                  state?: "OPEN" | "CLOSED";
-                  assignees?: { nodes: Array<{ login: string }> };
-                } | null;
-                fieldValues: {
-                  nodes: Array<{
-                    name?: string | null;
-                    field?: { name?: string | null } | null;
-                  } | null>;
-                };
-              }>;
-            };
-          } | null;
-        };
-      }>(
-        `query Roadmap($owner: String!, $repo: String!, $number: Int!) {
-          repository(owner: $owner, name: $repo) {
-            projectV2(number: $number) {
-              items(first: 100) {
-                nodes {
-                  content {
-                    ... on Issue {
-                      number
-                      title
-                      url
-                      state
-                      assignees(first: 10) { nodes { login } }
-                    }
-                  }
-                  fieldValues(first: 20) {
-                    nodes {
-                      ... on ProjectV2ItemFieldSingleSelectValue {
-                        name
-                        field { ... on ProjectV2SingleSelectField { name } }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }`,
-        { owner: this.owner, repo: this.repo, number: projectNumber },
-      );
-      if (!response.repository.projectV2) throw new Error(`Projet GitHub #${projectNumber} introuvable`);
-
-      const columns = { brainstorming: [], inProgress: [], test: [], done: [] } as Record<"brainstorming" | "inProgress" | "test" | "done", RoadmapIssue[]>;
-      for (const item of response.repository.projectV2.items.nodes) {
-        if (!item.content || typeof item.content.number !== "number" || !item.content.title || !item.content.url || !item.content.state) continue;
-        const status = item.fieldValues.nodes.find((field) => field?.field?.name?.toLowerCase() === "status")?.name?.toLowerCase();
-        const key = status === "brainstorming" ? "brainstorming" : status === "in progress" ? "inProgress" : status === "test" ? "test" : status === "done" ? "done" : undefined;
-        if (!key) continue;
-        columns[key].push({
-          number: item.content.number,
-          title: item.content.title,
-          url: item.content.url,
-          assignees: (item.content.assignees?.nodes ?? []).map((assignee) => assignee.login),
-          state: item.content.state === "CLOSED" ? "closed" : "open",
+      const number = projectNumber ?? (await this.findProjectNumber());
+      const columns: Record<RoadmapColumn, RoadmapIssue[]> = { brainstorming: [], inProgress: [], test: [], done: [] };
+      let cursor: string | null = null;
+      do {
+        const response: ProjectItemsResponse = await this.projectClient.graphql<ProjectItemsResponse>(PROJECT_ITEMS_QUERY, {
+          owner: this.owner,
+          number,
+          cursor,
         });
-      }
+        const project = response.repositoryOwner?.projectV2;
+        if (!project) throw new Error(`Projet GitHub #${number} introuvable`);
+        for (const item of project.items.nodes) {
+          const card = toRoadmapIssue(item);
+          if (!card) continue;
+          const status = item.fieldValues.nodes.find((field) => isStatusField(field?.field?.name))?.name ?? undefined;
+          columns[roadmapColumn(status)].push(card);
+        }
+        cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;
+      } while (cursor);
       return columns;
     } catch (error) {
-      throw new Error(`GitHub n'a pas pu lire le Project #${projectNumber}: ${describeGitHubError(error)}`);
+      throw new Error(`GitHub n'a pas pu lire le projet de la roadmap: ${describeGitHubError(error)}`);
     }
+  }
+
+  private async findProjectNumber(): Promise<number> {
+    if (this.projectNumber) return this.projectNumber;
+    const response = await this.projectClient.graphql<{
+      repositoryOwner: { projectsV2?: { nodes: Array<{ number: number; title: string; closed: boolean }> } } | null;
+    }>(PROJECTS_QUERY, { owner: this.owner });
+    const open = (response.repositoryOwner?.projectsV2?.nodes ?? []).filter((project) => !project.closed);
+    const repo = this.repo.toLowerCase();
+    const found = open.find((project) => project.title.toLowerCase().includes(repo)) ?? (open.length === 1 ? open[0] : undefined);
+    if (!found) {
+      throw new Error(`aucun projet dont le titre contient « ${this.repo} » : renseigne GITHUB_PROJECT_NUMBER`);
+    }
+    console.info(`[roadmap] projet GitHub utilisé : #${found.number} « ${found.title} »`);
+    this.projectNumber = found.number;
+    return found.number;
   }
 
   private async getIssuesByLabel(label: string): Promise<RoadmapIssue[]> {
@@ -206,4 +179,95 @@ function getStatus(error: unknown): number | undefined {
 function describeGitHubError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "erreur inconnue";
+}
+
+export type RoadmapColumn = "brainstorming" | "inProgress" | "test" | "done";
+
+const CARD_FIELDS = `number title url state assignees(first: 10) { nodes { login } }`;
+
+const PROJECTS_QUERY = `query Projects($owner: String!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner { projectsV2(first: 50) { nodes { number title closed } } }
+  }
+}`;
+
+const PROJECT_ITEMS_QUERY = `query Roadmap($owner: String!, $number: Int!, $cursor: String) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        items(first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            isArchived
+            content {
+              ... on DraftIssue { title assignees(first: 10) { nodes { login } } }
+              ... on Issue { ${CARD_FIELDS} }
+              ... on PullRequest { ${CARD_FIELDS} }
+            }
+            fieldValues(first: 20) {
+              nodes {
+                ... on ProjectV2ItemFieldSingleSelectValue {
+                  name
+                  field { ... on ProjectV2SingleSelectField { name } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+interface ProjectItem {
+  isArchived?: boolean;
+  content: {
+    number?: number;
+    title?: string;
+    url?: string;
+    state?: string;
+    assignees?: { nodes: Array<{ login: string }> };
+  } | null;
+  fieldValues: { nodes: Array<{ name?: string | null; field?: { name?: string | null } | null } | null> };
+}
+
+interface ProjectItemsResponse {
+  repositoryOwner: {
+    projectV2?: {
+      items: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ProjectItem[] };
+    } | null;
+  } | null;
+}
+
+function toRoadmapIssue(item: ProjectItem): RoadmapIssue | undefined {
+  const content = item.content;
+  if (item.isArchived || !content?.title) return undefined;
+  return {
+    ...(content.number !== undefined && { number: content.number }),
+    ...(content.url !== undefined && { url: content.url }),
+    title: content.title,
+    assignees: (content.assignees?.nodes ?? []).map((assignee) => assignee.login),
+    state: content.state === "CLOSED" || content.state === "MERGED" ? "closed" : "open",
+  };
+}
+
+function normalize(value: string): string {
+  return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+function isStatusField(name: string | null | undefined): boolean {
+  const field = normalize(name ?? "");
+  return field === "status" || field === "statut" || field === "etat";
+}
+
+/**
+ * Colonne de la roadmap d'après le statut de la carte, en français ou en anglais. Une carte sans
+ * statut (ou au statut inconnu) est une idée : elle va dans Brainstorming.
+ */
+export function roadmapColumn(status: string | undefined): RoadmapColumn {
+  const s = normalize(status ?? "");
+  if (/(done|termine|fini|livre|complete|ferme|closed|shipped)/.test(s)) return "done";
+  if (/(test|review|revue|qa|recette|verif|valid)/.test(s)) return "test";
+  if (/(progress|cours|doing|dev|wip)/.test(s)) return "inProgress";
+  return "brainstorming";
 }

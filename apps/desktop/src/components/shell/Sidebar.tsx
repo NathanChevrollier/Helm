@@ -2,7 +2,7 @@
 // groupe « Serveur »), puis les sections groupées, avec des badges sur ce qui demande une action.
 import { useEffect, useState } from "react";
 import { ChevronsUpDown, Lock, MessagesSquare, PanelLeftClose, PanelLeftOpen, Sparkles, type LucideIcon } from "lucide-react";
-import { HelmLogo } from "../HelmLogo";
+import { AppLogo } from "../AppLogo";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useApp } from "../../lib/store";
 import { useShell } from "../../lib/shell";
@@ -14,7 +14,7 @@ import { SECTIONS, type SectionId } from "../../sections";
 import { Avatar, FOCUS_RING, StatusDot } from "../ui";
 import ServerSwitcher from "./ServerSwitcher";
 
-const RAIL_KEY = "helm.rail";
+const RAIL_KEY = "zenytt.rail";
 
 export default function Sidebar({ version }: { version?: string }) {
   const section = useApp((s) => s.section);
@@ -67,12 +67,12 @@ export default function Sidebar({ version }: { version?: string }) {
           type="button"
           onClick={() => setSection("home")}
           className={`flex size-8 items-center justify-center rounded-lg hover:bg-hover ${FOCUS_RING}`}
-          title="Helm — accueil"
-          aria-label="Helm, accueil"
+          title="Zenytt — accueil"
+          aria-label="Zenytt, accueil"
         >
-          <HelmLogo size={26} />
+          <AppLogo size={26} />
         </button>
-        {open && <span className="flex-1 text-[15px] font-semibold tracking-[0.01em]">Helm</span>}
+        {open && <span className="flex-1 text-[15px] font-semibold tracking-[0.01em]">Zenytt</span>}
         <button
           type="button"
           onClick={() => setOpen(!open)}
@@ -143,13 +143,13 @@ export default function Sidebar({ version }: { version?: string }) {
         {lockConfigured && <NavItem label="Verrouiller" icon={Lock} expanded={open} active={false} hint={display(shortcutOf("lock"))} onClick={() => useLock.getState().lock()} />}
         {open ? (
           <div className="flex items-center justify-between px-2.5 pt-2 text-[11px] text-faint">
-            <span>{version ? `Helm v${version}` : "Helm"}</span>
+            <span>{version ? `Zenytt v${version}` : "Zenytt"}</span>
             <button type="button" className={`flex items-center gap-1 rounded hover:text-fg ${FOCUS_RING}`} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")}>
               <MessagesSquare size={12} /> Discord
             </button>
           </div>
         ) : (
-          <NavItem label="Discord de Helm" icon={MessagesSquare} expanded={false} active={false} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")} />
+          <NavItem label="Discord de Zenytt" icon={MessagesSquare} expanded={false} active={false} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")} />
         )}
       </div>
     </nav>

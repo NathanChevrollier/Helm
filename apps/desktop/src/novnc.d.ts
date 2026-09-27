@@ -1,4 +1,4 @@
-// Types minimaux de noVNC (le paquet n'en publie pas) : seulement ce que Helm utilise.
+// Types minimaux de noVNC (le paquet n'en publie pas) : seulement ce que Zenytt utilise.
 declare module "@novnc/novnc" {
   export interface RfbCredentials {
     username?: string;

@@ -1,8 +1,8 @@
 //! Espace de travail : état de l'interface, journal d'actions et sessions tmux.
 
-use helm_core::tmux::{self, Session};
-use helm_profiles::audit::Entry;
 use tauri::State;
+use zenytt_core::tmux::{self, Session};
+use zenytt_profiles::audit::Entry;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -17,7 +17,7 @@ pub fn ui_state_get(store: State<'_, Store>) -> serde_json::Value {
     store.read(|d| d.ui_state.clone())
 }
 
-/// Ouvre le dossier des journaux de Helm dans l'explorateur.
+/// Ouvre le dossier des journaux de Zenytt dans l'explorateur.
 #[tauri::command]
 pub fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
@@ -27,16 +27,16 @@ pub fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
     app.opener().open_path(dir.to_string_lossy(), None::<String>).map_err(|e| e.to_string())
 }
 
-/// Helm est verrouillé. Gardé côté Rust : recharger l'interface (F5) ne déverrouille pas.
+/// Zenytt est verrouillé. Gardé côté Rust : recharger l'interface (F5) ne déverrouille pas.
 static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Commandes permises quand Helm est verrouillé : de quoi afficher l'écran de verrouillage et
+/// Commandes permises quand Zenytt est verrouillé : de quoi afficher l'écran de verrouillage et
 /// le lever. Tout le reste est refusé par `lib.rs` avant d'atteindre la commande : sans cela, le
 /// verrou ne serait qu'un calque d'interface, contournable depuis les outils de développement.
 pub const ALLOWED_WHILE_LOCKED: &[&str] =
-    &["app_version", "app_is_locked", "app_unlock", "app_lock_engage", "ui_state_get", "store_warning", "term_resize"];
+    &["app_version", "app_is_locked", "app_unlock", "app_lock_engage", "ui_state_get", "store_warning", "app_notices", "term_resize"];
 
-/// Vrai si Helm est verrouillé (mot de passe défini et verrou engagé).
+/// Vrai si Zenytt est verrouillé (mot de passe défini et verrou engagé).
 pub fn is_locked() -> bool {
     LOCKED.load(std::sync::atomic::Ordering::SeqCst)
 }
@@ -60,7 +60,7 @@ pub fn app_lock_get() -> Option<String> {
 #[tauri::command]
 pub fn app_lock_set(hash: String) -> Result<(), String> {
     if LOCKED.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err("Helm est verrouillé".into());
+        return Err("Zenytt est verrouillé".into());
     }
     if hash.is_empty() {
         // Désactivation du verrouillage.
@@ -198,14 +198,14 @@ pub struct McpConfig {
     claude_code: String,
 }
 
-/// Configuration à copier dans Claude Desktop / Claude Code pour brancher le serveur MCP de Helm.
+/// Configuration à copier dans Claude Desktop / Claude Code pour brancher le serveur MCP de Zenytt.
 #[tauri::command]
 pub fn mcp_config() -> Result<McpConfig, String> {
     let exe = std::env::current_exe().map_err(err)?.display().to_string();
-    let desktop = serde_json::json!({ "mcpServers": { "helm": { "command": exe, "args": ["--mcp"] } } });
+    let desktop = serde_json::json!({ "mcpServers": { "zenytt": { "command": exe, "args": ["--mcp"] } } });
     Ok(McpConfig {
         claude_desktop: serde_json::to_string_pretty(&desktop).map_err(err)?,
-        claude_code: format!("claude mcp add helm -- \"{exe}\" --mcp"),
+        claude_code: format!("claude mcp add zenytt -- \"{exe}\" --mcp"),
         command: exe,
     })
 }
@@ -267,12 +267,12 @@ pub fn save_binary_file(request: tauri::ipc::Request<'_>) -> Result<String, Stri
         let v = request.headers().get(name).ok_or_else(|| format!("en-tête {name} manquant"))?;
         percent_decode(v.to_str().map_err(err)?)
     };
-    let dir = std::path::PathBuf::from(header("x-helm-dir")?);
+    let dir = std::path::PathBuf::from(header("x-zenytt-dir")?);
     if !dir.is_absolute() || !dir.is_dir() {
         return Err("dossier de destination invalide".into());
     }
-    let name = helm_core::sftp::local_name(&header("x-helm-name")?);
-    let path = helm_core::sftp::unique_local(&dir, &name);
+    let name = zenytt_core::sftp::local_name(&header("x-zenytt-name")?);
+    let path = zenytt_core::sftp::unique_local(&dir, &name);
     std::fs::write(&path, bytes).map_err(err)?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -298,7 +298,7 @@ pub fn read_local_file(path: String) -> Result<tauri::ipc::Response, String> {
 // figeraient toute l'interface le temps de l'opération.
 #[tauri::command(async)]
 pub fn settings_export(store: State<'_, Store>, path: String, password: String, include_secrets: bool) -> Result<(), String> {
-    let text = helm_profiles::export::export(&store, &password, include_secrets)?;
+    let text = zenytt_profiles::export::export(&store, &password, include_secrets)?;
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
     log::info!("réglages exportés vers {path} (chiffré : {}, secrets : {include_secrets})", !password.is_empty());
     Ok(())
@@ -309,7 +309,7 @@ pub fn settings_export(store: State<'_, Store>, path: String, password: String, 
 // figeraient toute l'interface le temps de l'opération.
 #[tauri::command(async)]
 pub fn settings_share(store: State<'_, Store>, ids: Vec<String>, password: String, include_secrets: bool) -> Result<String, String> {
-    let text = helm_profiles::export::share(&store, &ids, &password, include_secrets)?;
+    let text = zenytt_profiles::export::share(&store, &ids, &password, include_secrets)?;
     log::info!("partage de {} serveur(s) (secrets : {include_secrets})", ids.len());
     Ok(text)
 }
@@ -319,7 +319,7 @@ pub fn settings_share(store: State<'_, Store>, ids: Vec<String>, password: Strin
 // figeraient toute l'interface le temps de l'opération.
 #[tauri::command(async)]
 pub fn settings_share_code(store: State<'_, Store>, ids: Vec<String>, password: String, include_secrets: bool) -> Result<String, String> {
-    Ok(helm_profiles::export::to_code(&settings_share(store, ids, password, include_secrets)?))
+    Ok(zenytt_profiles::export::to_code(&settings_share(store, ids, password, include_secrets)?))
 }
 
 /// Importe un partage reçu (contenu de fichier ou code collé).
@@ -330,9 +330,9 @@ pub fn settings_import_text(
     store: State<'_, Store>,
     text: String,
     password: String,
-) -> Result<helm_profiles::export::ImportSummary, String> {
-    let content = helm_profiles::export::from_code(&text)?;
-    let summary = helm_profiles::export::import(&store, &content, &password)?;
+) -> Result<zenytt_profiles::export::ImportSummary, String> {
+    let content = zenytt_profiles::export::from_code(&text)?;
+    let summary = zenytt_profiles::export::import(&store, &content, &password)?;
     log::info!("partage importé : {summary:?}");
     Ok(summary)
 }
@@ -340,7 +340,7 @@ pub fn settings_import_text(
 /// Un partage reçu est-il chiffré (faut-il demander son mot de passe) ?
 #[tauri::command]
 pub fn settings_text_encrypted(text: String) -> Result<bool, String> {
-    helm_profiles::export::is_encrypted(&helm_profiles::export::from_code(&text)?)
+    zenytt_profiles::export::is_encrypted(&zenytt_profiles::export::from_code(&text)?)
 }
 
 /// Le fichier à importer est-il chiffré ?
@@ -348,15 +348,15 @@ pub fn settings_text_encrypted(text: String) -> Result<bool, String> {
 // figeraient toute l'interface le temps de l'opération.
 #[tauri::command(async)]
 pub fn settings_import_encrypted(path: String) -> Result<bool, String> {
-    helm_profiles::export::is_encrypted(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
+    zenytt_profiles::export::is_encrypted(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
 }
 
 // Hors du fil principal : chiffrement (PBKDF2, 600 000 tours) ou lecture de gros fichiers
 // figeraient toute l'interface le temps de l'opération.
 #[tauri::command(async)]
-pub fn settings_import(store: State<'_, Store>, path: String, password: String) -> Result<helm_profiles::export::ImportSummary, String> {
+pub fn settings_import(store: State<'_, Store>, path: String, password: String) -> Result<zenytt_profiles::export::ImportSummary, String> {
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let summary = helm_profiles::export::import(&store, &text, &password)?;
+    let summary = zenytt_profiles::export::import(&store, &text, &password)?;
     log::info!("réglages importés depuis {path} : {summary:?}");
     Ok(summary)
 }
@@ -397,7 +397,7 @@ mod tests {
     fn remote_names_cannot_escape_the_folder() {
         // Le nom d'un fichier reçu vient de la machine distante : il est ramené à un simple nom.
         for hostile in ["../../Windows/System32/evil.dll", "..\\..\\evil.exe", "CON", "..", "a/b\\c.txt"] {
-            let n = helm_core::sftp::local_name(hostile);
+            let n = zenytt_core::sftp::local_name(hostile);
             assert!(!n.contains('/') && !n.contains('\\') && n != ".." && !n.is_empty(), "{hostile} -> {n}");
         }
     }

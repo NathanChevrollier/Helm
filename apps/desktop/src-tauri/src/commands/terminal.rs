@@ -1,8 +1,8 @@
 //! Terminaux interactifs.
 
-use helm_core::shell_history;
 use tauri::ipc::Channel;
 use tauri::State;
+use zenytt_core::shell_history;
 
 use crate::sessions::{Sessions, TermEvent};
 use crate::store::Store;
@@ -22,11 +22,11 @@ pub async fn term_open(
     // Une session tmux remplace le shell : elle survit aux coupures et à la fermeture de l'app.
     let command = match (command, tmux_session) {
         // Onglet ouvert sur une commande (mises à jour, journal…) : elle est lancée par un shell
-        // qui annonce son PID, sinon Helm perdrait le dossier courant de cet onglet.
+        // qui annonce son PID, sinon Zenytt perdrait le dossier courant de cet onglet.
         (Some(c), _) => Some(announcing_pid(&c)),
-        (None, Some(name)) => Some(helm_core::tmux::attach_command(&name).map_err(|e| e.to_string())?),
+        (None, Some(name)) => Some(zenytt_core::tmux::attach_command(&name).map_err(|e| e.to_string())?),
         // Shell simple : il annonce son PID (séquence OSC ignorée par l'affichage) pour que
-        // Helm retrouve son dossier courant (panneau Fichiers, glisser-déposer).
+        // Zenytt retrouve son dossier courant (panneau Fichiers, glisser-déposer).
         (None, None) => Some(announcing_pid(LOGIN_SHELL)),
     };
     sessions.open_terminal(&conn, cols, rows, command, on_event).await
@@ -36,7 +36,7 @@ pub async fn term_open(
 const LOGIN_SHELL: &str = r#"exec "${SHELL:-/bin/sh}" -l"#;
 
 /// Fait précéder une commande de la séquence OSC privée 7770, qui transmet à l'interface le PID
-/// du shell qui l'exécute (séquence ignorée par l'affichage). Helm retrouve ensuite le dossier
+/// du shell qui l'exécute (séquence ignorée par l'affichage). Zenytt retrouve ensuite le dossier
 /// courant de cet onglet via `/proc`, y compris quand un programme y tourne au premier plan.
 fn announcing_pid(command: &str) -> String {
     let script = format!(r#"printf "\033]7770;%s\007" "$$"; {command}"#);
@@ -97,7 +97,7 @@ pub async fn term_cwd(
     let conn = sessions.get(&store, &server_id).await?;
 
     if let Some(name) = tmux_session {
-        let cmd = helm_core::tmux::pane_path_command(&name).map_err(|e| e.to_string())?;
+        let cmd = zenytt_core::tmux::pane_path_command(&name).map_err(|e| e.to_string())?;
         let out = conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
         let mut lines = out.stdout.lines().map(str::trim).filter(|l| !l.is_empty());
         // Première ligne : le chemin donné par tmux ; deuxième : le PID du shell du panneau.
@@ -131,7 +131,7 @@ pub async fn tmux_scroll(
         return Ok(());
     }
     let conn = sessions.get(&store, &server_id).await?;
-    let cmd = helm_core::tmux::scroll_command(&session, up, lines).map_err(|e| e.to_string())?;
+    let cmd = zenytt_core::tmux::scroll_command(&session, up, lines).map_err(|e| e.to_string())?;
     conn.exec(&cmd, None).await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -153,7 +153,7 @@ pub async fn term_close(sessions: State<'_, Sessions>, id: u64) -> Result<(), St
 }
 
 /// Historique des commandes du shell de l'utilisateur (bash et zsh), le plus récent d'abord,
-/// sans doublons. Lu seulement sur demande (palette Ctrl+K), jamais conservé par Helm.
+/// sans doublons. Lu seulement sur demande (palette Ctrl+K), jamais conservé par Zenytt.
 #[tauri::command]
 pub async fn shell_history(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<String>, String> {
     if !sessions.is_connected(&server_id).await {
@@ -228,7 +228,7 @@ mod tests {
 }
 
 /// Historique des commandes du shell distant, dédoublonné et classé (le plus récent d'abord).
-/// Helm lit les fichiers que le shell tient déjà : rien n'est installé sur le serveur, et les
+/// Zenytt lit les fichiers que le shell tient déjà : rien n'est installé sur le serveur, et les
 /// commandes qui contiennent visiblement un secret sont écartées côté Rust.
 #[tauri::command]
 pub async fn term_history(

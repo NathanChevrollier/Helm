@@ -24,7 +24,7 @@ seed() {
         -e MARIADB_ROOT_PASSWORD=demo -e MARIADB_DATABASE=boutique -v demo-db-data:/var/lib/mysql \
         -p 127.0.0.1:3306:3306 mariadb:11
 }
-seed > /var/log/helm-seed.log 2>&1 &
+seed > /var/log/zenytt-seed.log 2>&1 &
 
 # Le conteneur vit tant que sshd tourne.
 exec tail -f /dev/null

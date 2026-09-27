@@ -1,9 +1,10 @@
-//! Données locales de Helm, partagées par l'app desktop et le serveur MCP :
+//! Données locales de Zenytt, partagées par l'app desktop et le serveur MCP :
 //! profils de serveurs, clés d'hôte approuvées, snippets, tunnels, état de l'interface,
 //! secrets (dans le keyring de l'OS) et journal d'actions.
 
 pub mod audit;
 pub mod export;
+pub mod legacy;
 pub mod secrets;
 pub mod ssh_config;
 pub mod sync;
@@ -12,13 +13,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use helm_core::{Auth, ConnectParams};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use zenytt_core::{Auth, ConnectParams};
 
 /// Identifiant de l'app : nom du dossier de configuration et du service keyring.
-pub const APP_ID: &str = "dev.helm.desktop";
+pub const APP_ID: &str = "dev.zenytt.desktop";
 
-/// Dossier de configuration de Helm (identique à `app_config_dir` de Tauri).
+/// Dossier de configuration de Zenytt (identique à `app_config_dir` de Tauri).
 pub fn config_dir() -> PathBuf {
     dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(APP_ID)
 }
@@ -127,8 +128,8 @@ impl DesktopProtocol {
     }
 }
 
-/// Bureau à distance (RDP ou VNC) : ouvert dans Helm, ou dans le client RDP du système (mstsc
-/// sous Windows), directement ou à travers un tunnel SSH par un serveur de Helm.
+/// Bureau à distance (RDP ou VNC) : ouvert dans Zenytt, ou dans le client RDP du système (mstsc
+/// sous Windows), directement ou à travers un tunnel SSH par un serveur de Zenytt.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktop {
@@ -148,7 +149,7 @@ pub struct RemoteDesktop {
     /// Identifiant de la banque (utilisateur + mot de passe) à utiliser.
     #[serde(default)]
     pub identity_id: Option<String>,
-    /// Serveur SSH de Helm par lequel passer (le port RDP n'est alors jamais exposé à Internet).
+    /// Serveur SSH de Zenytt par lequel passer (le port RDP n'est alors jamais exposé à Internet).
     #[serde(default)]
     pub via_server_id: Option<String>,
     #[serde(default)]
@@ -207,7 +208,7 @@ pub fn valid_id(id: &str) -> bool {
 pub struct Registry {
     pub id: String,
     pub name: String,
-    pub kind: helm_core::registry::Kind,
+    pub kind: zenytt_core::registry::Kind,
     /// Adresse du registre (`ghcr.io`, `registry.exemple.fr:5000`…).
     pub server: String,
     /// Utilisateur, ou identifiant de clé d'accès AWS pour ECR.
@@ -222,7 +223,7 @@ impl Registry {
 
     /// Mêmes règles que le formulaire d'enregistrement (adresse et utilisateur).
     pub fn is_valid(&self) -> bool {
-        valid_id(&self.id) && helm_core::registry::valid_server(&self.server) && helm_core::registry::valid_word(&self.username)
+        valid_id(&self.id) && zenytt_core::registry::valid_server(&self.server) && zenytt_core::registry::valid_word(&self.username)
     }
 }
 
@@ -285,16 +286,16 @@ pub struct Store {
 impl Store {
     /// Lecture seule, sans jamais toucher au fichier (serveur MCP).
     pub fn load(dir: &Path) -> Self {
-        let path = dir.join("helm.json");
+        let path = dir.join("zenytt.json");
         let data = read_json(&path).unwrap_or_default();
         Self { path, data: Mutex::new(data), warning: None }
     }
 
     /// Chargement par l'app. Un fichier illisible n'est jamais écrasé : il est mis de côté et
-    /// la copie de secours (`helm.json.bak`, version précédente) est utilisée si elle est valide.
+    /// la copie de secours (`zenytt.json.bak`, version précédente) est utilisée si elle est valide.
     pub fn open(dir: &Path) -> Self {
         let _ = std::fs::create_dir_all(dir);
-        let path = dir.join("helm.json");
+        let path = dir.join("zenytt.json");
         let Ok(bytes) = std::fs::read(&path) else {
             return Self { path, data: Mutex::default(), warning: None };
         };
@@ -302,14 +303,16 @@ impl Store {
             return Self { path, data: Mutex::new(data), warning: None };
         }
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let aside = dir.join(format!("helm.json.corrompu-{stamp}"));
+        let aside = dir.join(format!("zenytt.json.corrompu-{stamp}"));
         let moved = std::fs::rename(&path, &aside).is_ok();
         let kept = if moved { format!("Il a été conservé sous {}.", aside.display()) } else { String::new() };
         let (data, warning) = match read_json::<Data>(&path.with_extension("json.bak")) {
-            Some(d) => (d, format!("Le fichier de configuration de Helm était illisible : la version précédente a été restaurée. {kept}")),
+            Some(d) => {
+                (d, format!("Le fichier de configuration de Zenytt était illisible : la version précédente a été restaurée. {kept}"))
+            }
             None => (
                 Data::default(),
-                format!("Le fichier de configuration de Helm était illisible et aucune copie de secours n'est valide. {kept}"),
+                format!("Le fichier de configuration de Zenytt était illisible et aucune copie de secours n'est valide. {kept}"),
             ),
         };
         Self { path, data: Mutex::new(data), warning: Some(warning) }
@@ -428,13 +431,13 @@ mod tests {
         let s = Store::open(dir.path());
         s.write(|d| d.snippets.push(Snippet { id: "1".into(), name: "a".into(), command: "ls".into() })).unwrap();
         s.write(|d| d.snippets.push(Snippet { id: "2".into(), name: "b".into(), command: "ls".into() })).unwrap();
-        std::fs::write(dir.path().join("helm.json"), b"{ tronqu").unwrap();
+        std::fs::write(dir.path().join("zenytt.json"), b"{ tronqu").unwrap();
 
         let s = Store::open(dir.path());
         assert!(s.warning().is_some());
         assert_eq!(s.read(|d| d.snippets.len()), 1, "la version précédente est restaurée");
         let aside =
-            std::fs::read_dir(dir.path()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("helm.json.corrompu-"));
+            std::fs::read_dir(dir.path()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("zenytt.json.corrompu-"));
         assert!(aside, "le fichier illisible est conservé");
     }
 

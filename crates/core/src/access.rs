@@ -1,8 +1,8 @@
 //! Accès au serveur : comptes pouvant se connecter, droits sudo, et clés SSH autorisées.
 //!
-//! Garde-fou : la clé avec laquelle Helm se connecte ne peut pas être retirée depuis Helm (tu te
+//! Garde-fou : la clé avec laquelle Zenytt se connecte ne peut pas être retirée depuis Zenytt (tu te
 //! couperais l'accès). Le fichier `authorized_keys` est réécrit en place, en root, après copie
-//! de sauvegarde (`authorized_keys.helm-avant`), en conservant propriétaire et permissions.
+//! de sauvegarde (`authorized_keys.zenytt-avant`), en conservant propriétaire et permissions.
 
 use russh::keys::{HashAlg, PublicKey};
 use serde::Serialize;
@@ -32,7 +32,7 @@ pub struct Key {
     pub comment: String,
     /// Options (`command="…"`, `restrict`…), par exemple les clés de déploiement.
     pub options: String,
-    /// Clé utilisée par Helm pour se connecter à ce serveur.
+    /// Clé utilisée par Zenytt pour se connecter à ce serveur.
     pub current: bool,
 }
 
@@ -145,7 +145,7 @@ pub fn parse_users(out: &str, current_key: Option<&str>) -> Vec<User> {
     users
 }
 
-/// `current_key` : empreinte SHA256 de la clé utilisée par Helm, si connue.
+/// `current_key` : empreinte SHA256 de la clé utilisée par Zenytt, si connue.
 pub async fn users(conn: &Connection, sudo: Option<&str>, current_key: Option<&str>) -> Result<Vec<User>> {
     let out = conn.exec_sudo(USERS_SCRIPT, sudo, None).await?.into_result()?;
     Ok(parse_users(&out.stdout, current_key))
@@ -158,7 +158,7 @@ async fn rewrite_keys(conn: &Connection, sudo: Option<&str>, user: &User, lines:
     let mut content = lines.join("\n");
     content.push('\n');
     let script = format!(
-        "set -e\ninstall -d -m 700 -o {u} -g \"$(id -gn {u})\" {d}\n[ -f {f} ] && cp -p {f} {f}.helm-avant || true\ncat > {f}.helm-new\nchown {u}:\"$(id -gn {u})\" {f}.helm-new\nchmod 600 {f}.helm-new\nmv -f {f}.helm-new {f}\n"
+        "set -e\ninstall -d -m 700 -o {u} -g \"$(id -gn {u})\" {d}\n[ -f {f} ] && cp -p {f} {f}.zenytt-avant || true\ncat > {f}.zenytt-new\nchown {u}:\"$(id -gn {u})\" {f}.zenytt-new\nchmod 600 {f}.zenytt-new\nmv -f {f}.zenytt-new {f}\n"
     );
     conn.exec_sudo(&format!("sh -c {}", shell_quote(&script)), sudo, Some(content.as_bytes())).await?.into_result()?;
     Ok(())
@@ -191,7 +191,7 @@ pub async fn add_key(conn: &Connection, sudo: Option<&str>, name: &str, public_k
     rewrite_keys(conn, sudo, &user, &lines).await
 }
 
-/// Retire une clé (identifiée par sa ligne exacte). Refuse de retirer la clé qu'utilise Helm.
+/// Retire une clé (identifiée par sa ligne exacte). Refuse de retirer la clé qu'utilise Zenytt.
 pub async fn remove_key(conn: &Connection, sudo: Option<&str>, name: &str, line: &str, current_key: Option<&str>) -> Result<()> {
     let user = find_user(conn, sudo, name, current_key).await?;
     let target = user
@@ -200,7 +200,7 @@ pub async fn remove_key(conn: &Connection, sudo: Option<&str>, name: &str, line:
         .find(|k| k.line == line.trim())
         .ok_or_else(|| Error::Other("clé introuvable (fichier modifié entre-temps ?)".into()))?;
     if target.current {
-        return Err(Error::Other("c'est la clé avec laquelle Helm se connecte : la retirer te couperait l'accès.".into()));
+        return Err(Error::Other("c'est la clé avec laquelle Zenytt se connecte : la retirer te couperait l'accès.".into()));
     }
     let lines: Vec<String> = user.keys.iter().filter(|k| k.line != target.line).map(|k| k.line.clone()).collect();
     rewrite_keys(conn, sudo, &user, &lines).await
@@ -217,11 +217,13 @@ mod tests {
         let k = parse_key(&format!("{ED} nathan@pc"), None).unwrap();
         assert_eq!((k.algorithm.as_str(), k.comment.as_str(), k.options.as_str()), ("ssh-ed25519", "nathan@pc", ""));
         assert!(k.fingerprint.starts_with("SHA256:"));
-        let d =
-            parse_key(&format!("command=\"sudo -n /usr/local/bin/helm-deploy app\",restrict {ED} helm-deploy:app"), Some(&k.fingerprint))
-                .unwrap();
-        assert_eq!(d.options, "command=\"sudo -n /usr/local/bin/helm-deploy app\",restrict");
-        assert!(d.current, "même clé que celle de Helm");
+        let d = parse_key(
+            &format!("command=\"sudo -n /usr/local/bin/zenytt-deploy app\",restrict {ED} zenytt-deploy:app"),
+            Some(&k.fingerprint),
+        )
+        .unwrap();
+        assert_eq!(d.options, "command=\"sudo -n /usr/local/bin/zenytt-deploy app\",restrict");
+        assert!(d.current, "même clé que celle de Zenytt");
         assert!(parse_key("# commentaire", None).is_none());
     }
 

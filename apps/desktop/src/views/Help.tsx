@@ -89,7 +89,7 @@ export default function HelpView() {
                         }`}
                       >
                         <span className="min-w-0 flex-1 truncate">{g.title}</span>
-                        {g.automatic && <span className="size-1.5 shrink-0 rounded-full bg-ok" title="Installé par Helm" />}
+                        {g.automatic && <span className="size-1.5 shrink-0 rounded-full bg-ok" title="Installé par Zenytt" />}
                       </button>
                     );
                   })}
@@ -103,7 +103,7 @@ export default function HelpView() {
               <Kbd>F1</Kbd> liste des raccourcis · <Kbd>Ctrl+K</Kbd> palette
             </span>
             <button type="button" className={`flex items-center gap-1.5 rounded hover:text-fg ${FOCUS_RING}`} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")}>
-              <MessagesSquare size={13} /> Une question ? Le Discord de Helm
+              <MessagesSquare size={13} /> Une question ? Le Discord de Zenytt
             </button>
           </div>
         </aside>
@@ -114,7 +114,7 @@ export default function HelpView() {
               <span className="text-xs text-muted">{topic?.label}</span>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-semibold tracking-tight">{selected.title}</h2>
-                {selected.automatic && <Badge tone="ok">Installé par Helm</Badge>}
+                {selected.automatic && <Badge tone="ok">Installé par Zenytt</Badge>}
               </div>
               <p className="text-[14px] leading-relaxed text-muted">{selected.summary}</p>
               {section && (

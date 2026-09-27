@@ -1,6 +1,6 @@
 //! Déploiement d'un projet compose : pull → up → vérification → retour à l'image précédente si échec.
 //!
-//! Un seul script serveur (`/usr/local/bin/helm-deploy`) sert au bouton de l'app et à GitHub Actions.
+//! Un seul script serveur (`/usr/local/bin/zenytt-deploy`) sert au bouton de l'app et à GitHub Actions.
 //! Pour GitHub, une clé SSH dédiée est restreinte dans `authorized_keys` par une commande forcée :
 //! elle ne peut que lancer le déploiement de SON projet (pas de shell, pas de redirection).
 
@@ -9,19 +9,19 @@ use serde::Serialize;
 use crate::ssh::shell_quote;
 use crate::{Connection, Error, Result};
 
-pub const SCRIPT_PATH: &str = "/usr/local/bin/helm-deploy";
-pub const CONF_DIR: &str = "/etc/helm-deploy";
+pub const SCRIPT_PATH: &str = "/usr/local/bin/zenytt-deploy";
+pub const CONF_DIR: &str = "/etc/zenytt-deploy";
 
 pub const DEPLOY_SCRIPT: &str = r#"#!/bin/bash
-# Généré par Helm : déploiement d'un projet docker compose avec retour arrière automatique.
+# Généré par Zenytt : déploiement d'un projet docker compose avec retour arrière automatique.
 set -uo pipefail
 P="${1:-${SSH_ORIGINAL_COMMAND:-}}"
 P="${P##* }"
 [[ "$P" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "projet invalide"; exit 2; }
-CONF="/etc/helm-deploy/$P.conf"
+CONF="/etc/zenytt-deploy/$P.conf"
 [ -f "$CONF" ] || { echo "le projet $P n'est pas configuré pour le déploiement"; exit 2; }
 . "$CONF"
-exec > >(tee -a /var/log/helm-deploy.log) 2>&1
+exec > >(tee -a /var/log/zenytt-deploy.log) 2>&1
 echo "=== Déploiement de $P — $(date -Is)"
 cd "$DIR" || { echo "@@DEPLOY FAILED dossier $DIR introuvable"; exit 1; }
 dc() { docker compose --project-directory "$DIR" -p "$P" "${FILES[@]}" "$@"; }
@@ -86,7 +86,7 @@ pub fn project_conf(dir: &str, files: &[String], check_host: Option<&str>) -> Re
     if !safe_path(dir) || files.is_empty() || !files.iter().all(|f| safe_path(f)) {
         return Err(Error::Other("dossier ou fichiers compose invalides".into()));
     }
-    let mut s = format!("# Généré par Helm\nDIR='{dir}'\nFILES=(");
+    let mut s = format!("# Généré par Zenytt\nDIR='{dir}'\nFILES=(");
     for f in files {
         s.push_str(&format!(" -f '{f}'"));
     }
@@ -109,7 +109,7 @@ pub async fn configure(conn: &Connection, sudo: Option<&str>, project: &str, con
     let dir = files.first().map(|f| crate::sftp::parent(f)).ok_or_else(|| Error::Other("projet sans fichier compose".into()))?;
     let conf = project_conf(&dir, &files, check_host)?;
     conn.exec_sudo(
-        &format!("install -d -m 755 {CONF_DIR} && touch /var/log/helm-deploy.log && chmod 640 /var/log/helm-deploy.log"),
+        &format!("install -d -m 755 {CONF_DIR} && touch /var/log/zenytt-deploy.log && chmod 640 /var/log/zenytt-deploy.log"),
         sudo,
         None,
     )
@@ -137,7 +137,7 @@ pub async fn command(conn: &Connection, project: &str) -> Result<String> {
 #[serde(rename_all = "camelCase")]
 pub struct DeployKey {
     pub project: String,
-    /// Clé privée à placer dans le secret GitHub (affichée une seule fois, jamais stockée par Helm).
+    /// Clé privée à placer dans le secret GitHub (affichée une seule fois, jamais stockée par Zenytt).
     pub private_key: String,
     pub known_hosts: String,
     pub user: String,
@@ -145,7 +145,7 @@ pub struct DeployKey {
 }
 
 fn marker(project: &str) -> String {
-    format!("helm-deploy:{project}")
+    format!("zenytt-deploy:{project}")
 }
 
 /// Motif `sed` qui ne reconnaît que la clé de CE projet : le `.` autorisé dans un nom de projet
@@ -173,7 +173,7 @@ pub async fn create_key(conn: &Connection, sudo: Option<&str>, project: &str, ho
     if !root {
         // Autorise uniquement le script de déploiement sans mot de passe, et vérifie la syntaxe avant de l'installer.
         let rule = format!("{user} ALL=(root) NOPASSWD: {SCRIPT_PATH}\n");
-        let file = format!("/etc/sudoers.d/helm-deploy-{user}");
+        let file = format!("/etc/sudoers.d/zenytt-deploy-{user}");
         conn.write_file_sudo(&format!("{file}.new"), &rule, sudo).await?;
         conn.exec_sudo(
             &format!("visudo -cf {file}.new && chmod 440 {file}.new && mv -f {file}.new {file} || {{ rm -f {file}.new; exit 1; }}"),
@@ -209,7 +209,7 @@ jobs:
     steps:
       - name: Déployer {project} sur le VPS
         env:
-          SSH_KEY: ${{{{ secrets.HELM_DEPLOY_KEY }}}}
+          SSH_KEY: ${{{{ secrets.ZENYTT_DEPLOY_KEY }}}}
         run: |
           install -m 600 /dev/null key
           printf '%s\n' "$SSH_KEY" > key
@@ -265,8 +265,8 @@ pub async fn sudo_risk(conn: &Connection, config_files: &str) -> Result<SudoRisk
 
 /// Projets qui ont une clé de déploiement active.
 pub async fn keys(conn: &Connection) -> Result<Vec<String>> {
-    let out = conn.exec("grep -o ' helm-deploy:[A-Za-z0-9_.-]*$' ~/.ssh/authorized_keys 2>/dev/null || true", None).await?;
-    Ok(out.stdout.lines().filter_map(|l| l.trim().strip_prefix("helm-deploy:")).map(str::to_string).collect())
+    let out = conn.exec("grep -o ' zenytt-deploy:[A-Za-z0-9_.-]*$' ~/.ssh/authorized_keys 2>/dev/null || true", None).await?;
+    Ok(out.stdout.lines().filter_map(|l| l.trim().strip_prefix("zenytt-deploy:")).map(str::to_string).collect())
 }
 
 pub async fn revoke_key(conn: &Connection, project: &str) -> Result<()> {
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn revoke_pattern_matches_only_its_project() {
-        assert_eq!(marker_pattern("my.app"), r"helm-deploy:my\.app");
-        assert_eq!(marker_pattern("site-web_2"), "helm-deploy:site-web_2");
+        assert_eq!(marker_pattern("my.app"), r"zenytt-deploy:my\.app");
+        assert_eq!(marker_pattern("site-web_2"), "zenytt-deploy:site-web_2");
     }
 }

@@ -14,19 +14,19 @@ const MODES: { id: SyncMode; label: string }[] = [
 ];
 
 const SERVER_COMPOSE = `services:
-  helm-sync:
+  zenytt-sync:
     build: .
-    container_name: helm-sync
+    container_name: zenytt-sync
     restart: unless-stopped
     environment:
-      HELM_SYNC_TOKENS: \${HELM_SYNC_TOKENS}
+      ZENYTT_SYNC_TOKENS: \${ZENYTT_SYNC_TOKENS}
     volumes:
-      - helm-sync-data:/data
+      - zenytt-sync-data:/data
     ports:
       - "127.0.0.1:8091:8080"
 
 volumes:
-  helm-sync-data:`;
+  zenytt-sync-data:`;
 
 /** Réglage de la synchronisation entre PC (Réglages → Préférences). */
 export default function SyncSettings() {
@@ -59,7 +59,7 @@ export default function SyncSettings() {
   }, [running]);
 
   const pickFile = async () => {
-    const p = await save({ title: "Fichier de synchronisation (dans un dossier OneDrive, Dropbox…)", defaultPath: "helm-sync.json", filters: [{ name: "Synchronisation Helm", extensions: ["json"] }] });
+    const p = await save({ title: "Fichier de synchronisation (dans un dossier OneDrive, Dropbox…)", defaultPath: "zenytt-sync.json", filters: [{ name: "Synchronisation Zenytt", extensions: ["json"] }] });
     if (p) setPath(p);
   };
 
@@ -101,7 +101,7 @@ export default function SyncSettings() {
       {mode === "file" && (
         <Field label="Fichier" hint="Place-le dans un dossier déjà synchronisé (OneDrive, Dropbox, Syncthing, partage réseau) et choisis le même sur tes autres PC.">
           <div className="flex gap-2">
-            <Input className="font-mono text-xs" value={path} placeholder="C:\Users\…\OneDrive\helm-sync.json" onChange={(e) => setPath(e.target.value)} />
+            <Input className="font-mono text-xs" value={path} placeholder="C:\Users\…\OneDrive\zenytt-sync.json" onChange={(e) => setPath(e.target.value)} />
             <Button type="button" icon={<FileSymlink size={14} />} onClick={() => void pickFile()}>
               Choisir…
             </Button>
@@ -111,24 +111,24 @@ export default function SyncSettings() {
       {mode === "server" && (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Adresse du serveur" hint="Serveur helm-sync (dossier sync-server du dépôt : Dockerfile, compose, bloc nginx).">
+            <Field label="Adresse du serveur" hint="Serveur zenytt-sync (dossier sync-server du dépôt : Dockerfile, compose, bloc nginx).">
               <Input value={url} placeholder="https://sync.exemple.fr" onChange={(e) => setUrl(e.target.value)} />
             </Field>
-            <Field label="Jeton" hint={kept(view?.hasToken) ?? "Valeur de HELM_SYNC_TOKENS sur le serveur."}>
+            <Field label="Jeton" hint={kept(view?.hasToken) ?? "Valeur de ZENYTT_SYNC_TOKENS sur le serveur."}>
               <Input type="password" value={token} autoComplete="off" onChange={(e) => setToken(e.target.value)} />
             </Field>
           </div>
           <details className="rounded-md border border-border bg-bg p-3 text-xs">
             <summary className="cursor-pointer font-medium text-fg">Déployer le serveur Docker</summary>
             <div className="mt-3 flex flex-col gap-3 text-muted">
-              <p>Sur le VPS, lance <code>docker compose up -d --build</code> depuis <code>sync-server</code>. Le volume <code>helm-sync-data</code> conserve les données chiffrées; le port 8091 reste local et doit être exposé uniquement par nginx en HTTPS.</p>
+              <p>Sur le VPS, lance <code>docker compose up -d --build</code> depuis <code>sync-server</code>. Le volume <code>zenytt-sync-data</code> conserve les données chiffrées; le port 8091 reste local et doit être exposé uniquement par nginx en HTTPS.</p>
               <div className="relative">
                 <pre className="overflow-x-auto rounded border border-border p-3 font-mono text-[11px] text-fg">{SERVER_COMPOSE}</pre>
                 <Button type="button" size="sm" className="absolute top-2 right-2" icon={<Copy size={13} />} onClick={() => void writeClipboard(SERVER_COMPOSE).then(() => notify("Compose copié", "success"))}>
                   Copier
                 </Button>
               </div>
-              <p>Configure <code>HELM_SYNC_TOKENS</code> dans <code>.env</code> avec <code>openssl rand -hex 32</code>, garde le fichier en <code>chmod 600</code>, puis utilise l’URL HTTPS du sous-domaine dans Helm.</p>
+              <p>Configure <code>ZENYTT_SYNC_TOKENS</code> dans <code>.env</code> avec <code>openssl rand -hex 32</code>, garde le fichier en <code>chmod 600</code>, puis utilise l’URL HTTPS du sous-domaine dans Zenytt.</p>
             </div>
           </details>
         </>

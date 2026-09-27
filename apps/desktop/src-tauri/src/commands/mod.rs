@@ -19,7 +19,7 @@ pub mod terminal;
 pub mod tunnels;
 pub mod workspace;
 
-use helm_core::Connection;
+use zenytt_core::Connection;
 
 use crate::sessions::Sessions;
 use crate::store::{secrets, Store};

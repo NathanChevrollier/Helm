@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api } from "./api";
 
 /**
- * Verrouillage de l'app : Helm ouvert donne accès (souvent root) à tous les serveurs.
+ * Verrouillage de l'app : Zenytt ouvert donne accès (souvent root) à tous les serveurs.
  * Le mot de passe n'est jamais stocké, seulement son empreinte PBKDF2, dans le coffre de l'OS.
  * Les connexions et terminaux continuent de tourner derrière l'écran de verrouillage.
  */

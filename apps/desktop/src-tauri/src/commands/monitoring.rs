@@ -1,14 +1,15 @@
-//! Monitoring : métriques en direct (sans agent), processus, services, et pilotage de l'agent helmd.
+//! Monitoring : métriques en direct (sans agent), processus, services, et pilotage de l'agent zenyttd.
 
 use std::collections::HashMap;
 
-use helm_core::agent::{self, AgentInfo};
-use helm_core::schedule;
-use helm_core::system::{self, Process, Service};
-use helm_protocol::proc::{parse_collect, COLLECT_SCRIPT};
-use helm_protocol::{AgentConfig, HistoryPoint, Metrics, RawSample};
 use tauri::State;
 use tokio::sync::Mutex;
+use zenytt_core::agent::{self, AgentInfo};
+use zenytt_core::schedule;
+use zenytt_core::system::{self, Process, Service};
+use zenytt_core::Connection;
+use zenytt_protocol::proc::{parse_collect, COLLECT_SCRIPT};
+use zenytt_protocol::{AgentConfig, HistoryPoint, Metrics, RawSample};
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -16,8 +17,8 @@ use crate::store::AuditLog;
 use crate::store::Store;
 
 /// Binaires de l'agent embarqués à la compilation (vides s'ils n'ont pas été construits).
-const AGENT_X86_64: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helmd-x86_64"));
-const AGENT_AARCH64: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helmd-aarch64"));
+const AGENT_X86_64: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/zenyttd-x86_64"));
+const AGENT_AARCH64: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/zenyttd-aarch64"));
 
 /// Dernier relevé brut par serveur, pour calculer CPU % et débits.
 #[derive(Default)]
@@ -44,7 +45,7 @@ pub async fn mon_metrics(
     let out = conn.run(COLLECT_SCRIPT).await.map_err(err)?;
     let raw = parse_collect(&out, now_ms());
     let mut prev = monitor.prev.lock().await;
-    let metrics = helm_protocol::compute(prev.get(&server_id), &raw);
+    let metrics = zenytt_protocol::compute(prev.get(&server_id), &raw);
     prev.insert(server_id, raw);
     Ok(metrics)
 }
@@ -141,17 +142,22 @@ pub async fn agent_install(
     let detail = String::new();
     let r: Result<String, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
-        let binary_for = |arch: &str| -> Option<&'static [u8]> {
-            match arch {
-                "x86_64" => Some(AGENT_X86_64),
-                "aarch64" => Some(AGENT_AARCH64),
-                _ => None,
-            }
-        };
-        agent::install(&conn, pw.as_deref(), binary_for).await.map_err(err)
+        install_agent(&conn, pw.as_deref()).await
     }
     .await;
     track(&audit, &store, &server_id, "agent.install", &detail, r)
+}
+
+/// Installe (ou réinstalle) l'agent embarqué dans l'application, pour l'architecture du serveur.
+pub(crate) async fn install_agent(conn: &Connection, sudo: Option<&str>) -> Result<String, String> {
+    let binary_for = |arch: &str| -> Option<&'static [u8]> {
+        match arch {
+            "x86_64" => Some(AGENT_X86_64),
+            "aarch64" => Some(AGENT_AARCH64),
+            _ => None,
+        }
+    };
+    agent::install(conn, sudo, binary_for).await.map_err(err)
 }
 
 #[tauri::command]

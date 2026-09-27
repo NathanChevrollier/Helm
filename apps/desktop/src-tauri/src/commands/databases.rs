@@ -1,9 +1,9 @@
 //! Bases de données du serveur : découverte des instances (conteneurs Docker ou service local),
 //! exploration et exécution de SQL.
 
-use helm_core::db::{self, Column, Engine, Filter, Instance, KeyPart, Named, QueryResult, SortDir};
-use helm_core::docker::{self, Access};
 use tauri::State;
+use zenytt_core::db::{self, Column, Engine, Filter, Instance, KeyPart, Named, QueryResult, SortDir};
+use zenytt_core::docker::{self, Access};
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -191,7 +191,7 @@ pub fn db_insert_row_sql(engine: Engine, table: String, values: Vec<(String, Opt
 #[tauri::command]
 pub async fn db_sqlite_files(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<Instance>, String> {
     let (conn, _) = admin(&store, &sessions, &server_id).await?;
-    let out = helm_core::ssh::long(conn.exec(db::SQLITE_PROBE, None)).await.map_err(err)?;
+    let out = zenytt_core::ssh::long(conn.exec(db::SQLITE_PROBE, None)).await.map_err(err)?;
     Ok(db::parse_sqlite(&out.stdout))
 }
 

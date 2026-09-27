@@ -1,7 +1,7 @@
 //! Catalogue d'applications Docker Compose prêtes à déployer.
 //!
 //! Chaque application décrit ses réglages (`Variable`) et deux gabarits : le `docker-compose.yml`
-//! et le `.env`. Helm remplit les mots de passe avec de l'aléa du système, valide chaque valeur,
+//! et le `.env`. Zenytt remplit les mots de passe avec de l'aléa du système, valide chaque valeur,
 //! puis rend les fichiers — que l'utilisateur voit avant qu'ils ne soient écrits sur le serveur.
 //!
 //! Deux règles tiennent toute la sécurité de ce module :
@@ -22,7 +22,7 @@ use crate::{Error, Result};
 #[serde(rename_all = "lowercase")]
 pub enum VarKind {
     Text,
-    /// Rempli par Helm avec de l'aléa du système ; masqué à la saisie.
+    /// Rempli par Zenytt avec de l'aléa du système ; masqué à la saisie.
     Password,
     /// Port de l'hôte, toujours lié à 127.0.0.1.
     Port,
@@ -42,7 +42,7 @@ pub struct Variable {
     pub label: String,
     pub hint: String,
     pub kind: VarKind,
-    /// Valeur proposée ; vide pour un mot de passe (Helm en génère un).
+    /// Valeur proposée ; vide pour un mot de passe (Zenytt en génère un).
     pub default: String,
 }
 
@@ -153,7 +153,7 @@ pub fn check_value(v: &Variable, value: &str) -> Result<()> {
         }
         VarKind::Password => {
             // Les caractères qui cassent YAML, `.env` ou un script d'entrée sont refusés plutôt
-            // qu'échappés : un mot de passe généré par Helm n'en contient jamais.
+            // qu'échappés : un mot de passe généré par Zenytt n'en contient jamais.
             if value.contains('\'') || value.contains('"') || value.contains('$') || value.contains('\\') {
                 return Err(Error::Other(format!("{} : évite les caractères ' \" $ et \\", v.label)));
             }
@@ -327,7 +327,7 @@ services:
                 port(8081),
                 data_dir("/opt/stacks/nextcloud/data"),
                 Variable::new("DB_DATA", "Dossier de la base", "Données PostgreSQL.", VarKind::Path, "/opt/stacks/nextcloud/db"),
-                Variable::new("DB_PASSWORD", "Mot de passe de la base", "Généré par Helm ; aucun humain n'a à le connaître.", VarKind::Password, ""),
+                Variable::new("DB_PASSWORD", "Mot de passe de la base", "Généré par Zenytt ; aucun humain n'a à le connaître.", VarKind::Password, ""),
                 Variable::new("ADMIN_USER", "Administrateur", "Compte créé au premier démarrage.", VarKind::Text, "admin"),
                 Variable::new("ADMIN_PASSWORD", "Mot de passe administrateur", "À noter maintenant : il ne sera plus affiché.", VarKind::Password, ""),
                 Variable::new("DOMAIN", "Adresse publique", "Sans elle, Nextcloud refuse les requêtes du reverse proxy.", VarKind::Domain, "cloud.exemple.fr"),
@@ -432,7 +432,7 @@ services:
                 data_dir("/opt/stacks/postgres/data"),
                 Variable::new("DB_NAME", "Nom de la base", "Créée au premier démarrage.", VarKind::Text, "app"),
                 Variable::new("DB_USER", "Utilisateur", "Propriétaire de la base.", VarKind::Text, "app"),
-                Variable::new("DB_PASSWORD", "Mot de passe", "Généré par Helm.", VarKind::Password, ""),
+                Variable::new("DB_PASSWORD", "Mot de passe", "Généré par Zenytt.", VarKind::Password, ""),
             ],
             r#"
 services:
@@ -456,8 +456,8 @@ services:
 "#,
             "",
             &[
-                "L'onglet Bases de données de Helm verra cette instance automatiquement.",
-                "Le port n'est ouvert que sur 127.0.0.1 : passe par un tunnel Helm pour t'y connecter depuis ton PC.",
+                "L'onglet Bases de données de Zenytt verra cette instance automatiquement.",
+                "Le port n'est ouvert que sur 127.0.0.1 : passe par un tunnel Zenytt pour t'y connecter depuis ton PC.",
             ],
         ),
         app_of(
@@ -487,7 +487,7 @@ services:
       - {{DATA}}:/data
 "#,
             "",
-            &["L'explorateur Redis de Helm lit `REDIS_PASSWORD` dans l'environnement du conteneur : il se connectera seul."],
+            &["L'explorateur Redis de Zenytt lit `REDIS_PASSWORD` dans l'environnement du conteneur : il se connectera seul."],
         ),
         app_of(
             "plausible",
@@ -547,7 +547,7 @@ services:
             "",
             &[
                 "ClickHouse demande de la RAM : compte 2 Go libres au minimum.",
-                "SECRET_KEY_BASE doit faire au moins 64 caractères pour Plausible : Helm en génère assez.",
+                "SECRET_KEY_BASE doit faire au moins 64 caractères pour Plausible : Zenytt en génère assez.",
             ],
         ),
         app_of(
@@ -628,7 +628,7 @@ services:
             "nginx-proxy-manager",
             "Nginx Proxy Manager",
             "Réseau",
-            "Reverse proxy avec interface web et certificats Let's Encrypt. À n'installer que si tu ne gères pas déjà nginx avec Helm.",
+            "Reverse proxy avec interface web et certificats Let's Encrypt. À n'installer que si tu ne gères pas déjà nginx avec Zenytt.",
             Some(81),
             "https://nginxproxymanager.com",
             vec![
@@ -667,7 +667,7 @@ services:
                 Variable::new("PORT", "Port de la console", "Interface web d'administration.", VarKind::Port, "9001"),
                 Variable::new("API_PORT", "Port de l'API S3", "Celui que les applications utilisent.", VarKind::Port, "9000"),
                 data_dir("/opt/stacks/minio/data"),
-                Variable::new("ROOT_USER", "Utilisateur racine", "Clé d'accès initiale.", VarKind::Text, "helm-admin"),
+                Variable::new("ROOT_USER", "Utilisateur racine", "Clé d'accès initiale.", VarKind::Text, "zenytt-admin"),
                 Variable::new("ROOT_PASSWORD", "Mot de passe racine", "Clé secrète initiale.", VarKind::Password, ""),
             ],
             r#"

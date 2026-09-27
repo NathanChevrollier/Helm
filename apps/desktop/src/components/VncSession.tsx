@@ -1,6 +1,6 @@
-// Session VNC affichée dans Helm, sans client externe.
+// Session VNC affichée dans Zenytt, sans client externe.
 //
-// Le rendu et les entrées sont assurés par noVNC ; Helm lui donne l'adresse du pont local (qui
+// Le rendu et les entrées sont assurés par noVNC ; Zenytt lui donne l'adresse du pont local (qui
 // relaie le protocole RFB, à travers un tunnel SSH si la machine passe par un serveur) et ajoute
 // la barre d'outils : Ctrl+Alt+Suppr, presse-papiers, qualité d'image, taille, lecture seule,
 // plein écran.
@@ -73,7 +73,7 @@ export default function VncSession() {
           const d = (e as CustomEvent<{ status: number; reason?: string }>).detail;
           setState({ kind: "erreur", message: d?.reason ? `Authentification refusée : ${d.reason}` : "Authentification refusée par la machine (mot de passe VNC incorrect ?)." });
         });
-        // La machine demande des identifiants alors qu'aucun n'est enregistré dans Helm.
+        // La machine demande des identifiants alors qu'aucun n'est enregistré dans Zenytt.
         rfb.addEventListener("credentialsrequired", (e) => {
           if (annule) return;
           const types = (e as CustomEvent<{ types: string[] }>).detail?.types ?? [];

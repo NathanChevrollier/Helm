@@ -75,7 +75,7 @@ export default function GuideContent({ guide, showOpen = true }: { guide: Guide;
       )}
 
       {guide.how && guide.how.length > 0 && (
-        <Section title="Comment ça marche dans Helm">
+        <Section title="Comment ça marche dans Zenytt">
           <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[13px] leading-relaxed">
             {guide.how.map((h) => (
               <li key={h}>{h}</li>

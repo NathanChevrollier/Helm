@@ -1,4 +1,4 @@
-//! Logique métier de Helm, indépendante de l'interface.
+//! Logique métier de Zenytt, indépendante de l'interface.
 
 pub mod access;
 pub mod agent;
@@ -13,6 +13,7 @@ pub mod docker;
 pub mod domains;
 pub mod fail2ban;
 pub mod firewall;
+pub mod legacy;
 pub mod nginx;
 pub mod redis;
 pub mod registry;

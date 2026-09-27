@@ -1,5 +1,5 @@
 //! Test de fumée contre le VPS Debian réaliste du `testenv` (localhost:2223, admin/admin, fail2ban).
-//! `cargo run -p helm-core --example debian_smoke`
+//! `cargo run -p zenytt-core --example debian_smoke`
 //!
 //! Vérifie ce que le premier faux VPS (root, Ubuntu) ne montrait pas : détection des outils de
 //! /usr/sbin pour un utilisateur normal, sudo avec mot de passe, fail2ban, écriture de fichiers
@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use helm_core::{diagnose, fail2ban, nginx, sftp, Auth, ConnectParams, Connection, Error};
+use zenytt_core::{diagnose, fail2ban, nginx, sftp, Auth, ConnectParams, Connection, Error};
 
 const SUDO: Option<&str> = Some("admin");
 
@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let d = diagnose::diagnose("127.0.0.1", 2223).await;
     println!("    diagnostic : {}", d.verdict);
     let banned = d.probably_banned;
-    let _ = std::process::Command::new("docker").args(["exec", "helm-test-debian", "fail2ban-client", "unban", "--all"]).status();
+    let _ = std::process::Command::new("docker").args(["exec", "zenytt-test-debian", "fail2ban-client", "unban", "--all"]).status();
     check(banned, "bannissement reconnu par le diagnostic")?;
     println!("Tout est bon.");
     Ok(())

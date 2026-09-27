@@ -357,7 +357,7 @@ function FixDialog({ serverId, finding, plan, onClose, onDone }: { serverId: str
           <p className="text-sm">{plan.description}</p>
           {plan.needsVerification && (
             <ResultBanner tone="warn" title="Cette correction touche l'accès au serveur">
-              <span className="text-xs text-muted">Helm garde ta connexion actuelle ouverte, en ouvre une nouvelle pour vérifier que tu peux toujours te connecter, et annule tout sinon.</span>
+              <span className="text-xs text-muted">Zenytt garde ta connexion actuelle ouverte, en ouvre une nouvelle pour vérifier que tu peux toujours te connecter, et annule tout sinon.</span>
             </ResultBanner>
           )}
           <details>

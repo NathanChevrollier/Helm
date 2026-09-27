@@ -374,7 +374,7 @@ pub async fn expire(conn: &Connection, sudo: Option<&str>, server: &Server, data
 }
 
 /// Commandes refusées par la console : elles bloquent le serveur ou détruisent tout, et rien dans
-/// l'interface de Helm n'en a besoin. La liste est volontairement courte et explicite.
+/// l'interface de Zenytt n'en a besoin. La liste est volontairement courte et explicite.
 pub const BLOCKED: &[&str] = &[
     "FLUSHALL",
     "FLUSHDB",
@@ -445,7 +445,7 @@ pub async fn command(conn: &Connection, sudo: Option<&str>, server: &Server, dat
         return Err(Error::Other("une seule commande à la fois".into()));
     }
     if let Some(what) = refusal(line) {
-        return Err(Error::Other(format!("commande refusée par Helm : {what}")));
+        return Err(Error::Other(format!("commande refusée par Zenytt : {what}")));
     }
     let replies = send(conn, sudo, server, database, &[line.to_string()]).await?;
     Ok(replies.iter().map(Reply::text).collect())
@@ -521,7 +521,7 @@ mod tests {
         assert_eq!(quote_arg("a\nb"), "\"a\\nb\"", "un retour à la ligne ne coupe pas la commande");
         assert_eq!(quote_arg("gui\"llemet"), "\"gui\\\"llemet\"");
         assert_eq!(quote_arg("\u{1}"), "\"\\x01\"");
-        // Aller-retour : ce que redis-cli écrit, Helm sait le relire.
+        // Aller-retour : ce que redis-cli écrit, Zenytt sait le relire.
         for s in ["simple", "a\nb", "gui\"llemet", "back\\slash", "accentué"] {
             let quoted = quote_arg(s);
             assert_eq!(unquote(&quoted[1..quoted.len() - 1]), s, "{s}");

@@ -1,7 +1,7 @@
 //! Test de fumée contre l'environnement `testenv` (localhost:2222).
-//! `cargo run -p helm-core --example smoke`
+//! `cargo run -p zenytt-core --example smoke`
 
-use helm_core::{Auth, ConnectParams, Connection, Error};
+use zenytt_core::{Auth, ConnectParams, Connection, Error};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 1. Hôte inconnu : la connexion doit être refusée avec l'empreinte.
-    let fp = match Connection::connect(params("root", "helm", None)).await {
+    let fp = match Connection::connect(params("root", "zenytt", None)).await {
         Err(Error::UnknownHostKey(fp)) => fp,
         Err(e) => return Err(format!("attendu UnknownHostKey, obtenu {e}").into()),
         Ok(_) => return Err("un hôte inconnu a été accepté".into()),
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ hôte inconnu détecté : {fp}");
 
     // 2. Mauvaise empreinte : refus.
-    match Connection::connect(params("root", "helm", Some("SHA256:faux".into()))).await {
+    match Connection::connect(params("root", "zenytt", Some("SHA256:faux".into()))).await {
         Err(Error::HostKeyMismatch { .. }) => println!("✓ empreinte modifiée détectée"),
         Err(e) => return Err(format!("attendu HostKeyMismatch, obtenu {e}").into()),
         Ok(_) => return Err("empreinte fausse acceptée".into()),
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 4. Connexion root + exec.
-    let root = Connection::connect(params("root", "helm", Some(fp.clone()))).await?;
+    let root = Connection::connect(params("root", "zenytt", Some(fp.clone()))).await?;
     println!("✓ connecté en root, whoami = {}", root.run("whoami").await?.trim());
     let out = root.exec("echo err >&2; exit 3", None).await?;
     assert_eq!((out.exit_code, out.stderr.trim()), (3, "err"));
@@ -63,8 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ SFTP : {} entrées dans /etc/nginx", entries.len());
 
     // 6b. Transferts : envoi d'un dossier local puis téléchargement et comparaison.
-    use helm_core::sftp as fs;
-    let tmp = std::env::temp_dir().join("helm-smoke");
+    use zenytt_core::sftp as fs;
+    let tmp = std::env::temp_dir().join("zenytt-smoke");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join("src/sub"))?;
     let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
@@ -98,14 +98,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Shell interactif.
     let mut shell = root.open_shell(80, 24).await?;
-    shell.data(&b"echo HELM_OK; exit\n"[..]).await?;
+    shell.data(&b"echo ZENYTT_OK; exit\n"[..]).await?;
     let mut seen = String::new();
     while let Some(msg) = shell.wait().await {
-        if let helm_core::russh::ChannelMsg::Data { data } = msg {
+        if let zenytt_core::russh::ChannelMsg::Data { data } = msg {
             seen.push_str(&String::from_utf8_lossy(&data));
         }
     }
-    assert!(seen.contains("HELM_OK"));
+    assert!(seen.contains("ZENYTT_OK"));
     println!("✓ shell interactif avec PTY");
     Ok(())
 }

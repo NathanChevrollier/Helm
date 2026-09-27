@@ -20,7 +20,7 @@ const CONCURRENCY = 4;
 const REFRESH_MS = 30_000;
 const CERT_WARN_DAYS = 21;
 const DAY = 86_400;
-const VIEW_KEY = "helm.home.view";
+const VIEW_KEY = "zenytt.home.view";
 
 /** Point qui demande une action, affiché dans la colonne « À traiter ». */
 interface Todo {
@@ -94,7 +94,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
 
   if (servers.length === 0) {
     return (
-      <PageLayout title="Bienvenue dans Helm" context="Poste">
+      <PageLayout title="Bienvenue dans Zenytt" context="Poste">
         <EmptyState
           icon={<LayoutDashboard />}
           title="Ajoute ton premier serveur"
@@ -153,7 +153,7 @@ export default function HomeView({ visible }: { visible: boolean }) {
         key: `down:${s.id}`,
         level: "critique",
         title: needsUser ? `${s.name} : connexion à valider` : auth ? `${s.name} : authentification refusée` : `${s.name} injoignable`,
-        detail: auth ? "Helm ne réessaie plus tout seul, pour ne pas déclencher fail2ban." : needsUser ? "Une clé d'hôte ou un mot de passe attend ton accord." : r.error?.replace(/^.*?: /, ""),
+        detail: auth ? "Zenytt ne réessaie plus tout seul, pour ne pas déclencher fail2ban." : needsUser ? "Une clé d'hôte ou un mot de passe attend ton accord." : r.error?.replace(/^.*?: /, ""),
         actions: [
           { label: "Se connecter", primary: true, run: async () => void ((await ensureConnected(s.id, { force: true })) && fetchHealth(s.id, 0)) },
           ...(auth || needsUser ? [] : [{ label: "Diagnostiquer", run: () => useDoctor.getState().open(s.id) }]),
@@ -192,8 +192,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
     todos.push({
       key: `agent:${s.id}`,
       level: "suggestion",
-      title: `${s.name} sans agent helmd`,
-      detail: "Historique sur 30 jours et alertes même quand Helm est fermé.",
+      title: `${s.name} sans agent zenyttd`,
+      detail: "Historique sur 30 jours et alertes même quand Zenytt est fermé.",
       actions: [{ label: "Installer l'agent", primary: true, run: () => go(s, "monitoring", "agent") }],
     });
   }

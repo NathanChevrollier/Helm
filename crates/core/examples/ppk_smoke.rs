@@ -1,7 +1,7 @@
 //! Connexion avec une clé PuTTY (.ppk v3 chiffrée) contre `testenv`.
-//! `cargo run -p helm-core --example ppk_smoke -- <chemin.ppk> <passphrase>`
+//! `cargo run -p zenytt-core --example ppk_smoke -- <chemin.ppk> <passphrase>`
 
-use helm_core::{Auth, ConnectParams, Connection, Error};
+use zenytt_core::{Auth, ConnectParams, Connection, Error};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

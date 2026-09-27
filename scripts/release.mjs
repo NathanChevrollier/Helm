@@ -39,6 +39,6 @@ execFileSync("cargo", ["update", "--workspace", "--offline"], { stdio: "inherit"
 
 git("add", "Cargo.toml", "Cargo.lock", "apps/desktop/package.json", "apps/desktop/src-tauri/tauri.conf.json");
 git("commit", "-m", `chore(release): ${tag}`);
-git("tag", "-a", tag, "-m", `Helm ${tag}`);
+git("tag", "-a", tag, "-m", `Zenytt ${tag}`);
 execFileSync("git", ["push", "--atomic", "origin", "main", tag], { stdio: "inherit" });
-console.log(`\n${tag} poussé : la release se construit sur https://github.com/NathanChevrollier/Helm/actions`);
+console.log(`\n${tag} poussé : la release se construit sur https://github.com/NathanChevrollier/Zenytt/actions`);

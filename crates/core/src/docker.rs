@@ -47,7 +47,7 @@ pub async fn access(conn: &Connection, sudo: Option<&str>) -> Result<(Access, St
 }
 
 /// Exécute une commande docker selon le mode d'accès.
-/// Dossier par défaut des projets compose créés par Helm.
+/// Dossier par défaut des projets compose créés par Zenytt.
 pub const STACKS_DIR: &str = "/opt/stacks";
 
 /// Nom de projet compose acceptable (et donc utilisable dans un chemin et une commande).
@@ -61,7 +61,7 @@ pub fn valid_project_name(name: &str) -> bool {
 /// Modèle de départ d'un nouveau projet compose : un service, un port publié en local seulement.
 pub fn compose_template(name: &str, image: &str, host_port: u16, container_port: u16) -> String {
     format!(
-        "# {name} — créé par Helm\nservices:\n  app:\n    image: {image}\n    container_name: {name}\n    restart: unless-stopped\n    ports:\n      # Publié sur la boucle locale : le reverse proxy (nginx/Apache) y accède, pas Internet.\n      - \"127.0.0.1:{host_port}:{container_port}\"\n    environment:\n      TZ: Europe/Paris\n    volumes:\n      - ./data:/data\n"
+        "# {name} — créé par Zenytt\nservices:\n  app:\n    image: {image}\n    container_name: {name}\n    restart: unless-stopped\n    ports:\n      # Publié sur la boucle locale : le reverse proxy (nginx/Apache) y accède, pas Internet.\n      - \"127.0.0.1:{host_port}:{container_port}\"\n    environment:\n      TZ: Europe/Paris\n    volumes:\n      - ./data:/data\n"
     )
 }
 
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn refs_are_validated() {
-        assert!(valid_ref("helm-demo-app").is_ok());
+        assert!(valid_ref("zenytt-demo-app").is_ok());
         assert!(valid_ref("nginx:alpine").is_ok());
         assert!(valid_ref("x; rm -rf /").is_err());
     }
@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn dangling_but_mounted_is_not_an_orphan() {
         // Docker peut signaler un volume comme « dangling » alors qu'un conteneur arrêté le monte :
-        // Helm ne le propose alors pas à la suppression.
+        // Zenytt ne le propose alors pas à la suppression.
         let v = parse_volumes("v\tlocal\t/m\n", "v\n", "arrete\tv\n");
         assert!(!v[0].orphan);
     }

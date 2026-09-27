@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Construit le latest.json d'une release (mises à jour automatiques de Helm).
+"""Construit le latest.json d'une release (mises à jour automatiques de Zenytt).
 
 Les quatre machines de compilation publient leurs installeurs en parallèle ; si chacune met aussi
 le latest.json à jour, elles s'écrasent (et l'une d'elles échoue sur un 404). Ce script est donc

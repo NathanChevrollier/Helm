@@ -1,10 +1,10 @@
-//! Synchronisation des réglages avec les autres PC : fichier partagé ou serveur `helm-sync`.
+//! Synchronisation des réglages avec les autres PC : fichier partagé ou serveur `zenytt-sync`.
 
 use std::time::Duration;
 
-use helm_profiles::sync::{self, Outcome, PushResult, Remote, SyncConfig, SyncMode, Transport, SECRET_OWNER};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use zenytt_profiles::sync::{self, Outcome, PushResult, Remote, SyncConfig, SyncMode, Transport, SECRET_OWNER};
 
 use crate::sessions::Sessions;
 use crate::store::{secrets, Store};
@@ -81,7 +81,7 @@ pub fn sync_set(store: State<'_, Store>, settings: SyncSettings) -> Result<(), S
     })
 }
 
-/// Serveur `helm-sync` (HTTP).
+/// Serveur `zenytt-sync` (HTTP).
 struct HttpTransport {
     url: String,
     token: String,

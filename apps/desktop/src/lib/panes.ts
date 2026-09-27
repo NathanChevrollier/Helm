@@ -45,7 +45,7 @@ export const usePanes = create<PanesState>((set) => ({
 
 // Accès au magasin depuis la console de développement, pour diagnostiquer le suivi de dossier.
 if (import.meta.env.DEV) {
-  (window as unknown as { __helmPanes?: typeof usePanes }).__helmPanes = usePanes;
+  (window as unknown as { __zenyttPanes?: typeof usePanes }).__zenyttPanes = usePanes;
 }
 
 /**
@@ -82,7 +82,7 @@ export async function uploadToPane(paneId: string, localPaths: string[]): Promis
     const home = await api.fsHome(p.serverId).catch(() => "/");
     const answer = await ask({
       title: "Dossier de destination",
-      body: "Helm n'a pas pu lire le dossier courant de ce terminal. Où envoyer les fichiers ?",
+      body: "Zenytt n'a pas pu lire le dossier courant de ce terminal. Où envoyer les fichiers ?",
       input: { label: "Dossier sur le serveur", initial: home },
       confirmLabel: "Envoyer",
     });

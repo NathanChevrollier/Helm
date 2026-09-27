@@ -1,6 +1,6 @@
-//! Historique des commandes du shell distant, lu pour la recherche inversée de Helm.
+//! Historique des commandes du shell distant, lu pour la recherche inversée de Zenytt.
 //!
-//! Rien n'est installé sur le serveur : Helm lit les fichiers d'historique que le shell tient déjà
+//! Rien n'est installé sur le serveur : Zenytt lit les fichiers d'historique que le shell tient déjà
 //! (`~/.bash_history`, `~/.zsh_history`, `~/.local/share/fish/fish_history`). Ce qu'on peut en
 //! tirer dépend donc du shell :
 //!
@@ -10,7 +10,7 @@
 //!   jamais la durée ;
 //! * **fish** écrit un petit YAML avec `- cmd:` et `when:`, sans durée.
 //!
-//! Helm affiche donc la durée quand le shell la donne, et ne l'invente jamais sinon.
+//! Zenytt affiche donc la durée quand le shell la donne, et ne l'invente jamais sinon.
 
 use std::collections::HashMap;
 

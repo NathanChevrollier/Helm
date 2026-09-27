@@ -140,7 +140,7 @@ pub async fn diagnose(host: &str, port: u16) -> Diagnosis {
     let ip = public_ip.clone().unwrap_or_else(|| "TON_IP".into());
     let unban = vec![
         format!("Depuis un autre réseau (partage 4G) ou la console de ton hébergeur : sudo fail2ban-client status sshd, puis sudo fail2ban-client set sshd unbanip {ip}."),
-        format!("Pour éviter que ça se reproduise, ajoute {ip} à ignoreip dans /etc/fail2ban/jail.local (Helm peut le faire dans Sécurité → fail2ban une fois connecté)."),
+        format!("Pour éviter que ça se reproduise, ajoute {ip} à ignoreip dans /etc/fail2ban/jail.local (Zenytt peut le faire dans Sécurité → fail2ban une fois connecté)."),
     ];
     let (verdict, advice, banned) = match (ssh, banner.is_some(), web_up) {
         (Probe::Open, true, _) => (

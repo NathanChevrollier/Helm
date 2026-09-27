@@ -1,5 +1,5 @@
 # Faux VPS de test : sshd + nginx + sudo + client Docker (branché sur un démon Docker privé, voir docker-compose.yml).
-# tmux, restic et ufw ne sont volontairement PAS installés : ça permet de tester les installations depuis Helm.
+# tmux, restic et ufw ne sont volontairement PAS installés : ça permet de tester les installations depuis Zenytt.
 FROM ubuntu:24.04
 
 RUN apt-get update \
@@ -12,8 +12,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-# root/helm et deploy/deploy (sudoer avec mot de passe), comme sur un vrai VPS.
-RUN echo 'root:helm' | chpasswd \
+# root/zenytt et deploy/deploy (sudoer avec mot de passe), comme sur un vrai VPS.
+RUN echo 'root:zenytt' | chpasswd \
     && useradd -m -s /bin/bash -G sudo deploy \
     && echo 'deploy:deploy' | chpasswd \
     && mkdir -p /run/sshd \
@@ -27,7 +27,7 @@ RUN ln -s /etc/nginx/sites-available/demo.example.com /etc/nginx/sites-enabled/ 
        -keyout /etc/letsencrypt/live/demo.example.com/privkey.pem \
        -out /etc/letsencrypt/live/demo.example.com/fullchain.pem
 
-# Projet compose de démo (port publié sur toutes les interfaces, à « restreindre » depuis Helm).
+# Projet compose de démo (port publié sur toutes les interfaces, à « restreindre » depuis Zenytt).
 COPY whoami-compose.yml /opt/whoami/docker-compose.yml
 
 COPY entrypoint.sh /entrypoint.sh

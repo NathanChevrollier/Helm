@@ -1,4 +1,4 @@
-//! Types et parseurs partagés entre l'app desktop et l'agent `helmd`.
+//! Types et parseurs partagés entre l'app desktop et l'agent `zenyttd`.
 //!
 //! Les parseurs travaillent sur le texte de `/proc` : l'app les applique à la sortie d'une
 //! commande SSH (mode sans agent), l'agent directement aux fichiers locaux.
@@ -11,9 +11,9 @@ pub mod proc;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Chemin du socket unix de l'agent.
-pub const SOCKET_PATH: &str = "/run/helmd/helmd.sock";
+pub const SOCKET_PATH: &str = "/run/zenyttd/zenyttd.sock";
 /// Fichier de configuration de l'agent.
-pub const CONFIG_PATH: &str = "/etc/helmd/config.json";
+pub const CONFIG_PATH: &str = "/etc/zenyttd/config.json";
 
 /// Compteurs bruts relevés à un instant : les taux (CPU %, débit réseau) se calculent
 /// entre deux relevés.

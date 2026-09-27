@@ -1,6 +1,6 @@
-// Session de bureau à distance affichée dans Helm, sans client externe.
+// Session de bureau à distance affichée dans Zenytt, sans client externe.
 //
-// Le rendu et les entrées sont assurés par le composant web d'IronRDP (WebAssembly) ; Helm lui
+// Le rendu et les entrées sont assurés par le composant web d'IronRDP (WebAssembly) ; Zenytt lui
 // fournit l'adresse du pont local, le jeton et les identifiants, et ajoute la barre d'outils :
 // Ctrl+Alt+Suppr, presse-papiers, taille d'affichage, disposition du clavier, plein écran, et
 // transfert de fichiers par le presse-papiers RDP (copier sur la machine → enregistrer sur le PC,
@@ -78,7 +78,7 @@ function chargerClient() {
 async function enregistrer(dossier: string, nom: string, blob: Blob): Promise<string> {
   const octets = new Uint8Array(await blob.arrayBuffer());
   return invoke<string>("save_binary_file", octets, {
-    headers: { "x-helm-dir": encodeURIComponent(dossier), "x-helm-name": encodeURIComponent(nom) },
+    headers: { "x-zenytt-dir": encodeURIComponent(dossier), "x-zenytt-name": encodeURIComponent(nom) },
   });
 }
 

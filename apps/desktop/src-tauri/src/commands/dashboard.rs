@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use helm_core::docker::{self, Access};
-use helm_core::{agent, nginx};
-use helm_protocol::proc::{parse_collect, COLLECT_SCRIPT};
-use helm_protocol::{ActiveAlert, Metrics};
 use serde::Serialize;
 use tauri::State;
 use tokio::sync::Mutex;
+use zenytt_core::docker::{self, Access};
+use zenytt_core::{agent, nginx};
+use zenytt_protocol::proc::{parse_collect, COLLECT_SCRIPT};
+use zenytt_protocol::{ActiveAlert, Metrics};
 
 use crate::commands::monitoring::Monitor;
 use crate::sessions::Sessions;
@@ -77,7 +77,7 @@ pub async fn dashboard_summary(
                     if let Ok(text) = conn.run(COLLECT_SCRIPT).await {
                         let raw = parse_collect(&text, now_ms());
                         let mut prev = monitor.prev.lock().await;
-                        metrics = Some(helm_protocol::compute(prev.get(&server_id), &raw));
+                        metrics = Some(zenytt_protocol::compute(prev.get(&server_id), &raw));
                         prev.insert(server_id.clone(), raw);
                     }
                     (false, metrics, vec![])

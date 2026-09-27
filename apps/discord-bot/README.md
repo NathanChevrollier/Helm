@@ -1,14 +1,14 @@
-# Helm Discord Bot
+# Zenytt Discord Bot
 
-Bot Discord autonome pour centraliser les suggestions et signalements de bugs de Helm dans GitHub.
+Bot Discord autonome pour centraliser les suggestions et signalements de bugs de Zenytt dans GitHub.
 
 ## Fonctionnalités
 
 - `/setup-feedback` publie deux panneaux interactifs dans les salons configurés par ID.
 - Les boutons et `/bug` / `/suggestion` ouvrent des modales Discord natives.
 - Chaque retour crée une issue GitHub avec le label `bug` ou `enhancement`, le lien vers l'auteur Discord et son avatar.
-- La roadmap maintient un seul embed à jour avec les cartes du GitHub Project v2 (`Brainstorming`, `In Progress`, `Test`, `Done`), y compris les issues terminées.
-- `/helm status` affiche le ping, l'uptime et la dernière release GitHub de Helm.
+- La roadmap maintient un seul embed à jour avec les cartes du GitHub Project v2 (issues et brouillons), rangées selon leur statut, en français ou en anglais (« Todo », « En cours », « En test », « Terminé »…).
+- `/zenytt status` affiche le ping, l'uptime et la dernière release GitHub de Zenytt.
 - `/sync-roadmap` force la mise à jour du panneau et `/roadmap` affiche les chantiers en privé.
 - Les commandes sont enregistrées au niveau de `GUILD_ID`, donc disponibles immédiatement sur le serveur ciblé.
 
@@ -18,7 +18,7 @@ Bot Discord autonome pour centraliser les suggestions et signalements de bugs de
 - Un bot créé dans le [Discord Developer Portal](https://discord.com/developers/applications).
 - Les intents privilégiés ne sont pas nécessaires: le bot utilise seulement `Guilds`.
 - Le bot doit avoir les permissions `View Channels`, `Send Messages`, `Embed Links` et `Use Application Commands` dans les deux salons.
-- Le token GitHub doit être un fine-grained token limité au dépôt Helm avec `Issues: Read and write` et `Projects: Read` si le mode Project v2 est utilisé.
+- Le token GitHub doit être un fine-grained token limité au dépôt Zenytt avec `Issues: Read and write` et `Projects: Read` si le mode Project v2 est utilisé.
 
 ## Configuration locale
 
@@ -26,17 +26,22 @@ Bot Discord autonome pour centraliser les suggestions et signalements de bugs de
 Copy-Item .env.example .env
 # Renseigner les secrets et identifiants dans .env
 pnpm install
-pnpm --filter helm-discord-bot typecheck
-pnpm --filter helm-discord-bot test
-pnpm --filter helm-discord-bot dev
+pnpm --filter zenytt-discord-bot typecheck
+pnpm --filter zenytt-discord-bot test
+pnpm --filter zenytt-discord-bot dev
 ```
 
 Une fois connecté, exécuter `/setup-feedback` avec un membre qui dispose de `Manage Server`.
 
 Pour la roadmap, crée un salon dédié et copie son ID dans `ROADMAP_CHANNEL_ID`. Le bot crée ou
 retrouve son embed dans les 50 derniers messages, puis l'édite à intervalle régulier. Tu peux
-forcer une mise à jour avec `/sync-roadmap`. Si `GITHUB_PROJECT_NUMBER` est renseigné, les
-colonnes du Project v2 sont utilisées directement; sinon le bot utilise les labels configurés.
+forcer une mise à jour avec `/sync-roadmap`.
+
+Pour lire le GitHub Project v2, crée un jeton « classic » (Settings → Developer settings →
+Personal access tokens → Tokens (classic)) avec la seule permission `read:project`, et mets-le
+dans `GITHUB_PROJECT_TOKEN` : les jetons fine-grained ne peuvent pas lire le projet d'un compte
+personnel. Le bot retrouve seul le projet dont le titre contient le nom du dépôt
+(`GITHUB_PROJECT_NUMBER` le force). Sans ce jeton, il se rabat sur les labels configurés.
 
 ## Configuration des secrets
 
@@ -47,8 +52,9 @@ colonnes du Project v2 sont utilisées directement; sinon le bot utilise les lab
 | `GUILD_ID`                      | ID du serveur où enregistrer les commandes.            |
 | `GITHUB_TOKEN`                  | Fine-grained token GitHub limité aux issues du dépôt.  |
 | `GITHUB_OWNER`                  | Propriétaire du dépôt, par défaut `NathanChevrollier`. |
-| `GITHUB_REPO`                   | Nom du dépôt, par défaut `Helm`.                       |
-| `GITHUB_PROJECT_NUMBER`         | Numéro du Project v2; active la lecture des colonnes.  |
+| `GITHUB_REPO`                   | Nom du dépôt, par défaut `Zenytt`.                       |
+| `GITHUB_PROJECT_TOKEN`          | Jeton classic `read:project` pour lire le Project v2.  |
+| `GITHUB_PROJECT_NUMBER`         | Numéro du Project v2 (facultatif, trouvé seul sinon).  |
 | `SUGGESTION_CHANNEL_ID`         | ID Discord du salon de suggestions.                    |
 | `BUG_CHANNEL_ID`                | ID Discord du salon de bugs.                           |
 | `ROADMAP_CHANNEL_ID`            | ID Discord du salon où publier le panneau roadmap.     |
@@ -67,7 +73,7 @@ Créer `.env` à partir de `.env.example`, puis depuis ce dossier:
 
 ```bash
 docker compose up -d --build
-docker compose logs -f helm-discord-bot
+docker compose logs -f zenytt-discord-bot
 docker compose down
 ```
 

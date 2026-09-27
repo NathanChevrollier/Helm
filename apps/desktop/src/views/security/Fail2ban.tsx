@@ -5,7 +5,7 @@ import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, ErrorState, IconButton, Input, Loading } from "../../components/ui";
 import { useCachedState } from "../../lib/cache";
 
-/** Adresses que Helm ajoute toujours à la liste (boucle locale). */
+/** Adresses que Zenytt ajoute toujours à la liste (boucle locale). */
 const LOOPBACK = ["127.0.0.1/8", "127.0.0.0/8", "::1"];
 
 function duration(secs: number): string {
@@ -43,7 +43,7 @@ export default function Fail2ban({ serverId, onCount, onAudit }: { serverId: str
     if (bannedCount != null) onCount?.(bannedCount);
   }, [bannedCount, onCount]);
 
-  // Liste commune à tous les jails (Helm les garde synchronisées), hors boucle locale.
+  // Liste commune à tous les jails (Zenytt les garde synchronisées), hors boucle locale.
   const ignored = [...new Set(state?.jails.flatMap((j) => j.ignoreip) ?? [])].filter((a) => !LOOPBACK.includes(a));
 
   const saveIgnore = async (addresses: string[], message: string) => {
@@ -153,7 +153,7 @@ export default function Fail2ban({ serverId, onCount, onAudit }: { serverId: str
         <div>
           <h2 className="font-medium">Adresses jamais bannies</h2>
           <p className="text-sm text-muted">
-            Appliquées à tous les jails. Helm les écrit dans son propre fichier ({"/etc/fail2ban/jail.d/zz-helm-ignore.local"}), teste la configuration puis recharge fail2ban ; tes fichiers ne sont pas modifiés.
+            Appliquées à tous les jails. Zenytt les écrit dans son propre fichier ({"/etc/fail2ban/jail.d/zz-zenytt-ignore.local"}), teste la configuration puis recharge fail2ban ; tes fichiers ne sont pas modifiés.
           </p>
         </div>
         <ul className="flex flex-wrap gap-2">

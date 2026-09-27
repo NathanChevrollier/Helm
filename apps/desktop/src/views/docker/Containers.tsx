@@ -20,7 +20,7 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
   const [state, setState] = useState<StateFilter>("all");
   const [groupBy, setGroupBy] = useState<GroupBy>(() => {
     try {
-      const v = localStorage.getItem("helm.docker.groupBy");
+      const v = localStorage.getItem("zenytt.docker.groupBy");
       return v === "folder" || v === "none" ? v : "project";
     } catch {
       return "project";
@@ -35,7 +35,7 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
   const setGroup = (g: GroupBy) => {
     setGroupBy(g);
     try {
-      localStorage.setItem("helm.docker.groupBy", g);
+      localStorage.setItem("zenytt.docker.groupBy", g);
     } catch {
       /* préférence non retenue */
     }

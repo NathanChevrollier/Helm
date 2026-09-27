@@ -243,7 +243,7 @@ SHELL=/bin/sh
 0 */12 * * * root test -x /usr/bin/certbot && certbot -q renew
 @@TIMERS
 Mon 2026-09-22 00:00:00 UTC 3h 10min left Sun 2026-09-21 00:00:00 UTC 20h ago logrotate.timer logrotate.service
-- - Sun 2026-09-21 06:00:00 UTC 14h ago helm-backup.timer helm-backup.service
+- - Sun 2026-09-21 06:00:00 UTC 14h ago zenytt-backup.timer zenytt-backup.service
 ";
         let s = parse_schedule(out);
         assert_eq!(s.crontabs.len(), 2);

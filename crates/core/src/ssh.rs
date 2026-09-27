@@ -498,7 +498,7 @@ fn with_admin_path(command: &str) -> String {
 pub fn sudo_failure(stderr: &str) -> Option<String> {
     let e = stderr.to_lowercase();
     if e.contains("must have a tty") || e.contains("a terminal is required") {
-        Some("sudo exige un terminal sur ce serveur (option « requiretty ») : ajoute « Defaults:TON_UTILISATEUR !requiretty » avec visudo pour que Helm puisse administrer ce serveur.".into())
+        Some("sudo exige un terminal sur ce serveur (option « requiretty ») : ajoute « Defaults:TON_UTILISATEUR !requiretty » avec visudo pour que Zenytt puisse administrer ce serveur.".into())
     } else if e.contains("incorrect password") || e.contains("sorry, try again") {
         Some("mot de passe sudo incorrect : corrige-le dans le profil du serveur.".into())
     } else if e.contains("a password is required") {

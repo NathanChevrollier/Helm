@@ -1,10 +1,10 @@
 //! Sauvegardes planifiées (restic) : configuration, sauvegardes existantes, restauration.
 
-use helm_core::backup::{self, BackupConfig, DbSource, Destination, Node, Snapshot, Status};
-use helm_core::docker::{self, Access};
-use helm_core::ssh::shell_quote;
 use serde::Serialize;
 use tauri::State;
+use zenytt_core::backup::{self, BackupConfig, DbSource, Destination, Node, Snapshot, Status};
+use zenytt_core::docker::{self, Access};
+use zenytt_core::ssh::shell_quote;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -205,14 +205,14 @@ pub async fn backup_stage_download(
     let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
     let user = conn.run("id -un").await.map_err(err)?.trim().to_string();
     let home = conn.run("printf %s \"$HOME\"").await.map_err(err)?;
-    let dest = format!("{home}/helm-restauration");
+    let dest = format!("{home}/zenytt-restauration");
     let cmd = format!(
         "mkdir -p {d} && cp -a {r} {d}/ && chown -R {u}: {d}",
         d = shell_quote(&dest),
         r = shell_quote(&restored),
         u = shell_quote(&user)
     );
-    helm_core::ssh::long(conn.exec_sudo(&cmd, sudo.as_deref(), None)).await.map_err(err)?.into_result().map_err(err)?;
+    zenytt_core::ssh::long(conn.exec_sudo(&cmd, sudo.as_deref(), None)).await.map_err(err)?.into_result().map_err(err)?;
     let name = restored.rsplit('/').next().unwrap_or("");
     Ok(format!("{dest}/{name}"))
 }

@@ -6,10 +6,13 @@ import { GitHubService } from "./services/githubService.js";
 import { RoadmapService } from "./services/roadmapService.js";
 
 const env = loadEnv();
-const github = new GitHubService(env.GITHUB_OWNER, env.GITHUB_REPO, env.GITHUB_TOKEN, {
-  bug: env.GITHUB_BUG_LABEL,
-  suggestion: env.GITHUB_SUGGESTION_LABEL,
-});
+const github = new GitHubService(
+  env.GITHUB_OWNER,
+  env.GITHUB_REPO,
+  env.GITHUB_TOKEN,
+  { bug: env.GITHUB_BUG_LABEL, suggestion: env.GITHUB_SUGGESTION_LABEL },
+  env.GITHUB_PROJECT_TOKEN,
+);
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const roadmap = new RoadmapService(client, env, github);
 

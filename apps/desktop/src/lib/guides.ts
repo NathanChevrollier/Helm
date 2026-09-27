@@ -2,14 +2,14 @@
 //
 // Chaque fiche suit le même plan, du plus utile au plus rare :
 //   1. à quoi ça sert            → `summary`
-//   2. ce que Helm fait tout seul → `automatic`
+//   2. ce que Zenytt fait tout seul → `automatic`
 //   3. comment ça marche ici      → `how`
 //   4. ce qu'il faut sur le serveur → `requirements`
 //   5. mise en place, commandes prêtes → `steps`
 //   6. quand ça coince            → `troubleshooting`
 //   7. bon à savoir               → `notes`
 //
-// Les commandes sont exactes et vérifiées contre le code de Helm (plans d'installation tmux,
+// Les commandes sont exactes et vérifiées contre le code de Zenytt (plans d'installation tmux,
 // préparation restic, sondes Docker) : elles ne servent que de recours quand l'automatique échoue.
 import type { SectionId } from "../sections";
 
@@ -62,7 +62,7 @@ export interface Guide {
   summary: string;
   section?: SectionId;
   automatic?: string;
-  /** Comment la fonctionnalité marche dans Helm : ce que l'app fait, où l'on clique. */
+  /** Comment la fonctionnalité marche dans Zenytt : ce que l'app fait, où l'on clique. */
   how?: string[];
   requirements?: string[];
   steps?: GuideStep[];
@@ -77,7 +77,7 @@ export const TOPICS: { id: GuideTopic; label: string; description: string }[] = 
   { id: "partage", label: "Partage et réglages", description: "Plusieurs postes, plusieurs personnes, assistant IA." },
 ];
 
-/** Installation d'un paquet, dans l'ordre des gestionnaires que Helm sait utiliser. */
+/** Installation d'un paquet, dans l'ordre des gestionnaires que Zenytt sait utiliser. */
 const install = (paquet: string): GuideStep[] => [
   { text: "Debian, Ubuntu, Raspberry Pi OS", command: `apt-get update && apt-get install -y ${paquet}`, sudo: true },
   { text: "Fedora, Rocky, Alma, CentOS", command: `dnf install -y ${paquet}`, sudo: true },
@@ -92,23 +92,23 @@ export const GUIDES: Guide[] = [
     title: "Ajouter et connecter un serveur",
     topic: "prise-en-main",
     section: "servers",
-    summary: "Un profil rassemble l'adresse, l'utilisateur et la façon de s'authentifier. Tout le reste de Helm s'appuie dessus.",
+    summary: "Un profil rassemble l'adresse, l'utilisateur et la façon de s'authentifier. Tout le reste de Zenytt s'appuie dessus.",
     how: [
       "Les secrets ne sont jamais écrits dans les fichiers de configuration : ils vont dans le coffre-fort du système (Credential Manager, Trousseau, Secret Service).",
-      "À la première connexion, l'empreinte de la clé d'hôte est mémorisée ; si elle change ensuite, Helm bloque et prévient au lieu de se connecter quand même.",
+      "À la première connexion, l'empreinte de la clé d'hôte est mémorisée ; si elle change ensuite, Zenytt bloque et prévient au lieu de se connecter quand même.",
       "Le mot de passe sudo enregistré dans le profil sert aux actions qui en ont besoin : écriture nginx, pare-feu, agent, sauvegardes.",
-      "Un serveur de rebond (bastion) se choisit dans le profil : Helm traverse le premier pour joindre le second.",
+      "Un serveur de rebond (bastion) se choisit dans le profil : Zenytt traverse le premier pour joindre le second.",
       "Une identité de la banque (Serveurs → Identifiants) remplace l'utilisateur et les secrets sur plusieurs profils à la fois.",
     ],
     requirements: ["un accès SSH (mot de passe, clé OpenSSH, clé PuTTY .ppk, agent OpenSSH ou Pageant)"],
     steps: [
-      { text: "Créer une clé dédiée à Helm sur ton PC, plutôt qu'un mot de passe", command: "ssh-keygen -t ed25519 -C helm" },
+      { text: "Créer une clé dédiée à Zenytt sur ton PC, plutôt qu'un mot de passe", command: "ssh-keygen -t ed25519 -C zenytt" },
       { text: "L'installer sur le serveur", command: "ssh-copy-id -i ~/.ssh/id_ed25519.pub utilisateur@serveur" },
-      { text: "Vérifier l'empreinte du serveur, côté serveur, pour la comparer à celle que Helm affiche", command: "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub", sudo: true },
+      { text: "Vérifier l'empreinte du serveur, côté serveur, pour la comparer à celle que Zenytt affiche", command: "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub", sudo: true },
     ],
     troubleshooting: [
       { symptom: "« Permission denied » alors que le mot de passe est bon", answer: "sshd refuse peut-être l'authentification par mot de passe, ou le compte est limité. Vérifier :", command: "grep -E 'PasswordAuthentication|PermitRootLogin|AllowUsers' /etc/ssh/sshd_config", sudo: true },
-      { symptom: "Connexion qui échoue depuis peu, sans rien avoir changé", answer: "Ton IP est peut-être bannie par fail2ban. Le diagnostic de connexion de Helm (fiche du serveur → Diagnostiquer, ou palette Ctrl+K) le détecte ; côté serveur :", command: "fail2ban-client status sshd", sudo: true },
+      { symptom: "Connexion qui échoue depuis peu, sans rien avoir changé", answer: "Ton IP est peut-être bannie par fail2ban. Le diagnostic de connexion de Zenytt (fiche du serveur → Diagnostiquer, ou palette Ctrl+K) le détecte ; côté serveur :", command: "fail2ban-client status sshd", sudo: true },
       { symptom: "« L'empreinte de l'hôte a changé »", answer: "Le serveur a été réinstallé, ou quelqu'un s'interpose. Ne valider qu'après avoir comparé l'empreinte affichée avec celle lue sur la console du serveur." },
     ],
   },
@@ -117,9 +117,9 @@ export const GUIDES: Guide[] = [
     title: "Terminal : dossier courant, fichiers, copier-coller",
     topic: "prise-en-main",
     section: "terminal",
-    summary: "Le terminal de Helm connaît le dossier où tu te trouves : le panneau Fichiers suit tes « cd », et un fichier déposé depuis Windows atterrit au bon endroit.",
+    summary: "Le terminal de Zenytt connaît le dossier où tu te trouves : le panneau Fichiers suit tes « cd », et un fichier déposé depuis Windows atterrit au bon endroit.",
     how: [
-      "Au démarrage, le shell annonce son identifiant de processus par une séquence invisible ; Helm lit ensuite /proc pour connaître le dossier courant, même quand un programme tourne au premier plan.",
+      "Au démarrage, le shell annonce son identifiant de processus par une séquence invisible ; Zenytt lit ensuite /proc pour connaître le dossier courant, même quand un programme tourne au premier plan.",
       "Le panneau Fichiers se recale tout seul après chaque « cd » (relevé toutes les 2,5 secondes).",
       "Le viseur du panneau coupe ce suivi quand tu veux naviguer ailleurs à la main ; recliquer le réactive et recale le panneau.",
       "Glisser des fichiers Windows sur le terminal les envoie dans le dossier courant du shell.",
@@ -134,31 +134,31 @@ export const GUIDES: Guide[] = [
     steps: [{ text: "Vérifier que le suivi de dossier est possible sur ce serveur", command: "readlink /proc/$$/cwd" }],
     troubleshooting: [
       { symptom: "« Dossier courant du terminal introuvable »", answer: "Le serveur n'expose pas /proc (BSD, certains conteneurs), ou le terminal est déconnecté. Les autres fonctions du terminal marchent quand même." },
-      { symptom: "La sélection à la souris ne fonctionne pas dans une session tmux", answer: "tmux capte la souris quand « mouse on » est actif. Helm force « mouse off » sur ses propres sessions ; pour une session créée à la main :", command: "tmux set-option -g mouse off" },
-      { symptom: "L'historique du serveur est vide", answer: "Le shell n'écrit souvent son fichier qu'à la déconnexion. Helm lit ~/.bash_history, ~/.zsh_history et l'historique de fish ; pour forcer l'écriture tout de suite :", command: "history -a" },
-      { symptom: "Les durées d'exécution n'apparaissent pas dans l'historique", answer: "Seul zsh les enregistre, en mode étendu ; bash ne les garde jamais. Helm affiche la durée quand le shell la donne et ne l'invente pas. Pour les avoir sous zsh, ajouter « setopt EXTENDED_HISTORY » à ~/.zshrc. Sous bash, « HISTTIMEFORMAT » donne au moins la date :", command: "echo 'export HISTTIMEFORMAT=\"%F %T \"' >> ~/.bashrc" },
-      { symptom: "Le bouton de diagnostic n'apparaît pas alors qu'une commande a échoué", answer: "Helm n'installe rien sur le serveur : le code de retour n'est pas lisible, la détection se fait sur le texte de la sortie. Une commande qui échoue sans rien écrire passe inaperçue — le clic droit propose « Expliquer ce qui s'affiche »." },
+      { symptom: "La sélection à la souris ne fonctionne pas dans une session tmux", answer: "tmux capte la souris quand « mouse on » est actif. Zenytt force « mouse off » sur ses propres sessions ; pour une session créée à la main :", command: "tmux set-option -g mouse off" },
+      { symptom: "L'historique du serveur est vide", answer: "Le shell n'écrit souvent son fichier qu'à la déconnexion. Zenytt lit ~/.bash_history, ~/.zsh_history et l'historique de fish ; pour forcer l'écriture tout de suite :", command: "history -a" },
+      { symptom: "Les durées d'exécution n'apparaissent pas dans l'historique", answer: "Seul zsh les enregistre, en mode étendu ; bash ne les garde jamais. Zenytt affiche la durée quand le shell la donne et ne l'invente pas. Pour les avoir sous zsh, ajouter « setopt EXTENDED_HISTORY » à ~/.zshrc. Sous bash, « HISTTIMEFORMAT » donne au moins la date :", command: "echo 'export HISTTIMEFORMAT=\"%F %T \"' >> ~/.bashrc" },
+      { symptom: "Le bouton de diagnostic n'apparaît pas alors qu'une commande a échoué", answer: "Zenytt n'installe rien sur le serveur : le code de retour n'est pas lisible, la détection se fait sur le texte de la sortie. Une commande qui échoue sans rien écrire passe inaperçue — le clic droit propose « Expliquer ce qui s'affiche »." },
     ],
-    notes: ["Les commandes qui contiennent visiblement un secret (mot de passe, jeton, clé) sont écartées de l'historique de Helm : les reproposer dans une liste, c'est les réafficher."],
+    notes: ["Les commandes qui contiennent visiblement un secret (mot de passe, jeton, clé) sont écartées de l'historique de Zenytt : les reproposer dans une liste, c'est les réafficher."],
   },
   {
     id: "sessions",
     title: "Sessions persistantes (tmux)",
     topic: "prise-en-main",
     section: "terminal",
-    summary: "Un terminal qui survit à une coupure réseau, à la veille du PC et à la fermeture de Helm : le programme continue de tourner sur le serveur et l'onglet se rebranche dessus.",
-    automatic: "Helm installe tmux lui-même : Terminal → bouton « Sessions tmux » de la barre d'outils → Installer tmux. Les commandes ci-dessous ne servent que si l'installation automatique échoue.",
+    summary: "Un terminal qui survit à une coupure réseau, à la veille du PC et à la fermeture de Zenytt : le programme continue de tourner sur le serveur et l'onglet se rebranche dessus.",
+    automatic: "Zenytt installe tmux lui-même : Terminal → bouton « Sessions tmux » de la barre d'outils → Installer tmux. Les commandes ci-dessous ne servent que si l'installation automatique échoue.",
     how: [
-      "Chaque onglet persistant correspond à une session tmux nommée « helm-… » sur le serveur.",
+      "Chaque onglet persistant correspond à une session tmux nommée « zenytt-… » sur le serveur.",
       "Terminal → « Sessions tmux » liste les sessions existantes : les reprendre dans un onglet, ou les fermer.",
-      "Les onglets et la division de l'écran sont restaurés au démarrage de Helm.",
+      "Les onglets et la division de l'écran sont restaurés au démarrage de Zenytt.",
     ],
     requirements: ["tmux sur le serveur", "un compte capable d'installer des paquets, seulement pour l'installation"],
     steps: [
       { text: "Vérifier si tmux est déjà présent", command: "command -v tmux || echo 'tmux absent'" },
       ...install("tmux"),
       { text: "Unraid n'a pas de gestionnaire de paquets : passer par le plugin « un-get » (Apps → un-get)", command: "un-get update && un-get install tmux" },
-      { text: "Lister les sessions créées par Helm", command: "tmux ls" },
+      { text: "Lister les sessions créées par Zenytt", command: "tmux ls" },
     ],
     troubleshooting: [
       { symptom: "Le bouton d'installation dit qu'aucun gestionnaire de paquets n'est reconnu", answer: "Installer tmux à la main avec l'outil de ta distribution. Sans tmux, les terminaux fonctionnent : ils ne survivent simplement pas aux coupures." },
@@ -197,7 +197,7 @@ export const GUIDES: Guide[] = [
     how: [
       "Les relevés viennent de l'agent quand il est installé, sinon d'une lecture directe à la connexion.",
       "« À traiter » regroupe ce qui demande une action : conteneurs arrêtés, alertes actives, certificats qui expirent.",
-      "L'activité récente est le journal local de Helm : toutes les actions faites depuis l'app, le MCP ou l'assistant.",
+      "L'activité récente est le journal local de Zenytt : toutes les actions faites depuis l'app, le MCP ou l'assistant.",
     ],
   },
   {
@@ -207,7 +207,7 @@ export const GUIDES: Guide[] = [
     section: "monitoring",
     summary: "Charge, mémoire, disques, réseau, processus et services, en direct ou sur 30 jours avec l'agent.",
     how: [
-      "Sans agent : les chiffres sont lus à la demande pendant que Helm est ouvert, sans historique.",
+      "Sans agent : les chiffres sont lus à la demande pendant que Zenytt est ouvert, sans historique.",
       "Avec l'agent : 30 jours de moyennes par minute, et des alertes qui partent même PC éteint.",
       "La charge (« load ») se compare au nombre de cœurs : 2.00 sur 4 cœurs, c'est la moitié de la machine.",
       "La mémoire affichée exclut le cache : un cache élevé n'est pas un problème.",
@@ -220,8 +220,8 @@ export const GUIDES: Guide[] = [
     section: "monitoring",
     summary: "Tout ce qui se déclenche tout seul sur le serveur : crontabs des utilisateurs, fichiers système de /etc/cron.d, et timers systemd.",
     how: [
-      "Helm lit les crontabs de chaque utilisateur, /etc/crontab, /etc/cron.d, les dossiers cron.hourly/daily/weekly/monthly, et « systemctl list-timers ».",
-      "Chaque ligne est traduite en français (« chaque jour à 03:00 ») et accompagnée de ce que la commande fait réellement quand Helm la reconnaît.",
+      "Zenytt lit les crontabs de chaque utilisateur, /etc/crontab, /etc/cron.d, les dossiers cron.hourly/daily/weekly/monthly, et « systemctl list-timers ».",
+      "Chaque ligne est traduite en français (« chaque jour à 03:00 ») et accompagnée de ce que la commande fait réellement quand Zenytt la reconnaît.",
       "« Modifier » ouvre le crontab dans l'éditeur ; la syntaxe est vérifiée avant enregistrement.",
     ],
     requirements: ["cron ou systemd (les deux sont lus)"],
@@ -237,11 +237,11 @@ export const GUIDES: Guide[] = [
   },
   {
     id: "docker",
-    title: "Docker : relier Helm au démon",
+    title: "Docker : relier Zenytt au démon",
     topic: "exploitation",
     section: "docker",
     summary: "Conteneurs, statistiques, journaux en direct, shell dans un conteneur, images, volumes et nettoyage chiffré.",
-    automatic: "Helm détecte tout seul s'il peut parler à Docker directement, sinon il passe par sudo. Podman est reconnu de la même façon.",
+    automatic: "Zenytt détecte tout seul s'il peut parler à Docker directement, sinon il passe par sudo. Podman est reconnu de la même façon.",
     how: [
       "« Shell » ouvre un onglet de terminal dans le conteneur (bash s'il existe, sinon sh).",
       "« Logs » ouvre un onglet qui suit la sortie en direct.",
@@ -262,8 +262,8 @@ export const GUIDES: Guide[] = [
     ],
     notes: [
       "Mettre un utilisateur dans le groupe docker revient à lui donner les droits root : à réserver à un compte d'administration.",
-      "Une fois connecté à un registre, Docker garde le jeton dans ~/.docker/config.json, simplement encodé en base64 si aucun « credential helper » n'est installé. Helm le signale : utilise des jetons en lecture seule plutôt que le mot de passe du compte.",
-      "Pour AWS ECR, le client aws (AWS CLI v2) doit être installé sur le serveur : Helm lui passe la clé d'accès sur l'entrée standard pour obtenir le jeton du jour.",
+      "Une fois connecté à un registre, Docker garde le jeton dans ~/.docker/config.json, simplement encodé en base64 si aucun « credential helper » n'est installé. Zenytt le signale : utilise des jetons en lecture seule plutôt que le mot de passe du compte.",
+      "Pour AWS ECR, le client aws (AWS CLI v2) doit être installé sur le serveur : Zenytt lui passe la clé d'accès sur l'entrée standard pour obtenir le jeton du jour.",
     ],
   },
   {
@@ -273,9 +273,9 @@ export const GUIDES: Guide[] = [
     section: "docker",
     summary: "Déployer une application du catalogue en un clic, créer un projet compose à la main, le déployer avec retour arrière automatique, ou depuis un dépôt GitHub privé.",
     how: [
-      "Un projet, c'est un dossier avec son compose.yml : Helm y lance « docker compose » à ta place.",
-      "« Catalogue » propose des applications prêtes à déployer (Nextcloud, Vaultwarden, Uptime Kuma, Gitea, n8n…) : Helm remplit les mots de passe avec de l'aléa du système et n'ouvre les ports que sur 127.0.0.1.",
-      "Le catalogue est intégré à Helm : aucun dépôt tiers n'est interrogé, et tu relis le docker-compose.yml et le .env avant qu'ils ne soient écrits sur le serveur.",
+      "Un projet, c'est un dossier avec son compose.yml : Zenytt y lance « docker compose » à ta place.",
+      "« Catalogue » propose des applications prêtes à déployer (Nextcloud, Vaultwarden, Uptime Kuma, Gitea, n8n…) : Zenytt remplit les mots de passe avec de l'aléa du système et n'ouvre les ports que sur 127.0.0.1.",
+      "Le catalogue est intégré à Zenytt : aucun dépôt tiers n'est interrogé, et tu relis le docker-compose.yml et le .env avant qu'ils ne soient écrits sur le serveur.",
       "Pour publier l'application sur un sous-domaine, enchaîne avec la page Sites : il crée le vhost nginx et le certificat HTTPS vers le port local choisi.",
       "Déployer enchaîne pull → up → vérification que les conteneurs tiennent ; si l'un d'eux retombe, l'état précédent est remis.",
       "Le déploiement GitHub génère une clé de déploiement restreinte à un dépôt : rien d'autre n'est accessible avec elle.",
@@ -300,10 +300,10 @@ export const GUIDES: Guide[] = [
     summary: "Parcourir bases et tables de MySQL/MariaDB, PostgreSQL et SQLite, éditer les lignes en place, exécuter du SQL, exporter en CSV, et explorer Redis.",
     how: [
       "Les requêtes passent par le client en ligne de commande du serveur, à travers SSH : aucun port de base n'a besoin d'être ouvert.",
-      "Pour un conteneur, Helm lit le mot de passe root dans ses variables d'environnement ; pour une instance locale, il utilise l'authentification par socket.",
+      "Pour un conteneur, Zenytt lit le mot de passe root dans ses variables d'environnement ; pour une instance locale, il utilise l'authentification par socket.",
       "Ctrl+Entrée exécute la requête ; le résultat s'exporte en CSV.",
       "Ouvre une table depuis la liste de gauche pour l'éditer : clic sur un en-tête pour trier, clic droit pour filtrer, double-clic sur une cellule pour la modifier.",
-      "L'édition en place exige une clé primaire : Helm la lit dans le schéma et montre le UPDATE exact avant de l'exécuter. Sans clé primaire, le tableau reste en lecture seule.",
+      "L'édition en place exige une clé primaire : Zenytt la lit dans le schéma et montre le UPDATE exact avant de l'exécuter. Sans clé primaire, le tableau reste en lecture seule.",
       "Le bouton SQLite cherche les fichiers .db / .sqlite dans /opt, /srv, /var/lib, /var/www, /home, /root et /data.",
       "Le bouton Redis ouvre l'explorateur de clés : parcours par pages avec SCAN, lecture de tous les types, durée de vie et console.",
       "Une instance injoignable reste listée : l'erreur apparaît à la première requête, avec sa cause.",
@@ -342,11 +342,11 @@ export const GUIDES: Guide[] = [
       { text: "Installer nginx", command: "apt-get install -y nginx", sudo: true },
       { text: "Installer certbot", command: "apt-get install -y certbot python3-certbot-nginx", sudo: true },
       { text: "Tester la configuration à la main", command: "nginx -t", sudo: true },
-      { text: "Voir les sauvegardes prises par Helm", command: "ls -1 /var/backups/helm/nginx", sudo: true },
+      { text: "Voir les sauvegardes prises par Zenytt", command: "ls -1 /var/backups/zenytt/nginx", sudo: true },
     ],
     troubleshooting: [
       { symptom: "Le certificat ne se renouvelle pas", answer: "Le renouvellement passe par le port 80, qui doit rester joignable. Essai à blanc :", command: "certbot renew --dry-run", sudo: true },
-      { symptom: "Le domaine ne pointe pas encore sur le serveur", answer: "Helm affiche l'IP résolue à côté du site ; tant qu'elle ne correspond pas, le certificat échouera." },
+      { symptom: "Le domaine ne pointe pas encore sur le serveur", answer: "Zenytt affiche l'IP résolue à côté du site ; tant qu'elle ne correspond pas, le certificat échouera." },
     ],
   },
   {
@@ -367,26 +367,26 @@ export const GUIDES: Guide[] = [
   },
   {
     id: "agent",
-    title: "Agent helmd : historique et alertes hors ligne",
+    title: "Agent zenyttd : historique et alertes hors ligne",
     topic: "exploitation",
     section: "monitoring",
-    summary: "Sans agent, Helm montre l'état en direct quand il est ouvert. Avec l'agent, le serveur garde 30 jours d'historique et envoie les alertes même PC éteint.",
-    automatic: "Installation en un clic : Supervision → Alertes et agent → Installer. Helm envoie le binaire par SSH et crée le service.",
+    summary: "Sans agent, Zenytt montre l'état en direct quand il est ouvert. Avec l'agent, le serveur garde 30 jours d'historique et envoie les alertes même PC éteint.",
+    automatic: "Installation en un clic : Supervision → Alertes et agent → Installer. Zenytt envoie le binaire par SSH et crée le service.",
     how: [
-      "L'agent n'ouvre aucun port : il écoute sur un socket unix et Helm l'interroge à travers SSH.",
+      "L'agent n'ouvre aucun port : il écoute sur un socket unix et Zenytt l'interroge à travers SSH.",
       "Il tourne sous un utilisateur dédié, avec un service systemd durci et 64 Mo de mémoire au maximum.",
       "Les alertes (seuils, site injoignable, sauvegarde en échec) partent vers Discord, ntfy ou un webhook.",
-      "Les seuils et destinations se règlent depuis Helm ; le fichier est rechargé à chaud.",
+      "Les seuils et destinations se règlent depuis Zenytt ; le fichier est rechargé à chaud.",
     ],
     requirements: ["systemd", "un mot de passe sudo dans le profil", "Linux x86_64 ou arm64"],
     steps: [
-      { text: "Vérifier le service", command: "systemctl status helmd --no-pager" },
-      { text: "Voir ses journaux", command: "journalctl -u helmd -n 50 --no-pager", sudo: true },
-      { text: "Lire sa configuration", command: "cat /etc/helmd/config.json", sudo: true },
-      { text: "Redémarrer après une modification manuelle", command: "systemctl restart helmd", sudo: true },
+      { text: "Vérifier le service", command: "systemctl status zenyttd --no-pager" },
+      { text: "Voir ses journaux", command: "journalctl -u zenyttd -n 50 --no-pager", sudo: true },
+      { text: "Lire sa configuration", command: "cat /etc/zenyttd/config.json", sudo: true },
+      { text: "Redémarrer après une modification manuelle", command: "systemctl restart zenyttd", sudo: true },
     ],
     troubleshooting: [
-      { symptom: "Le service ne démarre pas", answer: "Regarder la raison exacte dans le journal :", command: "journalctl -u helmd -n 30 --no-pager", sudo: true },
+      { symptom: "Le service ne démarre pas", answer: "Regarder la raison exacte dans le journal :", command: "journalctl -u zenyttd -n 30 --no-pager", sudo: true },
       { symptom: "Aucune alerte ne part", answer: "Vérifier la destination (webhook, ntfy, Discord) depuis Supervision → Alertes et agent : un bouton envoie un message de test." },
     ],
   },
@@ -396,7 +396,7 @@ export const GUIDES: Guide[] = [
     topic: "exploitation",
     section: "backups",
     summary: "Sauvegardes chiffrées et dédupliquées : dumps de bases cohérents, volumes Docker, dossiers ; vers le serveur ou un stockage S3.",
-    automatic: "Helm installe restic et prépare /etc/helm-backup à la première configuration, puis pose la planification.",
+    automatic: "Zenytt installe restic et prépare /etc/zenytt-backup à la première configuration, puis pose la planification.",
     how: [
       "Les bases sont exportées avant la copie, sans arrêter le service, pour obtenir un dump cohérent.",
       "La déduplication fait qu'une sauvegarde quotidienne ne coûte que ce qui a changé.",
@@ -407,14 +407,14 @@ export const GUIDES: Guide[] = [
     steps: [
       { text: "Vérifier restic", command: "restic version" },
       ...install("restic").slice(0, 2),
-      { text: "Lancer la sauvegarde à la main (script créé par Helm)", command: "/etc/helm-backup/run.sh", sudo: true },
-      { text: "Vérifier la planification", command: "systemctl list-timers 'helm-backup*' --no-pager" },
+      { text: "Lancer la sauvegarde à la main (script créé par Zenytt)", command: "/etc/zenytt-backup/run.sh", sudo: true },
+      { text: "Vérifier la planification", command: "systemctl list-timers 'zenytt-backup*' --no-pager" },
     ],
     troubleshooting: [
       { symptom: "La sauvegarde échoue depuis un changement de mot de passe de base", answer: "Le script utilise les identifiants enregistrés à la configuration : refaire Sauvegardes → ⋯ → Modifier la configuration." },
     ],
     notes: [
-      "La phrase de passe du dépôt est indispensable pour restaurer : Helm la garde dans le coffre-fort, garde-la aussi ailleurs.",
+      "La phrase de passe du dépôt est indispensable pour restaurer : Zenytt la garde dans le coffre-fort, garde-la aussi ailleurs.",
       "Une sauvegarde sur le même disque que les données ne protège pas d'une panne de disque : prévoir S3 ou un autre serveur.",
     ],
   },
@@ -428,7 +428,7 @@ export const GUIDES: Guide[] = [
     summary: "État de SSH, du pare-feu, de fail2ban, des mises à jour, des ports exposés et des comptes privilégiés, avec des corrections guidées.",
     how: [
       "L'audit est en lecture seule : rien n'est modifié sans ton accord explicite.",
-      "Avant de toucher à SSH ou au pare-feu, Helm garde une connexion de contrôle ouverte ; si la modification te coupe l'accès, elle est annulée automatiquement.",
+      "Avant de toucher à SSH ou au pare-feu, Zenytt garde une connexion de contrôle ouverte ; si la modification te coupe l'accès, elle est annulée automatiquement.",
       "Une alerte qui ne te concerne pas peut être ignorée : elle passe dans les archivées, avec la raison.",
       "Le pare-feu et fail2ban se pilotent depuis la même page : règles, prisons, bannissements en cours.",
     ],
@@ -450,16 +450,16 @@ export const GUIDES: Guide[] = [
     section: "tunnels",
     summary: "Un port du serveur devient accessible sur ton PC en 127.0.0.1, à travers la connexion SSH. Le service reste invisible depuis Internet.",
     how: [
-      "Helm n'écoute que sur 127.0.0.1 : le tunnel n'est pas partagé avec ton réseau local.",
+      "Zenytt n'écoute que sur 127.0.0.1 : le tunnel n'est pas partagé avec ton réseau local.",
       "La connexion SSH s'ouvre à la première utilisation du port.",
-      "Un tunnel peut démarrer automatiquement au lancement de Helm.",
+      "Un tunnel peut démarrer automatiquement au lancement de Zenytt.",
     ],
     steps: [
       { text: "Équivalent en ligne de commande, pour comparaison", command: "ssh -N -L 13306:127.0.0.1:3306 utilisateur@serveur" },
       { text: "Voir ce qui écoute côté serveur", command: "ss -lntp", sudo: true },
     ],
     troubleshooting: [
-      { symptom: "« Address already in use » à l'ouverture", answer: "Le port local est déjà pris : en choisir un autre (Helm en propose un libre)." },
+      { symptom: "« Address already in use » à l'ouverture", answer: "Le port local est déjà pris : en choisir un autre (Zenytt en propose un libre)." },
     ],
   },
   {
@@ -467,16 +467,16 @@ export const GUIDES: Guide[] = [
     title: "Bureau à distance (RDP, VNC, SPICE)",
     topic: "securite",
     section: "servers",
-    summary: "Ouvrir la session graphique d'une machine Windows (RDP), d'un bureau Linux, d'un Raspberry Pi ou d'un Mac (VNC) dans Helm, et la console d'une VM QEMU/KVM (SPICE).",
+    summary: "Ouvrir la session graphique d'une machine Windows (RDP), d'un bureau Linux, d'un Raspberry Pi ou d'un Mac (VNC) dans Zenytt, et la console d'une VM QEMU/KVM (SPICE).",
     how: [
-      "La session s'affiche dans Helm : le client RDP est intégré à l'app, rien n'est installé sur la machine distante.",
-      "La connexion part toujours de ton PC. Si la machine n'est joignable que depuis un de tes serveurs, Helm monte un tunnel SSH le temps de la session : le port 3389 n'est jamais exposé sur Internet.",
+      "La session s'affiche dans Zenytt : le client RDP est intégré à l'app, rien n'est installé sur la machine distante.",
+      "La connexion part toujours de ton PC. Si la machine n'est joignable que depuis un de tes serveurs, Zenytt monte un tunnel SSH le temps de la session : le port 3389 n'est jamais exposé sur Internet.",
       "La barre de session donne Ctrl+Alt+Suppr, le collage vers la machine, la taille d'affichage (ajustée ou réelle), le plein écran (Échap pour sortir) et la déconnexion.",
       "Le presse-papiers suit dans les deux sens, et la machine s'adapte à la taille de la fenêtre.",
       "Le clavier part en mode « caractères », qui convient à un clavier français face à une machine en disposition différente ; le bouton clavier bascule en touches brutes si un logiciel distant l'exige.",
       "Le client du système (mstsc, FreeRDP) reste disponible sur la fiche, à côté de « Se connecter ».",
-      "Fichiers en RDP : copie un fichier sur la machine, Helm propose « Enregistrer sur le PC » ; dans l'autre sens, le bouton d'envoi (ou un glisser-déposer sur la session) prépare les fichiers, qu'il reste à coller (Ctrl+V) dans l'explorateur de la machine. Le texte et les images passent directement par le presse-papiers.",
-      "VNC : choisis le protocole « VNC » dans la fiche. La session s'ouvre dans Helm (noVNC), avec un réglage de qualité d'image — basse latence pour une connexion lente, qualité maximale sur le réseau local — la lecture seule, le presse-papiers et Ctrl+Alt+Suppr.",
+      "Fichiers en RDP : copie un fichier sur la machine, Zenytt propose « Enregistrer sur le PC » ; dans l'autre sens, le bouton d'envoi (ou un glisser-déposer sur la session) prépare les fichiers, qu'il reste à coller (Ctrl+V) dans l'explorateur de la machine. Le texte et les images passent directement par le presse-papiers.",
+      "VNC : choisis le protocole « VNC » dans la fiche. La session s'ouvre dans Zenytt (noVNC), avec un réglage de qualité d'image — basse latence pour une connexion lente, qualité maximale sur le réseau local — la lecture seule, le presse-papiers et Ctrl+Alt+Suppr.",
       "SPICE : la console d'une VM QEMU/KVM s'ouvre dans remote-viewer (virt-viewer), à travers le tunnel SSH le cas échéant. Le fichier de connexion est effacé par remote-viewer dès sa lecture : le mot de passe ne reste pas sur le disque.",
     ],
     requirements: [
@@ -513,7 +513,7 @@ export const GUIDES: Guide[] = [
       },
       {
         symptom: "Image rayée ou couleurs délavées sur un Linux avec xrdp",
-        answer: "xrdp est limité à 16 bits par couleur : ce réglage se corrige côté serveur, pas dans le client. L'audit de sécurité de Helm le détecte et propose « Passer xrdp en couleurs 32 bits » ; à la main :",
+        answer: "xrdp est limité à 16 bits par couleur : ce réglage se corrige côté serveur, pas dans le client. L'audit de sécurité de Zenytt le détecte et propose « Passer xrdp en couleurs 32 bits » ; à la main :",
         command: "sed -i -E 's/^[[:space:]]*max_bpp[[:space:]]*=.*/max_bpp=32/' /etc/xrdp/xrdp.ini && systemctl restart xrdp",
       },
       {
@@ -527,7 +527,7 @@ export const GUIDES: Guide[] = [
     ],
     notes: [
       "N'expose jamais le port 3389 sur Internet : passe par un tunnel (choisis un serveur dans la fiche du bureau).",
-      "C'est encore plus vrai en VNC et en SPICE : sans TLS, l'écran et souvent le mot de passe circulent en clair. Helm l'indique par « non chiffré » sur la fiche et dans la session tant que la connexion est directe.",
+      "C'est encore plus vrai en VNC et en SPICE : sans TLS, l'écran et souvent le mot de passe circulent en clair. Zenytt l'indique par « non chiffré » sur la fiche et dans la session tant que la connexion est directe.",
       "Le mot de passe reste dans le coffre-fort du système et ne sert qu'à la session en cours.",
       "Le client intégré est récent : en cas de doute sur un comportement, « Client du système » ouvre la même machine avec mstsc ou FreeRDP et permet de comparer. Signale la différence, avec le message d'erreur affiché.",
       "Une seule session à la fois : ouvrir un autre bureau ferme la précédente, avec son tunnel.",
@@ -539,7 +539,7 @@ export const GUIDES: Guide[] = [
     id: "share",
     title: "Partager un terminal ou une configuration",
     topic: "partage",
-    summary: "Montrer un terminal à quelqu'un, en lecture seule ou avec le contrôle, et transmettre un profil de serveur à une autre installation de Helm.",
+    summary: "Montrer un terminal à quelqu'un, en lecture seule ou avec le contrôle, et transmettre un profil de serveur à une autre installation de Zenytt.",
     how: [
       "Le contenu est chiffré côté client : le relais ne voit rien, la clé n'est que dans l'invitation.",
       "« Avec le contrôle » donne à la personne tes droits sur le serveur : à réserver à quelqu'un de confiance.",
@@ -549,8 +549,8 @@ export const GUIDES: Guide[] = [
     steps: [
       { text: "Sur le VPS : lancer le relais depuis le dossier sync-server du dépôt", command: "docker compose up -d" },
       { text: "Le publier derrière nginx avec HTTPS (le dépôt fournit nginx.conf.example, qui gère la montée en WebSocket)" },
-      { text: "Dans Helm : Réglages → Synchronisation, renseigner l'adresse et la phrase de passe" },
-      { text: "Terminal → Partage → Partager ce terminal : transmettre l'invitation « helm-term:… ». Le destinataire la colle dans Terminal → Partage → Rejoindre un terminal partagé." },
+      { text: "Dans Zenytt : Réglages → Synchronisation, renseigner l'adresse et la phrase de passe" },
+      { text: "Terminal → Partage → Partager ce terminal : transmettre l'invitation « zenytt-term:… ». Le destinataire la colle dans Terminal → Partage → Rejoindre un terminal partagé." },
     ],
   },
   {
@@ -596,7 +596,7 @@ export const GUIDES: Guide[] = [
     section: "settings",
     summary: "Préférences de l'app, verrouillage, synchronisation, assistant IA, accès en lecture pour les assistants, et journal de toutes les actions.",
     how: [
-      "Le journal d'actions garde ce que Helm a fait sur chaque serveur, y compris via l'assistant et le MCP.",
+      "Le journal d'actions garde ce que Zenytt a fait sur chaque serveur, y compris via l'assistant et le MCP.",
       "Le verrouillage demande un mot de passe après une durée d'inactivité, ou à la demande (Ctrl+Maj+L).",
       "L'accès IA s'autorise serveur par serveur : un serveur non coché est invisible pour l'assistant et le MCP.",
       "Les raccourcis clavier sont tous modifiables.",

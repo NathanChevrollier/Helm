@@ -157,8 +157,8 @@ export default function ServerForm({ server, folders, onClose, onSaved }: { serv
             )}
           </Field>
           <Field label="Dossier (optionnel)" hint="Range le serveur dans la barre latérale et la liste.">
-            <Input list="helm-server-folders" value={p.group ?? ""} placeholder="Production, perso…" onChange={(e) => set("group", e.target.value || null)} />
-            <datalist id="helm-server-folders">
+            <Input list="zenytt-server-folders" value={p.group ?? ""} placeholder="Production, perso…" onChange={(e) => set("group", e.target.value || null)} />
+            <datalist id="zenytt-server-folders">
               {folders.map((f) => (
                 <option key={f} value={f} />
               ))}
@@ -207,7 +207,7 @@ export default function ServerForm({ server, folders, onClose, onSaved }: { serv
                 </>
               )}
               {p.authKind === "agent" && (
-                <p className="rounded-lg border border-border bg-subtle p-3 text-xs text-muted">Helm utilisera les clés chargées dans l'agent OpenSSH du système ou dans Pageant (PuTTY).</p>
+                <p className="rounded-lg border border-border bg-subtle p-3 text-xs text-muted">Zenytt utilisera les clés chargées dans l'agent OpenSSH du système ou dans Pageant (PuTTY).</p>
               )}
               <div className="flex flex-col gap-2">
                 <Checkbox

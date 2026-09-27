@@ -1,6 +1,6 @@
-// Sessions de bureau à distance ouvertes dans Helm (clients RDP et VNC intégrés).
+// Sessions de bureau à distance ouvertes dans Zenytt (clients RDP et VNC intégrés).
 //
-// La connexion part toujours du PC : directement, ou à travers un tunnel SSH monté par Helm quand
+// La connexion part toujours du PC : directement, ou à travers un tunnel SSH monté par Zenytt quand
 // la machine n'est joignable que depuis un serveur. Le pont local (côté Rust) parle le protocole
 // de passerelle attendu par le client web ; l'interface ne connaît que l'adresse et le jeton.
 import { create } from "zustand";

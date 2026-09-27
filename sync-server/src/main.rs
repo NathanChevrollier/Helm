@@ -1,4 +1,4 @@
-//! helm-sync : garde, pour chaque jeton, la dernière version des réglages de Helm.
+//! zenytt-sync : garde, pour chaque jeton, la dernière version des réglages de Zenytt.
 //!
 //! Le serveur ne voit jamais les réglages en clair : il reçoit une enveloppe chiffrée par l'app
 //! (AES-256-GCM, clé tirée de la phrase de passe de synchronisation, inconnue du serveur) et
@@ -6,10 +6,10 @@
 //! s'il y en a eu une autre entre-temps, il est refusé (409) et l'app fusionne avant de renvoyer.
 //!
 //! Configuration (variables d'environnement) :
-//! - `HELM_SYNC_TOKENS` : jetons autorisés, séparés par des virgules (24 caractères minimum),
+//! - `ZENYTT_SYNC_TOKENS` : jetons autorisés, séparés par des virgules (24 caractères minimum),
 //!   un espace de stockage distinct par jeton ;
-//! - `HELM_SYNC_DATA` : dossier des données (défaut `/data`) ;
-//! - `HELM_SYNC_ADDR` : adresse d'écoute (défaut `0.0.0.0:8080`).
+//! - `ZENYTT_SYNC_DATA` : dossier des données (défaut `/data`) ;
+//! - `ZENYTT_SYNC_ADDR` : adresse d'écoute (défaut `0.0.0.0:8080`).
 
 mod relay;
 
@@ -134,11 +134,11 @@ fn read_stored(path: &Path) -> Result<Option<Stored>, String> {
     }
 }
 
-/// Refus des contenus en clair : seule une enveloppe d'export Helm chiffrée est acceptée.
+/// Refus des contenus en clair : seule une enveloppe d'export Zenytt chiffrée est acceptée.
 fn is_encrypted_envelope(data: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(data)
         .ok()
-        .is_some_and(|v| v["format"] == "helm-export" && v["encrypted"] == true && v["data"].is_string())
+        .is_some_and(|v| v["format"] == "zenytt-export" && v["encrypted"] == true && v["data"].is_string())
 }
 
 pub async fn unauthorized() -> Response {
@@ -169,7 +169,7 @@ async fn put_state(State(app): State<Arc<App>>, headers: HeaderMap, Json(push): 
         return error(StatusCode::TOO_MANY_REQUESTS, "trop d'envois : réessaie dans une minute");
     }
     if !is_encrypted_envelope(&push.data) {
-        return error(StatusCode::UNPROCESSABLE_ENTITY, "contenu refusé : seules les données chiffrées par Helm sont acceptées");
+        return error(StatusCode::UNPROCESSABLE_ENTITY, "contenu refusé : seules les données chiffrées par Zenytt sont acceptées");
     }
     let _guard = app.write.lock().await;
     let current = match read_stored(&path) {
@@ -205,7 +205,7 @@ fn router(app: Arc<App>) -> Router {
 fn parse_tokens(raw: &str) -> Result<HashSet<String>, String> {
     let tokens: Vec<&str> = raw.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
     if tokens.is_empty() {
-        return Err("HELM_SYNC_TOKENS est vide : définis au moins un jeton (openssl rand -hex 32)".into());
+        return Err("ZENYTT_SYNC_TOKENS est vide : définis au moins un jeton (openssl rand -hex 32)".into());
     }
     if let Some(short) = tokens.iter().find(|t| t.len() < MIN_TOKEN_LEN) {
         return Err(format!(
@@ -230,22 +230,26 @@ async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
+/// Variable d'environnement, ou son ancien nom (serveurs installés avant le renommage de l'app).
+fn env(name: &str) -> Option<String> {
+    std::env::var(name).ok().or_else(|| std::env::var(name.replacen("ZENYTT", "HELM", 1)).ok())
+}
+
 #[tokio::main]
 async fn main() {
-    let tokens = match parse_tokens(&std::env::var("HELM_SYNC_TOKENS").unwrap_or_default()) {
+    let tokens = match parse_tokens(&env("ZENYTT_SYNC_TOKENS").unwrap_or_default()) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("helm-sync : {e}");
+            eprintln!("zenytt-sync : {e}");
             std::process::exit(2);
         }
     };
-    let dir = PathBuf::from(std::env::var("HELM_SYNC_DATA").unwrap_or_else(|_| "/data".into()));
+    let dir = PathBuf::from(env("ZENYTT_SYNC_DATA").unwrap_or_else(|| "/data".into()));
     if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("helm-sync : dossier {} : {e}", dir.display());
+        eprintln!("zenytt-sync : dossier {} : {e}", dir.display());
         std::process::exit(2);
     }
-    let addr: SocketAddr =
-        std::env::var("HELM_SYNC_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()).parse().expect("HELM_SYNC_ADDR invalide");
+    let addr: SocketAddr = env("ZENYTT_SYNC_ADDR").unwrap_or_else(|| "0.0.0.0:8080".into()).parse().expect("ZENYTT_SYNC_ADDR invalide");
     let count = tokens.len();
     let app = Arc::new(App::new(dir, tokens));
     // Ménage régulier des sessions de partage expirées.
@@ -257,7 +261,7 @@ async fn main() {
         }
     });
     let listener = tokio::net::TcpListener::bind(addr).await.expect("écoute impossible");
-    println!("helm-sync {} : écoute sur {addr}, {count} jeton(s)", env!("CARGO_PKG_VERSION"));
+    println!("zenytt-sync {} : écoute sur {addr}, {count} jeton(s)", env!("CARGO_PKG_VERSION"));
     axum::serve(listener, router(app)).with_graceful_shutdown(shutdown()).await.expect("serveur arrêté");
 }
 
@@ -297,7 +301,7 @@ mod tests {
     }
 
     fn envelope(v: &str) -> String {
-        json!({ "baseRev": 0, "data": json!({ "format": "helm-export", "version": 1, "encrypted": true, "data": v }).to_string() })
+        json!({ "baseRev": 0, "data": json!({ "format": "zenytt-export", "version": 1, "encrypted": true, "data": v }).to_string() })
             .to_string()
     }
 
@@ -314,7 +318,7 @@ mod tests {
         assert_eq!(status, 200);
         assert!(body.contains("\\\"a\\\""));
         // Contenu en clair refusé.
-        let plain = json!({ "baseRev": 1, "data": "{\"format\":\"helm-export\",\"encrypted\":false,\"data\":{}}" }).to_string();
+        let plain = json!({ "baseRev": 1, "data": "{\"format\":\"zenytt-export\",\"encrypted\":false,\"data\":{}}" }).to_string();
         assert_eq!(request(&addr, "PUT", TOKEN, Some(&plain)).await.0, 422);
     }
 

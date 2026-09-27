@@ -1,12 +1,12 @@
-//! Sessions persistantes : chaque onglet de terminal vit dans une session tmux `helm-…`,
+//! Sessions persistantes : chaque onglet de terminal vit dans une session tmux `zenytt-…`,
 //! qui survit aux coupures réseau et à la fermeture de l'app.
 
 use serde::Serialize;
 
 use crate::{Connection, Error, Result};
 
-/// Préfixe des sessions créées par Helm (les autres sessions tmux de l'utilisateur ne sont pas touchées).
-pub const PREFIX: &str = "helm-";
+/// Préfixe des sessions créées par Zenytt (les autres sessions tmux de l'utilisateur ne sont pas touchées).
+pub const PREFIX: &str = "zenytt-";
 
 pub fn valid_session(name: &str) -> bool {
     name.starts_with(PREFIX) && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -16,7 +16,7 @@ pub fn valid_session(name: &str) -> bool {
 /// uniquement : le `.tmux.conf` de l'utilisateur n'est jamais modifié.
 ///
 /// La souris reste volontairement désactivée côté tmux : sinon c'est lui qui reçoit les clics et
-/// la molette, et l'on perd la sélection à la souris, le copier et le défilement de Helm.
+/// la molette, et l'on perd la sélection à la souris, le copier et le défilement de Zenytt.
 pub fn attach_command(name: &str) -> Result<String> {
     if !valid_session(name) {
         return Err(Error::Other(format!("nom de session invalide : {name}")));
@@ -162,16 +162,16 @@ mod tests {
 
     #[test]
     fn names() {
-        assert!(valid_session("helm-3f2a9c"));
+        assert!(valid_session("zenytt-3f2a9c"));
         assert!(!valid_session("work"));
-        assert!(!valid_session("helm-x; rm -rf /"));
-        assert!(attach_command("helm-a").unwrap().starts_with("tmux new-session -A -s helm-a "));
+        assert!(!valid_session("zenytt-x; rm -rf /"));
+        assert!(attach_command("zenytt-a").unwrap().starts_with("tmux new-session -A -s zenytt-a "));
         assert!(attach_command("perso").is_err());
     }
 
     #[test]
     fn list() {
-        let s = parse_list("helm-abc|1|1790000000|2|htop\nperso|0|1|1|bash\nhelm-def|0|1790000100|1|bash\n");
+        let s = parse_list("zenytt-abc|1|1790000000|2|htop\nperso|0|1|1|bash\nzenytt-def|0|1790000100|1|bash\n");
         assert_eq!(s.len(), 2);
         assert!(s[0].attached);
         assert_eq!(s[0].command, "htop");
@@ -186,7 +186,7 @@ mod tests {
         assert!(unraid.starts_with(UNSUPPORTED) && unraid.contains("Unraid"));
         assert!(install_plan("").unwrap_err().starts_with(UNSUPPORTED));
         assert!(install_plan("pm:inconnu\n").is_err());
-        assert!(pane_path_command("helm-a").unwrap().contains("pane_current_path"));
+        assert!(pane_path_command("zenytt-a").unwrap().contains("pane_current_path"));
         assert!(pane_path_command("x; reboot").is_err());
     }
 }

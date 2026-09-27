@@ -1,24 +1,24 @@
-//! Installation et pilotage de l'agent `helmd` sur le serveur, via SSH.
+//! Installation et pilotage de l'agent `zenyttd` sur le serveur, via SSH.
 
-use helm_protocol::{AgentConfig, AgentStatus, HistoryPoint, Request, Response, CONFIG_PATH};
 use serde::Serialize;
+use zenytt_protocol::{AgentConfig, AgentStatus, HistoryPoint, Request, Response, CONFIG_PATH};
 
 use crate::ssh::shell_quote;
 use crate::{Connection, Error, Result};
 
 /// Unité systemd durcie : utilisateur dédié, système de fichiers en lecture seule sauf l'historique.
 pub const SYSTEMD_UNIT: &str = r#"[Unit]
-Description=Helm monitoring agent
+Description=Zenytt monitoring agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/helmd run
-User=helmd
-Group=helmd
-RuntimeDirectory=helmd
+ExecStart=/usr/local/bin/zenyttd run
+User=zenyttd
+Group=zenyttd
+RuntimeDirectory=zenyttd
 RuntimeDirectoryMode=0755
-StateDirectory=helmd
+StateDirectory=zenyttd
 Restart=always
 RestartSec=5
 NoNewPrivileges=yes
@@ -42,42 +42,42 @@ WantedBy=multi-user.target
 pub const INSTALL_SCRIPT: &str = r#"set -e
 BIN="$1"
 [ "$(sha256sum "$BIN" | cut -d' ' -f1)" = "$2" ] || { echo "binaire modifié depuis l'envoi : installation annulée" >&2; rm -rf "$(dirname "$BIN")"; exit 1; }
-install -m 0755 "$BIN" /usr/local/bin/helmd
+install -m 0755 "$BIN" /usr/local/bin/zenyttd
 rm -rf "$(dirname "$BIN")"
-id helmd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin helmd 2>/dev/null || adduser -S -H -s /sbin/nologin helmd
-install -d -m 0755 /etc/helmd
-[ -f /etc/helmd/config.json ] || /usr/local/bin/helmd default-config > /etc/helmd/config.json
-chown root:helmd /etc/helmd/config.json
-chmod 0640 /etc/helmd/config.json
-install -d -o helmd -g helmd -m 0750 /var/lib/helmd
+id zenyttd >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin zenyttd 2>/dev/null || adduser -S -H -s /sbin/nologin zenyttd
+install -d -m 0755 /etc/zenyttd
+[ -f /etc/zenyttd/config.json ] || /usr/local/bin/zenyttd default-config > /etc/zenyttd/config.json
+chown root:zenyttd /etc/zenyttd/config.json
+chmod 0640 /etc/zenyttd/config.json
+install -d -o zenyttd -g zenyttd -m 0750 /var/lib/zenyttd
 if [ -d /run/systemd/system ]; then
-  cat > /etc/systemd/system/helmd.service
+  cat > /etc/systemd/system/zenyttd.service
   systemctl daemon-reload
-  systemctl enable helmd >/dev/null 2>&1
-  systemctl restart helmd
+  systemctl enable zenyttd >/dev/null 2>&1
+  systemctl restart zenyttd
   echo "MODE=systemd"
 else
   cat > /dev/null
-  install -d -o helmd -g helmd -m 0755 /run/helmd
-  pkill -x helmd 2>/dev/null || true
-  su -s /bin/sh helmd -c 'nohup /usr/local/bin/helmd run >/var/lib/helmd/helmd.log 2>&1 &'
+  install -d -o zenyttd -g zenyttd -m 0755 /run/zenyttd
+  pkill -x zenyttd 2>/dev/null || true
+  su -s /bin/sh zenyttd -c 'nohup /usr/local/bin/zenyttd run >/var/lib/zenyttd/zenyttd.log 2>&1 &'
   echo "MODE=nohup"
 fi
 sleep 1
-/usr/local/bin/helmd version
+/usr/local/bin/zenyttd version
 "#;
 
 pub const UNINSTALL_SCRIPT: &str = r#"
 if [ -d /run/systemd/system ]; then
-  systemctl disable --now helmd 2>/dev/null || true
-  rm -f /etc/systemd/system/helmd.service
+  systemctl disable --now zenyttd 2>/dev/null || true
+  rm -f /etc/systemd/system/zenyttd.service
   systemctl daemon-reload
 else
-  pkill -x helmd 2>/dev/null || true
+  pkill -x zenyttd 2>/dev/null || true
 fi
-rm -f /usr/local/bin/helmd
-rm -rf /var/lib/helmd /etc/helmd /run/helmd
-userdel helmd 2>/dev/null || deluser helmd 2>/dev/null || true
+rm -f /usr/local/bin/zenyttd
+rm -rf /var/lib/zenyttd /etc/zenyttd /run/zenyttd
+userdel zenyttd 2>/dev/null || deluser zenyttd 2>/dev/null || true
 echo OK
 "#;
 
@@ -100,7 +100,7 @@ pub struct AgentInfo {
 }
 
 fn query_command(req: &Request) -> String {
-    format!("helmd query {}", shell_quote(&serde_json::to_string(req).unwrap_or_default()))
+    format!("zenyttd query {}", shell_quote(&serde_json::to_string(req).unwrap_or_default()))
 }
 
 async fn query(conn: &Connection, req: &Request) -> Result<Response> {
@@ -134,7 +134,7 @@ pub async fn info_privileged(conn: &Connection, sudo: Option<&str>) -> Result<Ag
 }
 
 async fn info_with(conn: &Connection, root: Option<Option<&str>>) -> Result<AgentInfo> {
-    let installed = conn.exec("test -x /usr/local/bin/helmd", None).await?.success();
+    let installed = conn.exec("test -x /usr/local/bin/zenyttd", None).await?.success();
     if !installed {
         return Ok(AgentInfo { installed, running: false, status: None, error: None });
     }
@@ -170,10 +170,10 @@ pub async fn save_config(conn: &Connection, cfg: &AgentConfig, sudo: Option<&str
     // Une URL affichée masquée (lecture sans sudo) conserve sa valeur actuelle.
     let mut cfg = cfg.clone();
     let n = &mut cfg.notifiers;
-    if [&n.discord_webhook, &n.ntfy_url, &n.webhook_url].iter().any(|v| v.as_deref() == Some(helm_protocol::REDACTED)) {
+    if [&n.discord_webhook, &n.ntfy_url, &n.webhook_url].iter().any(|v| v.as_deref() == Some(zenytt_protocol::REDACTED)) {
         let current: AgentConfig = serde_json::from_str(&conn.read_file_sudo(CONFIG_PATH, sudo).await?).unwrap_or_default();
         let keep = |v: &mut Option<String>, old: &Option<String>| {
-            if v.as_deref() == Some(helm_protocol::REDACTED) {
+            if v.as_deref() == Some(zenytt_protocol::REDACTED) {
                 v.clone_from(old);
             }
         };
@@ -197,7 +197,7 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
     let (os, arch) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
     if os != "Linux" {
         return Err(Error::Other(format!(
-            "l'agent helmd ne fonctionne que sous Linux (ce serveur : {os}). Le monitoring direct reste disponible."
+            "l'agent zenyttd ne fonctionne que sous Linux (ce serveur : {os}). Le monitoring direct reste disponible."
         )));
     }
     let target = target_for_arch(arch).ok_or_else(|| {
@@ -206,11 +206,11 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
         ))
     })?;
     let bytes =
-        binary_for(target).filter(|b| !b.is_empty()).ok_or_else(|| Error::Other(format!("binaire helmd introuvable pour {target}")))?;
+        binary_for(target).filter(|b| !b.is_empty()).ok_or_else(|| Error::Other(format!("binaire zenyttd introuvable pour {target}")))?;
     let sha256: String = ring::digest::digest(&ring::digest::SHA256, bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect();
     let remote = upload_binary(conn, bytes).await?;
     // Le script lit l'unité systemd sur stdin.
-    let cmd = format!("sh -c {} helmd-install {} {sha256}", shell_quote(INSTALL_SCRIPT), shell_quote(&remote));
+    let cmd = format!("sh -c {} zenyttd-install {} {sha256}", shell_quote(INSTALL_SCRIPT), shell_quote(&remote));
     let out = conn.exec_sudo(&cmd, sudo, Some(SYSTEMD_UNIT.as_bytes())).await?.into_result()?;
     Ok(out.stdout)
 }
@@ -218,12 +218,12 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
 /// Envoie le binaire dans un dossier temporaire privé (0700, nom imprévisible) : aucun autre
 /// compte du serveur ne peut le créer à l'avance ni le remplacer avant son installation.
 async fn upload_binary(conn: &Connection, bytes: &[u8]) -> Result<String> {
-    let private = conn.run("mktemp -d /tmp/helmd-upload.XXXXXXXXXX").await?.trim().to_string();
-    if !private.starts_with("/tmp/helmd-upload.") || !private[5..].chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+    let private = conn.run("mktemp -d /tmp/zenyttd-upload.XXXXXXXXXX").await?.trim().to_string();
+    if !private.starts_with("/tmp/zenyttd-upload.") || !private[5..].chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return Err(Error::Other(format!("dossier temporaire inattendu : {private}")));
     }
     let sftp = conn.sftp().await?;
-    let remote = format!("{private}/helmd");
+    let remote = format!("{private}/zenyttd");
     crate::sftp::write_bytes(&sftp, &remote, bytes).await?;
     Ok(remote)
 }
@@ -246,6 +246,6 @@ mod tests {
 
     #[test]
     fn query_is_quoted() {
-        assert_eq!(query_command(&Request::Status), r#"helmd query '{"type":"status"}'"#);
+        assert_eq!(query_command(&Request::Status), r#"zenyttd query '{"type":"status"}'"#);
     }
 }

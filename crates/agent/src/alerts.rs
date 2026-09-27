@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use helm_protocol::{ActiveAlert, AgentConfig, Metrics};
+use zenytt_protocol::{ActiveAlert, AgentConfig, Metrics};
 
 /// Transition à notifier.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,13 +30,13 @@ const SAMPLES_BEFORE_RESOLVE: u32 = 3;
 const HTTP_FAILURES_BEFORE_ALERT: u32 = 2;
 
 /// Clé stable d'une règle : deux règles sur la même métrique avec des seuils différents restent distinctes.
-fn rule_key(rule: &helm_protocol::AlertRule) -> String {
+fn rule_key(rule: &zenytt_protocol::AlertRule) -> String {
     format!("rule:{:?}:{}", rule.metric, rule.threshold).to_lowercase()
 }
 
-fn fmt_value(metric: helm_protocol::AlertMetric, v: f64) -> String {
+fn fmt_value(metric: zenytt_protocol::AlertMetric, v: f64) -> String {
     match metric {
-        helm_protocol::AlertMetric::Load => format!("{v:.2}"),
+        zenytt_protocol::AlertMetric::Load => format!("{v:.2}"),
         _ => format!("{v:.0} %"),
     }
 }
@@ -90,7 +90,7 @@ impl Evaluator {
         out
     }
 
-    /// Contrôle du résultat de la dernière sauvegarde Helm (`/var/lib/helm-backup/last.json`).
+    /// Contrôle du résultat de la dernière sauvegarde Zenytt (`/var/lib/zenytt-backup/last.json`).
     /// `last` = (réussie, fin en secondes Unix, message). `None` si les sauvegardes ne sont pas configurées.
     pub fn backup_result(&mut self, last: Option<(bool, i64, String)>, now_secs: i64, server: &str) -> Option<Transition> {
         const KEY: &str = "backup";
@@ -156,7 +156,7 @@ impl Evaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use helm_protocol::{AlertMetric, AlertRule};
+    use zenytt_protocol::{AlertMetric, AlertRule};
 
     fn cfg(for_secs: u64) -> AgentConfig {
         AgentConfig { rules: vec![AlertRule { metric: AlertMetric::Cpu, threshold: 80.0, for_secs, enabled: true }], ..Default::default() }

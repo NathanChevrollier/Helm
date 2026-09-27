@@ -1,9 +1,9 @@
 [package]
-name = "helm-sync"
+name = "zenytt-sync"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
-description = "Serveur de synchronisation des réglages de Helm (contenu chiffré de bout en bout)"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
+description = "Serveur de synchronisation des réglages de Zenytt (contenu chiffré de bout en bout)"
 
 # Projet indépendant du workspace de l'app : son image Docker se construit avec ce seul dossier.
 [workspace]

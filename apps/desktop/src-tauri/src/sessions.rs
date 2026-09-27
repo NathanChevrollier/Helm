@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use base64::Engine;
-use helm_core::russh::client::Msg;
-use helm_core::russh::{ChannelMsg, ChannelWriteHalf};
-use helm_core::russh_sftp::client::SftpSession;
-use helm_core::Connection;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tokio::sync::Mutex;
+use zenytt_core::russh::client::Msg;
+use zenytt_core::russh::{ChannelMsg, ChannelWriteHalf};
+use zenytt_core::russh_sftp::client::SftpSession;
+use zenytt_core::Connection;
 
 use crate::store::Store;
 
@@ -131,7 +131,7 @@ impl Sessions {
         };
         let conn = match result {
             Ok(c) => c,
-            Err(helm_core::Error::Auth(reason)) => {
+            Err(zenytt_core::Error::Auth(reason)) => {
                 log::warn!("{target} : authentification refusée ({reason}), reconnexions automatiques suspendues");
                 self.auth_blocked.lock().unwrap().insert(server_id.to_string(), reason.clone());
                 return Err(format!("Authentification échouée : {reason}"));
@@ -145,6 +145,7 @@ impl Sessions {
         // Nouvelle connexion : les noms d'utilisateurs ont pu changer depuis la précédente.
         self.id_names.lock().await.remove(server_id);
         self.connections.lock().await.insert(server_id.to_string(), conn.clone());
+        crate::legacy::on_connect(server_id, &conn);
         Ok(conn)
     }
 

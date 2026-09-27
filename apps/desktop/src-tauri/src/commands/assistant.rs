@@ -13,15 +13,15 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use helm_ai::{Config, Message, Reply, Stop, Tool, ToolCall, ToolResult};
-use helm_core::docker::{self, Access};
-use helm_core::{agent, nginx, security, system, Connection};
-use helm_mcp::mask::mask;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::{oneshot, Mutex};
+use zenytt_ai::{Config, Message, Reply, Stop, Tool, ToolCall, ToolResult};
+use zenytt_core::docker::{self, Access};
+use zenytt_core::{agent, nginx, security, system, Connection};
+use zenytt_mcp::mask::mask;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -104,7 +104,7 @@ pub fn ai_set(store: State<'_, Store>, settings: AiSettings, api_key: Option<Str
     if settings.config.model.trim().is_empty() {
         return Err("choisis un modèle".into());
     }
-    helm_ai::check_base_url(&settings.config.base_url)?;
+    zenytt_ai::check_base_url(&settings.config.base_url)?;
     if let Some(key) = api_key {
         secrets::set(SECRET_OWNER, "key", key.trim())?;
     }
@@ -281,7 +281,7 @@ fn tools_for(settings: &AiSettings) -> Vec<Tool> {
     if c.status {
         tools.push(Tool {
             name: "server_status".into(),
-            description: "État actuel d'un serveur : CPU, mémoire, disques, charge, réseau, uptime, et alertes de l'agent helmd.".into(),
+            description: "État actuel d'un serveur : CPU, mémoire, disques, charge, réseau, uptime, et alertes de l'agent zenyttd.".into(),
             schema: tool_schema(server.clone(), vec!["server"]),
         });
     }
@@ -369,7 +369,7 @@ fn system_prompt(settings: &AiSettings, context: &str) -> String {
         }
     };
     format!(
-        "Tu es l'assistant de Helm, un logiciel de gestion de serveurs (VPS) utilisé par une seule personne, en français.\n\
+        "Tu es l'assistant de Zenytt, un logiciel de gestion de serveurs (VPS) utilisé par une seule personne, en français.\n\
          Réponds en français, brièvement et concrètement : pas de politesses, pas de rappel de la question.\n\
          Sers-toi des outils pour constater par toi-même l'état des serveurs avant de conclure ; n'invente jamais une sortie de commande, \
          un nom de conteneur ou un chemin. Si une information manque, dis-le ou va la chercher avec un outil.\n\
@@ -396,9 +396,9 @@ struct ToolContext<'a> {
 
 impl ToolContext<'_> {
     /// Serveur autorisé pour l'IA, désigné par son nom ou son identifiant.
-    fn server(&self, arg: &Value) -> Result<helm_profiles::ServerProfile, String> {
+    fn server(&self, arg: &Value) -> Result<zenytt_profiles::ServerProfile, String> {
         let name = arg["server"].as_str().unwrap_or_default().trim().to_string();
-        let allowed: Vec<helm_profiles::ServerProfile> = self.store.read(|d| d.servers.iter().filter(|s| s.ai_access).cloned().collect());
+        let allowed: Vec<zenytt_profiles::ServerProfile> = self.store.read(|d| d.servers.iter().filter(|s| s.ai_access).cloned().collect());
         if allowed.is_empty() {
             return Err("aucun serveur n'est autorisé pour l'IA : coche « accès IA » dans Réglages → Accès IA".into());
         }
@@ -412,7 +412,7 @@ impl ToolContext<'_> {
             .ok_or_else(|| format!("serveur « {name} » inconnu ou non autorisé pour l'IA (appelle list_servers)"))
     }
 
-    async fn conn(&self, arg: &Value) -> Result<(helm_profiles::ServerProfile, Connection, Option<String>), String> {
+    async fn conn(&self, arg: &Value) -> Result<(zenytt_profiles::ServerProfile, Connection, Option<String>), String> {
         let profile = self.server(arg)?;
         let (conn, sudo) = admin(self.store, self.sessions, &profile.id).await?;
         Ok((profile, conn, sudo))
@@ -437,10 +437,10 @@ impl ToolContext<'_> {
             }
             "server_status" => {
                 let (profile, conn, sudo) = self.conn(a).await?;
-                let raw = conn.run(helm_protocol::proc::COLLECT_SCRIPT).await.map_err(err)?;
+                let raw = conn.run(zenytt_protocol::proc::COLLECT_SCRIPT).await.map_err(err)?;
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-                let sample = helm_protocol::proc::parse_collect(&raw, now);
-                let metrics = helm_protocol::compute(None, &sample);
+                let sample = zenytt_protocol::proc::parse_collect(&raw, now);
+                let metrics = zenytt_protocol::compute(None, &sample);
                 let info = agent::info_privileged(&conn, sudo.as_deref()).await.ok();
                 let alerts = info.as_ref().and_then(|i| i.status.as_ref()).map(|s| s.active_alerts.clone()).unwrap_or_default();
                 Ok(serde_json::to_string_pretty(&json!({ "serveur": profile.name, "metriques": metrics, "alertes": alerts }))
@@ -484,13 +484,13 @@ impl ToolContext<'_> {
                 let (_, conn, sudo) = self.conn(a).await?;
                 let path = a["path"].as_str().unwrap_or_default();
                 let refused = || "ce chemin n'est pas lisible par l'IA (clés, secrets et dossiers sensibles sont exclus)".to_string();
-                if !helm_mcp::readable(path) {
+                if !zenytt_mcp::readable(path) {
                     return Err(refused());
                 }
                 // Mêmes règles que le serveur MCP : un lien symbolique placé dans un dossier
                 // autorisé (`/opt/x -> /etc/shadow`) ne doit pas ouvrir l'accès à sa cible.
-                let real = helm_mcp::real_path(&conn, sudo.as_deref(), path).await?;
-                if !helm_mcp::readable(&real) {
+                let real = zenytt_mcp::real_path(&conn, sudo.as_deref(), path).await?;
+                if !zenytt_mcp::readable(&real) {
                     return Err(refused());
                 }
                 conn.read_file_sudo(&real, sudo.as_deref()).await.map_err(err)
@@ -537,7 +537,7 @@ impl ToolContext<'_> {
             }
         }
         let (conn, sudo) = admin(self.store, self.sessions, &profile.id).await?;
-        let result = helm_core::ssh::long(conn.exec_sudo(&format!("{command} 2>&1"), sudo.as_deref(), None)).await.map_err(err);
+        let result = zenytt_core::ssh::long(conn.exec_sudo(&format!("{command} 2>&1"), sudo.as_deref(), None)).await.map_err(err);
         let detail = format!("{command} ({why})");
         let out = track(self.audit, self.store, &profile.id, "ai.run_command", &detail, result)?;
         Ok(format!("code de sortie : {}\n{}", out.exit_code, out.stdout))
@@ -563,7 +563,7 @@ pub async fn ai_ask(
 ) -> Result<(), String> {
     let settings = settings_of(&store);
     let key = secrets::get(SECRET_OWNER, "key").unwrap_or_default();
-    if key.is_empty() && settings.config.provider == helm_ai::Provider::Anthropic {
+    if key.is_empty() && settings.config.provider == zenytt_ai::Provider::Anthropic {
         return Err("ajoute ta clé d'API dans Réglages → Assistant".into());
     }
     let tools = tools_for(&settings);
@@ -580,10 +580,10 @@ pub async fn ai_ask(
     let mut totals = (0u64, 0u64);
 
     for _ in 0..MAX_ROUNDS {
-        let body = helm_ai::build_request(&settings.config, &prompt, &history, &tools);
+        let body = zenytt_ai::build_request(&settings.config, &prompt, &history, &tools);
         let (config, key_owned) = (settings.config.clone(), key.clone());
         let reply: Result<Reply, String> =
-            tokio::task::spawn_blocking(move || helm_ai::send(&config, &key_owned, &body, Duration::from_secs(180)))
+            tokio::task::spawn_blocking(move || zenytt_ai::send(&config, &key_owned, &body, Duration::from_secs(180)))
                 .await
                 .map_err(|e| e.to_string())?;
         let reply = match reply {
@@ -684,7 +684,7 @@ mod tests {
             assert!(dangerous(c), "devrait demander validation : {c}");
         }
         for c in [
-            "rm /tmp/helm-test.txt",
+            "rm /tmp/zenytt-test.txt",
             "ls -la /srv",
             "systemctl status nginx",
             "docker logs --tail 50 app",

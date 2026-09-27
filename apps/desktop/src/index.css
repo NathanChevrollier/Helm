@@ -100,23 +100,23 @@ body {
   height: 8px;
 }
 
-@keyframes helm-drawer-in {
+@keyframes zenytt-drawer-in {
   from {
     transform: translateX(24px);
     opacity: 0;
   }
 }
-@keyframes helm-pop-in {
+@keyframes zenytt-pop-in {
   from {
     transform: translateY(-4px) scale(0.98);
     opacity: 0;
   }
 }
 .animate-drawer-in {
-  animation: helm-drawer-in 160ms ease-out;
+  animation: zenytt-drawer-in 160ms ease-out;
 }
 .animate-pop-in {
-  animation: helm-pop-in 120ms ease-out;
+  animation: zenytt-pop-in 120ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
   .animate-drawer-in,

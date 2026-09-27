@@ -1,9 +1,9 @@
 services:
-  helm-discord-bot:
+  zenytt-discord-bot:
     build:
       context: ../..
       dockerfile: apps/discord-bot/Dockerfile
-    container_name: helm-discord-bot
+    container_name: zenytt-discord-bot
     restart: unless-stopped
     init: true
     env_file:

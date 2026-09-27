@@ -3,20 +3,20 @@
 
 use std::collections::HashMap;
 
-use helm_core::catalog;
-use helm_core::docker::{self, Access, ComposeProject, Container, DiskUsage, Image, Stats, Volume};
-use helm_core::registry as helm_registry;
-use helm_core::ssh::shell_quote;
-use helm_core::Connection;
 use serde::Serialize;
 use tauri::State;
 use tokio::sync::Mutex;
+use zenytt_core::catalog;
+use zenytt_core::docker::{self, Access, ComposeProject, Container, DiskUsage, Image, Stats, Volume};
+use zenytt_core::registry as zenytt_registry;
+use zenytt_core::ssh::shell_quote;
+use zenytt_core::Connection;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
 use crate::store::AuditLog;
 use crate::store::{secrets, Store};
-use helm_profiles::Registry;
+use zenytt_profiles::Registry;
 
 /// Mode d'accès à Docker mémorisé par serveur.
 #[derive(Default)]
@@ -231,7 +231,7 @@ pub async fn docker_compose_create(
         if !start {
             return Ok(ComposeCreated { file, log: String::new(), started: false });
         }
-        let out = helm_core::ssh::long(docker::run(
+        let out = zenytt_core::ssh::long(docker::run(
             &c.conn,
             c.access,
             c.sudo.as_deref(),
@@ -374,9 +374,9 @@ pub async fn docker_restrict_apply(
         let s = c.sudo.as_deref();
         let plan = restrict_plan(&c.conn, s, &project, host_port).await?;
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let backup = format!("{}.helm-bak-{ts}", plan.file);
-        let candidate = format!("{}.helm-new", plan.file);
-        let dir = helm_core::sftp::parent(&plan.file);
+        let backup = format!("{}.zenytt-bak-{ts}", plan.file);
+        let candidate = format!("{}.zenytt-new", plan.file);
+        let dir = zenytt_core::sftp::parent(&plan.file);
         c.conn
             .exec_sudo(&format!("cp -a -- {} {}", shell_quote(&plan.file), shell_quote(&backup)), s, None)
             .await
@@ -428,7 +428,7 @@ pub async fn docker_restrict_apply(
     track(&audit, &store, &server_id, "docker.restrict_port", &detail, r)
 }
 
-/// Catalogue d'applications prêtes à déployer. La liste est intégrée à Helm : aucun appel réseau,
+/// Catalogue d'applications prêtes à déployer. La liste est intégrée à Zenytt : aucun appel réseau,
 /// donc aucun dépôt tiers à faire confiance, et le catalogue fonctionne hors ligne.
 #[tauri::command]
 pub fn docker_catalog() -> Vec<catalog::App> {
@@ -514,14 +514,14 @@ pub fn registry_save(store: State<'_, Store>, mut registry: Registry, secret: Op
     if registry.server.is_empty() {
         registry.server = registry.kind.default_server().to_string();
     }
-    if !helm_registry::valid_server(&registry.server) {
+    if !zenytt_registry::valid_server(&registry.server) {
         return Err(format!("adresse de registre invalide : {}", registry.server));
     }
-    if registry.kind == helm_registry::Kind::Ecr && helm_registry::ecr_region(&registry.server).is_none() {
+    if registry.kind == zenytt_registry::Kind::Ecr && zenytt_registry::ecr_region(&registry.server).is_none() {
         return Err("adresse ECR attendue : <compte>.dkr.ecr.<région>.amazonaws.com".into());
     }
     registry.username = registry.username.trim().to_string();
-    if !helm_registry::valid_word(&registry.username) {
+    if !zenytt_registry::valid_word(&registry.username) {
         return Err("nom d'utilisateur (ou identifiant de clé AWS) invalide".into());
     }
     registry.name = registry.name.trim().to_string();
@@ -560,9 +560,9 @@ pub async fn registry_sessions(
     sessions: State<'_, Sessions>,
     cache: State<'_, DockerAccess>,
     server_id: String,
-) -> Result<Vec<helm_registry::Session>, String> {
+) -> Result<Vec<zenytt_registry::Session>, String> {
     let c = ctx(&store, &sessions, &cache, &server_id).await?;
-    helm_registry::sessions(&c.conn, c.access, c.sudo.as_deref()).await.map_err(err)
+    zenytt_registry::sessions(&c.conn, c.access, c.sudo.as_deref()).await.map_err(err)
 }
 
 /// Connecte un serveur à un registre enregistré. Le secret est lu dans le keyring et transmis sur
@@ -582,7 +582,7 @@ pub async fn registry_login(
         let secret = secrets::get(&Registry::secret_owner(&registry.id), "password")
             .ok_or("aucun jeton enregistré pour ce registre : modifie-le pour en ajouter un")?;
         let c = ctx(&store, &sessions, &cache, &server_id).await?;
-        helm_registry::login(&c.conn, c.access, c.sudo.as_deref(), registry.kind, &registry.server, &registry.username, &secret)
+        zenytt_registry::login(&c.conn, c.access, c.sudo.as_deref(), registry.kind, &registry.server, &registry.username, &secret)
             .await
             .map_err(err)
     }
@@ -603,7 +603,7 @@ pub async fn registry_logout(
     let detail = server.clone();
     let r: Result<(), String> = async {
         let c = ctx(&store, &sessions, &cache, &server_id).await?;
-        helm_registry::logout(&c.conn, c.access, c.sudo.as_deref(), &server).await.map_err(err)
+        zenytt_registry::logout(&c.conn, c.access, c.sudo.as_deref(), &server).await.map_err(err)
     }
     .await;
     track(&audit, &store, &server_id, "docker.registry_logout", &detail, r)

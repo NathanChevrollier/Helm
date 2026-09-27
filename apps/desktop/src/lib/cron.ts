@@ -28,7 +28,7 @@ const REGLES: Regle[] = [
   { test: /apt-get\s+(autoremove|clean|autoclean)/i, texte: "Fait le ménage dans les paquets et le cache d'installation." },
   { test: /(^|\s)snap\s+refresh/i, texte: "Met à jour les paquets snap." },
   { test: /docker\s+system\s+prune|docker\s+image\s+prune/i, texte: "Supprime les images, conteneurs et caches Docker inutilisés pour récupérer de l'espace disque." },
-  { test: /helm-backup|restic\s+backup/i, texte: "Sauvegarde du serveur (restic) : bases, volumes et dossiers configurés." },
+  { test: /zenytt-backup|restic\s+backup/i, texte: "Sauvegarde du serveur (restic) : bases, volumes et dossiers configurés." },
   { test: /restic\s+(forget|prune)/i, texte: "Applique la rétention des sauvegardes : supprime les anciennes copies devenues inutiles." },
   { test: /restic\s+check/i, texte: "Vérifie l'intégrité du dépôt de sauvegarde." },
   { test: /borg\s+(create|prune)/i, texte: "Sauvegarde ou rétention avec BorgBackup." },

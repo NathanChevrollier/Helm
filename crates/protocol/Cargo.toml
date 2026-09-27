@@ -1,9 +1,9 @@
 [package]
-name = "helm-protocol"
+name = "zenytt-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Types partagés entre l'app desktop et l'agent helmd"
+description = "Types partagés entre l'app desktop et l'agent zenyttd"
 
 [dependencies]
 serde.workspace = true

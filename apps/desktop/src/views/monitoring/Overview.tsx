@@ -216,7 +216,7 @@ export default function Overview({
         <Panel title={agent?.status?.activeAlerts.length ? "Alertes en cours" : "Alertes"}>
           {!agent?.running ? (
             <div className="flex flex-col items-start gap-2 text-[13px] text-muted">
-              Sans l'agent helmd, pas d'alerte quand Helm est fermé.
+              Sans l'agent zenyttd, pas d'alerte quand Zenytt est fermé.
               <Button size="sm" onClick={onOpenAgent}>
                 Installer l'agent
               </Button>

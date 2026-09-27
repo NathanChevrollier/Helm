@@ -27,14 +27,14 @@ monaco.languages.setMonarchTokensProvider("nginx", {
   },
 });
 
-monaco.editor.defineTheme("helm-dark", {
+monaco.editor.defineTheme("zenytt-dark", {
   base: "vs-dark",
   inherit: true,
   rules: [],
   colors: { "editor.background": "#0e0f11", "editor.lineHighlightBackground": "#16181c" },
 });
 
-monaco.editor.defineTheme("helm-light", {
+monaco.editor.defineTheme("zenytt-light", {
   base: "vs",
   inherit: true,
   rules: [],

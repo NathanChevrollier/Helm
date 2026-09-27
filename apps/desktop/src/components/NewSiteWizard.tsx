@@ -11,7 +11,7 @@ interface Step {
   detail?: string;
 }
 
-const EMAIL_KEY = "helm.certbotEmail";
+const EMAIL_KEY = "zenytt.certbotEmail";
 const validDomain = (d: string) => /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(d);
 
 function readEmail() {

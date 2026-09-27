@@ -1,15 +1,15 @@
-# Helm
+# Zenytt
 
-[![CI](https://github.com/NathanChevrollier/Helm/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Helm/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/NathanChevrollier/Helm?label=version)](https://github.com/NathanChevrollier/Helm/releases/latest)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![CI](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/NathanChevrollier/Zenytt?label=version)](https://github.com/NathanChevrollier/Zenytt/releases/latest)
+[![PolyForm Shield License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-blue)](LICENSE)
 
 *[Version française](README.md)*
 
 A desktop application (Windows, macOS, Linux) for running your Linux servers: SSH terminal, files,
 monitoring, Docker, databases, websites, backups and security auditing in a single window.
 
-**Everything goes over SSH.** Helm installs no web panel, opens no port on your server and depends
+**Everything goes over SSH.** Zenytt installs no web panel, opens no port on your server and depends
 on no third-party service. Credentials stay in your operating system's keychain, and anything that
 passes through a relay server is end-to-end encrypted.
 
@@ -24,7 +24,7 @@ passes through a relay server is end-to-end encrypted.
 - [AI assistant](#ai-assistant)
 - [Sharing and sync](#sharing-and-sync)
 - [MCP server (read-only)](#mcp-server-read-only)
-- [The `helmd` agent](#the-helmd-agent)
+- [The `zenyttd` agent](#the-zenyttd-agent)
 - [Security model](#security-model)
 - [Server requirements](#server-requirements)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -36,29 +36,29 @@ passes through a relay server is end-to-end encrypted.
 With your system's package manager:
 
 ```sh
-winget install NathanChevrollier.Helm                              # Windows
-brew tap NathanChevrollier/tap && brew install --cask helm-desktop # macOS
-yay -S helm-desktop-bin                                            # Arch Linux (AUR)
-flatpak install flathub dev.helm.desktop                           # Linux (Flatpak)
+winget install NathanChevrollier.Zenytt                              # Windows
+brew tap NathanChevrollier/tap && brew install --cask zenytt-desktop # macOS
+yay -S zenytt-desktop-bin                                            # Arch Linux (AUR)
+flatpak install flathub dev.zenytt.desktop                           # Linux (Flatpak)
 ```
 
-Or download an installer from the [Releases](https://github.com/NathanChevrollier/Helm/releases/latest) page:
+Or download an installer from the [Releases](https://github.com/NathanChevrollier/Zenytt/releases/latest) page:
 
 | System | File |
 | --- | --- |
-| Windows 10/11 | `Helm_x.y.z_x64-setup.exe` |
-| macOS Apple Silicon | `Helm_x.y.z_aarch64.dmg` |
-| macOS Intel | `Helm_x.y.z_x64.dmg` |
+| Windows 10/11 | `Zenytt_x.y.z_x64-setup.exe` |
+| macOS Apple Silicon | `Zenytt_x.y.z_aarch64.dmg` |
+| macOS Intel | `Zenytt_x.y.z_x64.dmg` |
 | Linux | `.AppImage` (auto-updates), `.deb` or `.rpm` |
 
-Helm checks for new versions at startup and offers to install them. Update packages are signed: a
+Zenytt checks for new versions at startup and offers to install them. Update packages are signed: a
 tampered version is rejected.
 
 > **Windows** — until SignPath code signing is active, SmartScreen shows "Windows protected your
 > PC" → *More info* → *Run anyway*.
 >
 > **macOS** — the app is not yet notarized by Apple. If macOS refuses to open it, run once:
-> `xattr -dr com.apple.quarantine /Applications/Helm.app`.
+> `xattr -dr com.apple.quarantine /Applications/Zenytt.app`.
 
 ## Getting started
 
@@ -81,7 +81,7 @@ Credential Manager, macOS Keychain, Secret Service on Linux).
 | **Servers** | SSH profiles, folders, reusable credential vault, jump hosts, PuTTY and `ssh_config` import, host key verification, **remote desktops inside the app**: RDP (with file transfer through the clipboard) and **VNC** (adjustable image quality, view-only mode) in built-in clients, **SPICE** VM consoles in remote-viewer — all through an SSH tunnel when needed. |
 | **Terminal** | **Persistent tmux sessions** that survive disconnects and closing the app. Tabs and splits, a file panel that follows the current directory, drag-and-drop uploads into it, **input broadcast** to several servers with confirmation of sensitive commands, a **"Why did this command fail?"** button that opens the assistant on the error, **fuzzy server history search** (Ctrl+Shift+R), **parameterised snippets** (`{{container}}`, `{{lines:100}}`), session recording (asciicast). |
 | **Files** | SFTP browser, **remote name search and grep** (Ctrl+P, nothing is downloaded), **server-side compression and extraction** (tar.gz, zip, tar.zst), **side-by-side file comparison**, **dual pane** to copy between servers, cancellable transfers, remote editing in Monaco, sudo fallback. |
-| **Monitoring** | CPU, memory, disks, network, processes, systemd services. With the `helmd` agent: 30 days of history and alerts (thresholds, unreachable sites, failed backups) to Discord, ntfy or a webhook, even with your PC off. |
+| **Monitoring** | CPU, memory, disks, network, processes, systemd services. With the `zenyttd` agent: 30 days of history and alerts (thresholds, unreachable sites, failed backups) to Discord, ntfy or a webhook, even with your PC off. |
 | **Docker** | Containers, stats, live logs, shell into a container, Compose projects, a **one-click application catalogue** (Nextcloud, Vaultwarden, Uptime Kuma, Gitea, n8n, Plausible… with generated passwords and ports bound to 127.0.0.1 only), images, **volumes with their real size and orphan detection**, cleanup showing the space reclaimed before deleting, **private registries** (Docker Hub, GitHub Packages, GitLab, AWS ECR, self-hosted) with credentials in the system keychain. **Deployment** with automatic rollback, deployment from GitHub with a restricted key, **restricting published ports** to 127.0.0.1. |
 | **Databases** | MySQL/MariaDB, PostgreSQL and **SQLite**, in containers or on the host: databases, tables, SQL editor with **table and column autocompletion**, **sort and filter from the column header**, **in-place cell editing** showing the exact `UPDATE` before it runs (a primary key is required), row insert and delete, CSV export. **Redis / Valkey explorer**: paged key browsing (SCAN), every type, TTL, console. |
 | **Sites** | Domain → nginx or Apache → port → container, TLS certificates, safe vhost editor, "New site" wizard, **configuration history** with diff and restore. |
@@ -108,10 +108,10 @@ logged.
 
 ## Sharing and sync
 
-- **Shared terminal** — a `helm-term:…` invitation gives view-only or control access to a terminal,
+- **Shared terminal** — a `zenytt-term:…` invitation gives view-only or control access to a terminal,
   without creating an account on the server or opening a port.
-- **Configuration sharing** — a `helm-share:…` code transfers a server profile (and optionally its
-  secrets) to another Helm install.
+- **Configuration sharing** — a `zenytt-share:…` code transfers a server profile (and optionally its
+  secrets) to another Zenytt install.
 - **Multi-device sync** — servers, credentials, approved host keys, snippets and tunnels, through a
   **file** (OneDrive, Dropbox, Syncthing, network share) or the small self-hosted
   [`sync-server/`](sync-server/).
@@ -121,14 +121,14 @@ never sees plaintext and rejects anything unencrypted.
 
 ## MCP server (read-only)
 
-`Helm --mcp` exposes **14 read-only tools** to compatible assistants (Claude Code, Claude Desktop…):
+`Zenytt --mcp` exposes **14 read-only tools** to compatible assistants (Claude Code, Claude Desktop…):
 status, history, alerts, containers, logs, sites, nginx configuration, audit, backups, processes,
 configuration files. No tool can modify a server or run an arbitrary command; only servers allowed
 in Settings are visible; secrets are masked and private keys refused; every call is logged.
 
-## The `helmd` agent
+## The `zenyttd` agent
 
-Optional: Helm works without it, but the agent brings history and offline alerts. A static Linux
+Optional: Zenytt works without it, but the agent brings history and offline alerts. A static Linux
 binary of about 2 MB (x86_64 and arm64), embedded in the app and installed in one click. It runs as
 a dedicated system user under a hardened systemd unit (`ProtectSystem=strict`, `NoNewPrivileges`,
 64 MB RAM cap), and **only listens on a unix socket** — the app queries it through the SSH
@@ -156,7 +156,7 @@ connection, no port is opened.
 | Sites | nginx or Apache |
 | Databases | MySQL/MariaDB, PostgreSQL (host or container), `sqlite3`, `redis-cli` |
 | Backups | restic (installed from the app if missing) |
-| Extended monitoring | `helmd` agent (optional) |
+| Extended monitoring | `zenyttd` agent (optional) |
 
 Features unavailable on a given server are flagged in the interface rather than hidden.
 
@@ -168,7 +168,7 @@ All configurable in Settings → Preferences.
 |---|---|
 | Command palette | `Ctrl+K` |
 | AI assistant | `Ctrl+I` |
-| Lock Helm | `Ctrl+Shift+L` |
+| Lock Zenytt | `Ctrl+Shift+L` |
 | New terminal tab / close tab | `Ctrl+Shift+T` / `Ctrl+Shift+W` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Search in terminal | `Ctrl+Shift+F` |
@@ -183,7 +183,7 @@ All configurable in Settings → Preferences.
 
 ```sh
 pnpm install
-pnpm build:agent   # helmd binaries, embedded in the next app build
+pnpm build:agent   # zenyttd binaries, embedded in the next app build
 pnpm dev           # app in development mode
 pnpm build         # installers in target/release/bundle/
 pnpm typecheck     # TypeScript
@@ -195,4 +195,11 @@ The repository layout, test environment, CI and release process are described in
 
 ## License
 
-MIT — see [LICENSE](LICENSE). © 2026 Nathan Chevrollier.
+© 2026 Nathan Chevrollier. Zenytt is **source-available** under the
+[PolyForm Shield License 1.0.0](LICENSE): free to use, including at work, to read and to modify,
+but not to build a competing product or service. Versions up to and including 1.1.1 remain under
+the MIT license.
+
+- [Privacy policy](docs/legal/privacy.en.md): no telemetry, everything stays on your computer
+- Terms of use and legal notice (French): [conditions](docs/legal/conditions-utilisation.md), [mentions légales](docs/legal/mentions-legales.md)
+- [Third-party components](THIRD_PARTY_NOTICES.md) · [Security policy](SECURITY.md) · [Contributing](CONTRIBUTING.md)

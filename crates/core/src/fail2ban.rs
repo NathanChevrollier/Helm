@@ -1,7 +1,7 @@
 //! fail2ban : état des jails, IP bannies, déblocage et liste des adresses jamais bannies.
 //!
 //! Les exceptions (`ignoreip`) sont écrites dans un fichier dédié, lu en dernier par fail2ban
-//! (`jail.d/zz-helm-ignore.local`) : les fichiers de l'utilisateur ne sont jamais modifiés. La
+//! (`jail.d/zz-zenytt-ignore.local`) : les fichiers de l'utilisateur ne sont jamais modifiés. La
 //! configuration est testée (`fail2ban-client -t`) avant rechargement, et restaurée en cas d'échec.
 
 use std::net::IpAddr;
@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::ssh::shell_quote;
 use crate::{Connection, Error, Result};
 
-pub const IGNORE_FILE: &str = "/etc/fail2ban/jail.d/zz-helm-ignore.local";
+pub const IGNORE_FILE: &str = "/etc/fail2ban/jail.d/zz-zenytt-ignore.local";
 
 const STATE_SCRIPT: &str = r#"command -v fail2ban-client >/dev/null 2>&1 || { echo @@ABSENT; exit 0; }
 fail2ban-client ping >/dev/null 2>&1 || { echo @@INACTIVE; exit 0; }
@@ -140,7 +140,7 @@ pub async fn unban(conn: &Connection, sudo: Option<&str>, jail: &str, ip: &str) 
 /// Contenu du fichier d'exceptions : la même liste pour tous les jails (et par défaut).
 pub fn ignore_file(addresses: &[String], jails: &[String]) -> String {
     let list = addresses.join(" ");
-    let mut s = format!("# Géré par Helm : adresses jamais bannies par fail2ban.\n# Modifie-les depuis Helm (Sécurité → fail2ban).\n\n[DEFAULT]\nignoreip = {list}\n");
+    let mut s = format!("# Géré par Zenytt : adresses jamais bannies par fail2ban.\n# Modifie-les depuis Zenytt (Sécurité → fail2ban).\n\n[DEFAULT]\nignoreip = {list}\n");
     // Une valeur définie dans la section d'un jail (jail.local) l'emporte sur [DEFAULT] : on la redéfinit.
     for j in jails {
         s.push_str(&format!("\n[{j}]\nignoreip = {list}\n"));
@@ -164,7 +164,7 @@ pub async fn set_ignore(conn: &Connection, sudo: Option<&str>, addresses: &[Stri
     let content = ignore_file(&list, &jails);
     let f = shell_quote(IGNORE_FILE);
     let script = format!(
-        "set -u\n[ -f {f} ] && cp -p {f} {f}.helm-avant\ncat > {f}\nchmod 644 {f}\nT=$(mktemp)\nif fail2ban-client -t >\"$T\" 2>&1; then\n  rm -f {f}.helm-avant\n  fail2ban-client reload 2>&1\n  echo @@OK\nelse\n  cat \"$T\"\n  if [ -f {f}.helm-avant ]; then mv -f {f}.helm-avant {f}; else rm -f {f}; fi\n  echo @@FAILED\nfi\nrm -f \"$T\"\n"
+        "set -u\n[ -f {f} ] && cp -p {f} {f}.zenytt-avant\ncat > {f}\nchmod 644 {f}\nT=$(mktemp)\nif fail2ban-client -t >\"$T\" 2>&1; then\n  rm -f {f}.zenytt-avant\n  fail2ban-client reload 2>&1\n  echo @@OK\nelse\n  cat \"$T\"\n  if [ -f {f}.zenytt-avant ]; then mv -f {f}.zenytt-avant {f}; else rm -f {f}; fi\n  echo @@FAILED\nfi\nrm -f \"$T\"\n"
     );
     let out = conn.exec_sudo(&format!("sh -c {}", shell_quote(&script)), sudo, Some(content.as_bytes())).await?;
     let text = format!("{}{}", out.stdout, out.stderr);

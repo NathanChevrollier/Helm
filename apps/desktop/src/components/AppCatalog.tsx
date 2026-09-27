@@ -1,7 +1,7 @@
 // Catalogue d'applications Docker Compose : choisir une application, remplir ses réglages, puis
 // relire les fichiers avant de les écrire sur le serveur.
 //
-// Le catalogue est intégré à Helm (aucun appel réseau, aucun dépôt tiers à faire confiance) et les
+// Le catalogue est intégré à Zenytt (aucun appel réseau, aucun dépôt tiers à faire confiance) et les
 // mots de passe sont tirés de l'aléa du système, côté Rust. Chaque application ne publie ses ports
 // que sur 127.0.0.1 : l'accès public passe par un site nginx, avec HTTPS, comme le reste du serveur.
 import { useEffect, useMemo, useState } from "react";
@@ -107,7 +107,7 @@ export default function AppCatalog({ onClose, onDeploy }: { onClose: () => void;
 
         {chosen.variables.some((v) => v.kind === "password") && (
           <p className="mt-3 rounded-md border border-warn/40 bg-warn/5 p-2 text-xs">
-            Les mots de passe ci-dessus ont été tirés au hasard par Helm et ne seront plus affichés après le déploiement. Note-les maintenant, ou retrouve-les
+            Les mots de passe ci-dessus ont été tirés au hasard par Zenytt et ne seront plus affichés après le déploiement. Note-les maintenant, ou retrouve-les
             dans le fichier <span className="font-mono">.env</span> du projet sur le serveur.
           </p>
         )}

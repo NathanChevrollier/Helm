@@ -37,7 +37,7 @@ export default function DatabasesView() {
 /** Dernières requêtes exécutées, par serveur (conservées sur ce PC). */
 function readHistory(serverId: string): string[] {
   try {
-    const v = JSON.parse(localStorage.getItem(`helm.sqlHistory.${serverId}`) ?? "[]");
+    const v = JSON.parse(localStorage.getItem(`zenytt.sqlHistory.${serverId}`) ?? "[]");
     return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
   } catch {
     return [];
@@ -46,7 +46,7 @@ function readHistory(serverId: string): string[] {
 function pushHistory(serverId: string, q: string): string[] {
   const list = [q.trim(), ...readHistory(serverId).filter((x) => x !== q.trim())].slice(0, 25);
   try {
-    localStorage.setItem(`helm.sqlHistory.${serverId}`, JSON.stringify(list));
+    localStorage.setItem(`zenytt.sqlHistory.${serverId}`, JSON.stringify(list));
   } catch {
     /* historique non retenu */
   }
@@ -56,7 +56,7 @@ function pushHistory(serverId: string, q: string): string[] {
 /** Hauteur de l'éditeur SQL, réglable à la souris et retenue. */
 function useEditorHeight(): [number, (e: React.PointerEvent<HTMLDivElement>) => void] {
   const [h, setH] = useState(() => {
-    const v = Number(localStorage.getItem("helm.sqlEditorHeight"));
+    const v = Number(localStorage.getItem("zenytt.sqlEditorHeight"));
     return v >= 90 && v <= 700 ? v : 190;
   });
   const start = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -73,7 +73,7 @@ function useEditorHeight(): [number, (e: React.PointerEvent<HTMLDivElement>) => 
       window.removeEventListener("pointerup", up);
       document.body.style.cursor = "";
       try {
-        localStorage.setItem("helm.sqlEditorHeight", String(last));
+        localStorage.setItem("zenytt.sqlEditorHeight", String(last));
       } catch {
         /* non retenu */
       }
@@ -114,13 +114,13 @@ function Databases({ serverId }: { serverId: string }) {
   const [filter, setFilter] = useState("");
   const [sql, setSql] = useCachedState(`dbSql:${serverId}`, "SELECT 1;");
   const [limit, setLimitState] = useState(() => {
-    const v = Number(localStorage.getItem("helm.sqlLimit"));
+    const v = Number(localStorage.getItem("zenytt.sqlLimit"));
     return LIMITS.includes(v) ? v : 500;
   });
   const setLimit = (v: number) => {
     setLimitState(v);
     try {
-      localStorage.setItem("helm.sqlLimit", String(v));
+      localStorage.setItem("zenytt.sqlLimit", String(v));
     } catch {
       /* non retenu */
     }
@@ -431,7 +431,7 @@ function Databases({ serverId }: { serverId: string }) {
                 icon: <X size={14} />,
                 onClick: () => {
                   try {
-                    localStorage.removeItem(`helm.sqlHistory.${serverId}`);
+                    localStorage.removeItem(`zenytt.sqlHistory.${serverId}`);
                   } catch {
                     /* rien */
                   }
@@ -474,7 +474,7 @@ function Databases({ serverId }: { serverId: string }) {
           </>
         }
       >
-        Helm cherche les conteneurs MySQL, MariaDB et PostgreSQL en cours, ainsi que les services installés sur le serveur.
+        Zenytt cherche les conteneurs MySQL, MariaDB et PostgreSQL en cours, ainsi que les services installés sur le serveur.
       </EmptyState>,
     );
   }

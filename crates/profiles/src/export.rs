@@ -1,4 +1,4 @@
-//! Export et import des réglages de Helm (profils, clés d'hôte approuvées, snippets, tunnels),
+//! Export et import des réglages de Zenytt (profils, clés d'hôte approuvées, snippets, tunnels),
 //! pour changer de PC ou garder une copie de secours.
 //!
 //! Le fichier est chiffré (AES-256-GCM, clé dérivée du mot de passe par PBKDF2-SHA256) dès qu'un
@@ -16,7 +16,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{secrets, Identity, IgnoredFinding, Registry, RemoteDesktop, ServerProfile, Snippet, Store, TunnelDef};
 
-const FORMAT: &str = "helm-export";
+const FORMAT: &str = "zenytt-export";
+
+/// Format reconnu à la lecture : l'actuel ou celui des versions précédentes. Il sert aussi de
+/// donnée authentifiée du chiffrement, d'où l'emploi du format lu pour déchiffrer.
+fn known_format(format: &str) -> bool {
+    format == FORMAT || format == crate::legacy::OLD_EXPORT_FORMAT
+}
 const ITERATIONS: u32 = 600_000;
 pub(crate) const SECRET_KINDS: &[&str] = &["password", "passphrase", "sudo", "restic"];
 
@@ -35,7 +41,7 @@ pub(crate) struct Payload {
     /// Bureaux à distance (absents des exports antérieurs).
     #[serde(default)]
     pub desktops: Vec<RemoteDesktop>,
-    /// Registres privés. `None` signifie « contenu venu d'une version de Helm qui ne les connaît
+    /// Registres privés. `None` signifie « contenu venu d'une version de Zenytt qui ne les connaît
     /// pas » — à distinguer d'une liste vide : sans cette nuance, un PC resté sur une ancienne
     /// version effacerait les registres de tous les autres à sa première synchronisation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -184,7 +190,7 @@ pub(crate) fn seal(payload: &Payload, password: &str) -> Result<String, String> 
 }
 
 /// Préfixe d'un partage transmis sous forme de texte (à coller dans une conversation).
-pub const SHARE_PREFIX: &str = "helm-share:";
+pub const SHARE_PREFIX: &str = "zenytt-share:";
 
 /// Partage d'une sélection de serveurs : leurs identifiants de la banque, les clés d'hôte
 /// approuvées correspondantes et, si demandé, leurs secrets. Toujours chiffré.
@@ -235,7 +241,7 @@ pub fn to_code(text: &str) -> String {
 /// Texte d'un partage reçu : code d'une ligne ou contenu de fichier, indifféremment.
 pub fn from_code(input: &str) -> Result<String, String> {
     let trimmed = input.trim();
-    let Some(code) = trimmed.strip_prefix(SHARE_PREFIX) else {
+    let Some(code) = trimmed.strip_prefix(SHARE_PREFIX).or_else(|| trimmed.strip_prefix(crate::legacy::OLD_SHARE_PREFIX)) else {
         return Ok(trimmed.to_string());
     };
     let bytes = B64.decode(code.trim().as_bytes()).map_err(|_| "ce code de partage est incomplet ou abîmé".to_string())?;
@@ -244,17 +250,17 @@ pub fn from_code(input: &str) -> Result<String, String> {
 
 /// Le fichier est-il chiffré (faut-il demander un mot de passe) ?
 pub fn is_encrypted(text: &str) -> Result<bool, String> {
-    let e: Envelope = serde_json::from_str(text).map_err(|_| "ce fichier n'est pas un export de Helm")?;
-    if e.format != FORMAT {
-        return Err("ce fichier n'est pas un export de Helm".into());
+    let e: Envelope = serde_json::from_str(text).map_err(|_| "ce fichier n'est pas un export de Zenytt")?;
+    if !known_format(&e.format) {
+        return Err("ce fichier n'est pas un export de Zenytt".into());
     }
     Ok(e.encrypted)
 }
 
 pub(crate) fn open(text: &str, password: &str) -> Result<Payload, String> {
-    let e: Envelope = serde_json::from_str(text).map_err(|_| "ce fichier n'est pas un export de Helm")?;
-    if e.format != FORMAT || e.version != 1 {
-        return Err("format d'export inconnu (fichier d'une version plus récente de Helm ?)".into());
+    let e: Envelope = serde_json::from_str(text).map_err(|_| "ce fichier n'est pas un export de Zenytt")?;
+    if !known_format(&e.format) || e.version != 1 {
+        return Err("format d'export inconnu (fichier d'une version plus récente de Zenytt ?)".into());
     }
     if !e.encrypted {
         return serde_json::from_value(e.data).map_err(|err| format!("export illisible : {err}"));
@@ -264,7 +270,7 @@ pub(crate) fn open(text: &str, password: &str) -> Result<Payload, String> {
     let nonce: [u8; 12] = B64.decode(e.nonce.ok_or_else(bad)?).map_err(|_| bad())?.try_into().map_err(|_| bad())?;
     let mut data = B64.decode(e.data.as_str().ok_or_else(bad)?).map_err(|_| bad())?;
     let plain = key(password, &salt, e.iterations.unwrap_or(ITERATIONS))?
-        .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from(FORMAT), &mut data)
+        .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from(e.format.as_bytes()), &mut data)
         .map_err(|_| "mot de passe incorrect (ou fichier modifié)".to_string())?;
     serde_json::from_slice(plain).map_err(|err| format!("export illisible : {err}"))
 }
@@ -463,6 +469,35 @@ mod tests {
     use super::*;
     use crate::{AuthKind, Data};
 
+    /// Un export chiffré par une version précédente (autre format, donc autre donnée authentifiée)
+    /// reste lisible, qu'il vienne d'un fichier, d'un code de partage ou de la synchronisation.
+    #[test]
+    fn export_d_une_version_precedente() {
+        let old = crate::legacy::OLD_EXPORT_FORMAT;
+        let payload = serde_json::to_vec(&Payload::default()).unwrap();
+        let (salt, nonce) = ([7u8; 16], [9u8; 12]);
+        let mut sealed = payload;
+        key("secret", &salt, 1000)
+            .unwrap()
+            .seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(old), &mut sealed)
+            .unwrap();
+        let text = serde_json::to_string(&Envelope {
+            format: old.into(),
+            version: 1,
+            encrypted: true,
+            iterations: Some(1000),
+            salt: Some(B64.encode(salt)),
+            nonce: Some(B64.encode(nonce)),
+            data: serde_json::Value::String(B64.encode(sealed)),
+        })
+        .unwrap();
+        assert_eq!(is_encrypted(&text), Ok(true));
+        assert!(open(&text, "secret").is_ok());
+        assert!(open(&text, "autre").is_err());
+        let code = format!("{}{}", crate::legacy::OLD_SHARE_PREFIX, B64.encode(text.as_bytes()));
+        assert_eq!(from_code(&code).unwrap(), text);
+    }
+
     fn store_with_server(dir: &std::path::Path) -> Store {
         let s = Store::open(dir);
         s.write(|d| {
@@ -522,7 +557,7 @@ mod tests {
         assert_eq!((summary.servers, summary.snippets), (1, 0), "seul le serveur choisi est partagé");
         assert_eq!(target.read(|d| d.servers[0].name.clone()), "VPS");
         assert_eq!(target.read(|d| d.known_hosts.len()), 1);
-        assert!(from_code("helm-share:pas du base64 !").is_err());
+        assert!(from_code("zenytt-share:pas du base64 !").is_err());
     }
 
     #[test]

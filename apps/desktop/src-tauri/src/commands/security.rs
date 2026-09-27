@@ -2,11 +2,11 @@
 
 use std::time::Duration;
 
-use helm_core::security::{self, FixOutcome, FixPlan, Report};
-use helm_core::Connection;
-use helm_core::{access, fail2ban, firewall};
-use helm_profiles::AuthKind;
 use tauri::State;
+use zenytt_core::security::{self, FixOutcome, FixPlan, Report};
+use zenytt_core::Connection;
+use zenytt_core::{access, fail2ban, firewall};
+use zenytt_profiles::AuthKind;
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
@@ -14,7 +14,7 @@ use crate::store::{AuditLog, Store};
 
 /// Constats d'audit ignorés pour ce serveur (les plus récents d'abord).
 #[tauri::command]
-pub fn findings_ignored(store: State<'_, Store>, server_id: String) -> Vec<helm_profiles::IgnoredFinding> {
+pub fn findings_ignored(store: State<'_, Store>, server_id: String) -> Vec<zenytt_profiles::IgnoredFinding> {
     let mut list: Vec<_> = store.read(|d| d.ignored_findings.iter().filter(|f| f.server_id == server_id).cloned().collect());
     list.sort_by_key(|f| std::cmp::Reverse(f.at));
     list
@@ -31,7 +31,7 @@ pub fn finding_ignore(
     reason: String,
 ) -> Result<(), String> {
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    let entry = helm_profiles::IgnoredFinding { server_id: server_id.clone(), finding_id: finding_id.clone(), title, reason, at };
+    let entry = zenytt_profiles::IgnoredFinding { server_id: server_id.clone(), finding_id: finding_id.clone(), title, reason, at };
     let r = store.write(|d| {
         d.ignored_findings.retain(|f| !(f.server_id == entry.server_id && f.finding_id == entry.finding_id));
         d.ignored_findings.push(entry);
@@ -60,13 +60,13 @@ pub fn security_fix_plan(id: String) -> Result<FixPlan, String> {
     security::fix_plan(&id).map_err(err)
 }
 
-/// Refuse d'avance les corrections qui couperaient l'accès de Helm lui-même.
+/// Refuse d'avance les corrections qui couperaient l'accès de Zenytt lui-même.
 fn guard(store: &Store, server_id: &str, fix: &str) -> Result<(), String> {
     let p = store.server(server_id)?;
     let by_password = p.auth_kind == AuthKind::Password;
     if fix == "disable-password-auth" && by_password {
         return Err(
-            "Helm se connecte à ce serveur par mot de passe : configure d'abord une clé SSH dans le profil, sinon tu serais bloqué dehors."
+            "Zenytt se connecte à ce serveur par mot de passe : configure d'abord une clé SSH dans le profil, sinon tu serais bloqué dehors."
                 .into(),
         );
     }
@@ -179,7 +179,7 @@ pub async fn f2b_set_ignore(
 /// IP publique du PC (pour « Ajouter mon IP »).
 #[tauri::command]
 pub async fn my_public_ip() -> Option<String> {
-    helm_core::diagnose::public_ip().await
+    zenytt_core::diagnose::public_ip().await
 }
 
 // ---------- Pare-feu ----------
@@ -226,15 +226,15 @@ pub async fn fw_delete(
 
 // ---------- Accès (comptes et clés SSH) ----------
 
-/// Empreinte de la clé avec laquelle Helm se connecte à ce serveur, si elle est connue.
+/// Empreinte de la clé avec laquelle Zenytt se connecte à ce serveur, si elle est connue.
 fn current_key(store: &Store, server_id: &str) -> Option<String> {
     let p = store.server(server_id).ok()?;
     if p.auth_kind == AuthKind::Password {
         return None;
     }
     let path = p.key_path.filter(|k| !k.is_empty())?;
-    helm_core::ssh::public_key_from_file(&helm_core::ssh::expand_home(&path))
-        .map(|k| k.fingerprint(helm_core::russh::keys::HashAlg::Sha256).to_string())
+    zenytt_core::ssh::public_key_from_file(&zenytt_core::ssh::expand_home(&path))
+        .map(|k| k.fingerprint(zenytt_core::russh::keys::HashAlg::Sha256).to_string())
 }
 
 #[tauri::command]

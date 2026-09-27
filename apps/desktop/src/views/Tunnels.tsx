@@ -104,7 +104,7 @@ export default function TunnelsView() {
             <span className="block truncate font-medium">{t.name || `${t.remoteHost}:${t.remotePort}`}</span>
             <span className="block truncate text-xs text-muted">
               {serverName(t.serverId)}
-              {t.autoStart ? " · démarre avec Helm" : ""}
+              {t.autoStart ? " · démarre avec Zenytt" : ""}
             </span>
           </span>
         </span>
@@ -369,7 +369,7 @@ export function TunnelForm({
           <Input type="number" min={1} max={65535} value={t.localPort || ""} onChange={(e) => set("localPort", Number(e.target.value))} />
         </Field>
         <div className="self-center">
-          <Checkbox checked={t.autoStart} onChange={(v) => set("autoStart", v)} label="Démarrer au lancement de Helm" />
+          <Checkbox checked={t.autoStart} onChange={(v) => set("autoStart", v)} label="Démarrer au lancement de Zenytt" />
         </div>
         {preview && (
           <div className="col-span-2 rounded-md border border-border bg-subtle px-3 py-2 text-xs">

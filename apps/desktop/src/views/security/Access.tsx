@@ -81,14 +81,14 @@ export default function Access({ serverId, onCount }: { serverId: string; onCoun
                     <span className="block truncate font-mono text-[11px] text-muted">{k.fingerprint}</span>
                     {k.options && <span className="block truncate font-mono text-[11px] text-warn">{k.options}</span>}
                   </span>
-                  {k.current && <Badge tone="accent">clé de Helm</Badge>}
+                  {k.current && <Badge tone="accent">clé de Zenytt</Badge>}
                   {!k.current && (
                     <IconButton
                       title="Retirer cette clé"
                       onClick={async () => {
                         const ok = await ask({
                           title: `Retirer cette clé de ${u.name} ?`,
-                          body: "La personne ou la machine qui l'utilise ne pourra plus se connecter. Une copie de l'ancien fichier est gardée (authorized_keys.helm-avant).",
+                          body: "La personne ou la machine qui l'utilise ne pourra plus se connecter. Une copie de l'ancien fichier est gardée (authorized_keys.zenytt-avant).",
                           code: `${k.algorithm} ${k.fingerprint} ${k.comment}`,
                           confirmLabel: "Retirer",
                           danger: true,

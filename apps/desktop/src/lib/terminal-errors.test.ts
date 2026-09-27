@@ -53,7 +53,7 @@ describe("détection d'un échec au terminal", () => {
   });
 
   it("fonctionne sans invite reconnaissable", () => {
-    const f = findLastFailure(["bash: helmd: command not found"])!;
+    const f = findLastFailure(["bash: zenyttd: command not found"])!;
     expect(f.command).toBeNull();
     expect(f.output).toContain("command not found");
   });
