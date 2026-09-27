@@ -1,7 +1,8 @@
 // Barre latérale « serveur d'abord » : le serveur actif en tête (il donne le contexte de tout le
 // groupe « Serveur »), puis les sections groupées, avec des badges sur ce qui demande une action.
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Lock, MessagesSquare, PanelLeftClose, PanelLeftOpen, ShipWheel, Sparkles, type LucideIcon } from "lucide-react";
+import { ChevronsUpDown, Lock, MessagesSquare, PanelLeftClose, PanelLeftOpen, Sparkles, type LucideIcon } from "lucide-react";
+import { HelmLogo } from "../HelmLogo";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useApp } from "../../lib/store";
 import { useShell } from "../../lib/shell";
@@ -65,11 +66,11 @@ export default function Sidebar({ version }: { version?: string }) {
         <button
           type="button"
           onClick={() => setSection("home")}
-          className={`flex size-8 items-center justify-center rounded-lg text-accent hover:bg-hover ${FOCUS_RING}`}
+          className={`flex size-8 items-center justify-center rounded-lg hover:bg-hover ${FOCUS_RING}`}
           title="Helm — accueil"
           aria-label="Helm, accueil"
         >
-          <ShipWheel size={22} />
+          <HelmLogo size={26} />
         </button>
         {open && <span className="flex-1 text-[15px] font-semibold tracking-[0.01em]">Helm</span>}
         <button

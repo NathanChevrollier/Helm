@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Lock, ShipWheel } from "lucide-react";
+import { Lock } from "lucide-react";
+import { HelmLogo } from "./HelmLogo";
 import { useLock } from "../lib/lock";
 import { Button, Input } from "./ui";
 
@@ -70,9 +71,7 @@ export default function LockScreen() {
             void submit();
           }}
         >
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-accent/10 text-accent">
-            <ShipWheel size={26} />
-          </div>
+          <HelmLogo size={52} className="drop-shadow-md" />
           <div className="text-center">
             <h1 className="flex items-center justify-center gap-2 text-base font-semibold">
               <Lock size={14} /> Helm est verrouillé
