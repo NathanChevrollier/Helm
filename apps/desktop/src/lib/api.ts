@@ -976,10 +976,24 @@ export type AiEvent =
 
 export type SyncMode = "off" | "file" | "server";
 
+/** Mode privé : serveur SSH qui héberge zenytt-sync et son port local. */
+export interface SyncTunnel {
+  serverId: string;
+  port: number;
+}
+
+export interface SyncServerStatus {
+  installed: boolean;
+  port: number;
+  healthy: boolean;
+  docker: boolean;
+}
+
 export interface SyncView {
   mode: SyncMode;
   path?: string | null;
   url?: string | null;
+  tunnel?: SyncTunnel | null;
   includeSecrets: boolean;
   lastRev: number;
   lastSync?: number | null;
@@ -1136,9 +1150,14 @@ export const api = {
 
   syncGet: () => invoke<SyncView>("sync_get"),
   /** `passphrase` / `token` : `undefined` = inchangé, `""` = supprimé. */
-  syncSet: (settings: { mode: SyncMode; path?: string | null; url?: string | null; includeSecrets: boolean; passphrase?: string; token?: string }) =>
+  syncSet: (settings: { mode: SyncMode; path?: string | null; url?: string | null; tunnel?: SyncTunnel | null; includeSecrets: boolean; passphrase?: string; token?: string }) =>
     invoke<void>("sync_set", { settings }),
   syncNow: () => invoke<SyncOutcome>("sync_now"),
+  syncServerStatus: (serverId: string) => invoke<SyncServerStatus>("sync_server_status", { serverId }),
+  /** Installe ou met à jour zenytt-sync sur le serveur et règle ce PC en mode privé (tunnel SSH). */
+  syncServerInstall: (serverId: string) => invoke<{ port: number; log: string }>("sync_server_install", { serverId }),
+  syncPairingCode: () => invoke<string>("sync_pairing_code"),
+  syncJoin: (code: string, passphrase: string) => invoke<void>("sync_join", { code, passphrase }),
 
   snippets: () => invoke<Snippet[]>("snippets_list"),
   saveSnippet: (snippet: Snippet) => invoke<void>("snippet_save", { snippet }),

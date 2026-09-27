@@ -79,12 +79,14 @@ jobs:
         with:
           name: zenyttd
           path: target
-      - name: L'agent zenyttd est bien embarqué
+      - name: L'agent zenyttd et le serveur zenytt-sync sont bien embarqués
         shell: bash
         run: |
-          for arch in x86_64 aarch64; do
-            f="target/$arch-unknown-linux-musl/release/zenyttd"
-            [ -s "$f" ] || { echo "::error::$f absent : l'app serait publiée sans agent"; exit 1; }
+          for bin in zenyttd zenytt-sync; do
+            for arch in x86_64 aarch64; do
+              f="target/$arch-unknown-linux-musl/release/$bin"
+              [ -s "$f" ] || { echo "::error::$f absent : l'app serait publiée sans $bin"; exit 1; }
+            done
           done
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

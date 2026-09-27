@@ -217,7 +217,7 @@ pub async fn install(conn: &Connection, sudo: Option<&str>, binary_for: impl Fn(
 
 /// Envoie le binaire dans un dossier temporaire privé (0700, nom imprévisible) : aucun autre
 /// compte du serveur ne peut le créer à l'avance ni le remplacer avant son installation.
-async fn upload_binary(conn: &Connection, bytes: &[u8]) -> Result<String> {
+pub(crate) async fn upload_binary(conn: &Connection, bytes: &[u8]) -> Result<String> {
     let private = conn.run("mktemp -d /tmp/zenyttd-upload.XXXXXXXXXX").await?.trim().to_string();
     if !private.starts_with("/tmp/zenyttd-upload.") || !private[5..].chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return Err(Error::Other(format!("dossier temporaire inattendu : {private}")));

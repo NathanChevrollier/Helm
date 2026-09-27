@@ -1,32 +1,19 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { CloudCog, Copy, FileSymlink, RefreshCw } from "lucide-react";
+import { CloudCog, Copy, FileSymlink, KeyRound, Link2, Lock, RefreshCw, Rocket, UploadCloud } from "lucide-react";
 import { api, errorMessage, type SyncMode, type SyncView } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { runSync, useSync } from "../lib/sync";
 import { useApp } from "../lib/store";
-import { Button, Checkbox, Field, Input, Segmented } from "./ui";
+import { Button, Checkbox, CodeBlock, Field, Input, Modal, Segmented } from "./ui";
+
+const SyncInstallWizard = lazy(() => import("./SyncInstallWizard"));
 
 const MODES: { id: SyncMode; label: string }[] = [
   { id: "off", label: "Désactivée" },
   { id: "file", label: "Fichier partagé" },
   { id: "server", label: "Serveur (Docker)" },
 ];
-
-const SERVER_COMPOSE = `services:
-  zenytt-sync:
-    build: .
-    container_name: zenytt-sync
-    restart: unless-stopped
-    environment:
-      ZENYTT_SYNC_TOKENS: \${ZENYTT_SYNC_TOKENS}
-    volumes:
-      - zenytt-sync-data:/data
-    ports:
-      - "127.0.0.1:8091:8080"
-
-volumes:
-  zenytt-sync-data:`;
 
 /** Réglage de la synchronisation entre PC (Réglages → Préférences). */
 export default function SyncSettings() {
@@ -41,6 +28,11 @@ export default function SyncSettings() {
   const [confirm, setConfirm] = useState("");
   const [includeSecrets, setIncludeSecrets] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [wizard, setWizard] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [pairing, setPairing] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const servers = useApp((s) => s.servers);
 
   const load = () =>
     api.syncGet().then((v) => {
@@ -66,10 +58,12 @@ export default function SyncSettings() {
   const apply = async () => {
     if (passphrase && passphrase !== confirm) return notify("Les deux phrases de passe ne correspondent pas.", "error");
     if (mode !== "off" && !passphrase && !view?.hasPassphrase) return notify("Choisis une phrase de passe : la même sur tous tes PC.", "error");
-    if (mode === "server" && !token && !view?.hasToken) return notify("Colle le jeton du serveur (fichier .env du serveur).", "error");
+    // Mode privé (installé par l'assistant) : gardé tant qu'aucune adresse n'est saisie.
+    const tunnel = mode === "server" && !url.trim() ? (view?.tunnel ?? null) : null;
+    if (mode === "server" && !tunnel && !token && !view?.hasToken) return notify("Colle le jeton du serveur (fichier .env du serveur).", "error");
     setSaving(true);
     try {
-      await api.syncSet({ mode, path, url, includeSecrets, passphrase: passphrase || undefined, token: token || undefined });
+      await api.syncSet({ mode, path, url, tunnel, includeSecrets, passphrase: passphrase || undefined, token: token || undefined });
       setPassphrase("");
       setConfirm("");
       setToken("");
@@ -84,6 +78,29 @@ export default function SyncSettings() {
   };
 
   const kept = (has: boolean | undefined) => (has ? "Déjà enregistrée : laisse vide pour la conserver." : undefined);
+  const privateServer = view?.tunnel ? (servers.find((s) => s.id === view.tunnel!.serverId)?.name ?? "serveur supprimé") : null;
+
+  /** Remet sur le serveur la version de zenytt-sync embarquée dans cette version de Zenytt. */
+  const updateServer = async () => {
+    if (!view?.tunnel) return;
+    setUpdating(true);
+    try {
+      await api.syncServerInstall(view.tunnel.serverId);
+      notify("Serveur de synchronisation mis à jour", "success");
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const showPairing = async () => {
+    try {
+      setPairing(await api.syncPairingCode());
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-panel p-4">
@@ -95,6 +112,19 @@ export default function SyncSettings() {
         <span className="mt-0.5 block text-xs leading-relaxed text-muted">
           Serveurs, bureaux à distance, identifiants, clés d'hôte approuvées, snippets et tunnels identiques sur tous tes PC. Tout est chiffré avec ta phrase de passe avant de quitter ce PC : ni le fichier ni le serveur ne peuvent le lire.
         </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="primary" icon={<Rocket size={13} />} onClick={() => setWizard(true)}>
+          Installer mon serveur de synchro…
+        </Button>
+        <Button size="sm" icon={<Link2 size={13} />} onClick={() => setJoining(true)}>
+          Rejoindre avec un code…
+        </Button>
+        {view?.mode === "server" && view.hasPassphrase && (
+          <Button size="sm" icon={<KeyRound size={13} />} onClick={() => void showPairing()}>
+            Code pour un autre PC
+          </Button>
+        )}
       </div>
       <Segmented label="Mode de synchronisation" size="sm" value={mode} onChange={setMode} options={MODES.map((m) => ({ value: m.id, label: m.label }))} />
 
@@ -108,30 +138,29 @@ export default function SyncSettings() {
           </div>
         </Field>
       )}
+      {mode === "server" && privateServer && !url.trim() && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-bg p-3 text-xs">
+          <Lock size={14} className="shrink-0 text-accent" />
+          <span className="min-w-0 flex-1">
+            Mode privé : serveur de synchronisation sur <strong>{privateServer}</strong> (port {view!.tunnel!.port}), joint par un tunnel SSH. Aucun port ouvert.
+          </span>
+          <Button size="sm" icon={<UploadCloud size={13} />} loading={updating} onClick={() => void updateServer()}>
+            Mettre à jour le serveur
+          </Button>
+        </div>
+      )}
       {mode === "server" && (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Adresse du serveur" hint="Serveur zenytt-sync (dossier sync-server du dépôt : Dockerfile, compose, bloc nginx).">
+        <details className="rounded-md border border-border bg-bg p-3 text-xs" open={!privateServer && !view?.hasToken}>
+          <summary className="cursor-pointer font-medium text-fg">{privateServer ? "Utiliser plutôt un serveur public (adresse et jeton)" : "Serveur déjà en place : adresse et jeton"}</summary>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="Adresse du serveur" hint="Adresse HTTPS d'un serveur zenytt-sync. Laisse vide pour garder le mode privé.">
               <Input value={url} placeholder="https://sync.exemple.fr" onChange={(e) => setUrl(e.target.value)} />
             </Field>
             <Field label="Jeton" hint={kept(view?.hasToken) ?? "Valeur de ZENYTT_SYNC_TOKENS sur le serveur."}>
               <Input type="password" value={token} autoComplete="off" onChange={(e) => setToken(e.target.value)} />
             </Field>
           </div>
-          <details className="rounded-md border border-border bg-bg p-3 text-xs">
-            <summary className="cursor-pointer font-medium text-fg">Déployer le serveur Docker</summary>
-            <div className="mt-3 flex flex-col gap-3 text-muted">
-              <p>Sur le VPS, lance <code>docker compose up -d --build</code> depuis <code>sync-server</code>. Le volume <code>zenytt-sync-data</code> conserve les données chiffrées; le port 8091 reste local et doit être exposé uniquement par nginx en HTTPS.</p>
-              <div className="relative">
-                <pre className="overflow-x-auto rounded border border-border p-3 font-mono text-[11px] text-fg">{SERVER_COMPOSE}</pre>
-                <Button type="button" size="sm" className="absolute top-2 right-2" icon={<Copy size={13} />} onClick={() => void writeClipboard(SERVER_COMPOSE).then(() => notify("Compose copié", "success"))}>
-                  Copier
-                </Button>
-              </div>
-              <p>Configure <code>ZENYTT_SYNC_TOKENS</code> dans <code>.env</code> avec <code>openssl rand -hex 32</code>, garde le fichier en <code>chmod 600</code>, puis utilise l’URL HTTPS du sous-domaine dans Zenytt.</p>
-            </div>
-          </details>
-        </>
+        </details>
       )}
       {mode !== "off" && (
         <>
@@ -168,6 +197,91 @@ export default function SyncSettings() {
         )}
       </div>
       {lastError && view?.mode !== "off" && <p className="text-xs text-danger">Dernière tentative : {lastError}</p>}
+
+      {wizard && (
+        <Suspense fallback={null}>
+          <SyncInstallWizard onClose={() => setWizard(false)} onDone={() => void load()} />
+        </Suspense>
+      )}
+      {joining && (
+        <JoinDialog
+          onClose={() => setJoining(false)}
+          onDone={() => {
+            setJoining(false);
+            void load();
+          }}
+        />
+      )}
+      {pairing && (
+        <Modal title="Code pour un autre PC" onClose={() => setPairing(null)} footer={<Button onClick={() => setPairing(null)}>Fermer</Button>}>
+          <p className="mb-3 text-sm">
+            Sur l'autre PC : Réglages → Synchronisation → <strong>Rejoindre avec un code</strong>, colle ce code puis ta phrase de passe. Le code est chiffré avec elle : sans elle, il ne révèle rien.
+          </p>
+          <CodeBlock
+            code={pairing}
+            className="max-h-48 overflow-auto break-all"
+            actions={
+              <Button size="sm" icon={<Copy size={13} />} onClick={() => void writeClipboard(pairing).then(() => notify("Code copié", "success"))}>
+                Copier
+              </Button>
+            }
+          />
+        </Modal>
+      )}
     </div>
+  );
+}
+
+/** Rejoindre la synchronisation d'un autre PC avec son code d'appairage et la phrase de passe. */
+function JoinDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const notify = useApp((s) => s.notify);
+  const [code, setCode] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const join = async () => {
+    setBusy(true);
+    try {
+      await api.syncJoin(code, passphrase);
+      await useApp.getState().refreshServers();
+      await runSync(true);
+      onDone();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Rejoindre la synchronisation"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button variant="primary" loading={busy} disabled={!code.trim().startsWith("zenytt-pair:") || passphrase.length < 10} onClick={() => void join()}>
+            Rejoindre
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted">Le code s'obtient sur un PC déjà synchronisé : Réglages → Synchronisation → « Code pour un autre PC ».</p>
+        <Field label="Code d'appairage">
+          <textarea
+            className="min-h-24 rounded-md border border-border bg-bg p-2 font-mono text-xs"
+            value={code}
+            placeholder="zenytt-pair:…"
+            onChange={(e) => setCode(e.target.value)}
+          />
+        </Field>
+        <Field label="Phrase de passe de synchronisation">
+          <Input type="password" value={passphrase} autoComplete="off" onChange={(e) => setPassphrase(e.target.value)} />
+        </Field>
+      </div>
+    </Modal>
   );
 }

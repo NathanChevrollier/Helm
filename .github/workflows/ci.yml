@@ -100,7 +100,8 @@ jobs:
           docker logs zenytt-test-vps | tail -50
           docker exec zenytt-test-debian tail -50 /var/log/auth.log
 
-  # Agent zenyttd : binaires Linux statiques (x86_64 et arm64), embarqués ensuite dans l'app par release.yml.
+  # Agent zenyttd et serveur de synchronisation zenytt-sync : binaires Linux statiques (x86_64 et
+  # arm64), embarqués ensuite dans l'app par release.yml (l'app les installe sur les serveurs).
   agent:
     needs: check
     runs-on: ubuntu-latest
@@ -115,10 +116,13 @@ jobs:
         with:
           tool: cargo-zigbuild
       - run: cargo zigbuild -p zenyttd --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+      - run: cargo zigbuild --manifest-path sync-server/Cargo.toml --target-dir target --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zenyttd
           path: |
             target/x86_64-unknown-linux-musl/release/zenyttd
             target/aarch64-unknown-linux-musl/release/zenyttd
+            target/x86_64-unknown-linux-musl/release/zenytt-sync
+            target/aarch64-unknown-linux-musl/release/zenytt-sync
           if-no-files-found: error

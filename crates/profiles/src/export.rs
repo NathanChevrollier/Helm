@@ -189,6 +189,45 @@ pub(crate) fn seal(payload: &Payload, password: &str) -> Result<String, String> 
     serde_json::to_string_pretty(&envelope).map_err(|e| e.to_string())
 }
 
+/// Chiffre un contenu JSON quelconque avec un mot de passe : même enveloppe et même chiffrement
+/// que l'export, sous un autre `format` (qui sert aussi de donnée authentifiée).
+pub(crate) fn seal_value(value: &serde_json::Value, password: &str, format: &str) -> Result<String, String> {
+    let rng = SystemRandom::new();
+    let (mut salt, mut nonce) = ([0u8; 16], [0u8; 12]);
+    rng.fill(&mut salt).map_err(|_| "aléa indisponible")?;
+    rng.fill(&mut nonce).map_err(|_| "aléa indisponible")?;
+    let mut sealed = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    key(password, &salt, ITERATIONS)?
+        .seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(format), &mut sealed)
+        .map_err(|_| "chiffrement impossible")?;
+    let envelope = Envelope {
+        format: format.into(),
+        version: 1,
+        encrypted: true,
+        iterations: Some(ITERATIONS),
+        salt: Some(B64.encode(salt)),
+        nonce: Some(B64.encode(nonce)),
+        data: serde_json::Value::String(B64.encode(sealed)),
+    };
+    serde_json::to_string(&envelope).map_err(|e| e.to_string())
+}
+
+/// Inverse de [`seal_value`] ; refuse une enveloppe d'un autre format.
+pub(crate) fn open_value(text: &str, password: &str, format: &str) -> Result<serde_json::Value, String> {
+    let bad = || "contenu chiffré illisible".to_string();
+    let e: Envelope = serde_json::from_str(text).map_err(|_| bad())?;
+    if e.format != format || e.version != 1 || !e.encrypted {
+        return Err(bad());
+    }
+    let salt = B64.decode(e.salt.ok_or_else(bad)?).map_err(|_| bad())?;
+    let nonce: [u8; 12] = B64.decode(e.nonce.ok_or_else(bad)?).map_err(|_| bad())?.try_into().map_err(|_| bad())?;
+    let mut data = B64.decode(e.data.as_str().ok_or_else(bad)?).map_err(|_| bad())?;
+    let plain = key(password, &salt, e.iterations.unwrap_or(ITERATIONS))?
+        .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from(format), &mut data)
+        .map_err(|_| "phrase de passe incorrecte (ou code modifié)".to_string())?;
+    serde_json::from_slice(plain).map_err(|_| bad())
+}
+
 /// Préfixe d'un partage transmis sous forme de texte (à coller dans une conversation).
 pub const SHARE_PREFIX: &str = "zenytt-share:";
 

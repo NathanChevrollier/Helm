@@ -36,6 +36,10 @@ pub struct SyncConfig {
     /// Adresse du serveur `zenytt-sync` (mode serveur), par ex. `https://sync.exemple.fr`.
     #[serde(default)]
     pub url: Option<String>,
+    /// Mode privé : le serveur n'écoute que sur la boucle locale d'un de tes serveurs, joint par un
+    /// tunnel SSH (pas de port ouvert, pas de nom de domaine). Remplace alors `url`.
+    #[serde(default)]
+    pub tunnel: Option<SyncTunnel>,
     /// Synchroniser aussi les mots de passe, passphrases et mots de passe sudo.
     #[serde(default)]
     pub include_secrets: bool,
@@ -50,8 +54,90 @@ pub struct SyncConfig {
     pub last_sync: Option<i64>,
 }
 
+/// Serveur SSH qui héberge `zenytt-sync` et port sur lequel il écoute (sur 127.0.0.1 côté serveur).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncTunnel {
+    pub server_id: String,
+    pub port: u16,
+}
+
 /// Propriétaire, dans le keyring, de la phrase de passe et du jeton de synchronisation.
 pub const SECRET_OWNER: &str = "sync";
+
+/// Préfixe d'un code d'appairage (à coller sur un autre PC pour rejoindre la synchronisation).
+pub const PAIRING_PREFIX: &str = "zenytt-pair:";
+const PAIRING_FORMAT: &str = "zenytt-pair";
+/// Secrets d'un serveur transmis avec le code en mode privé : de quoi s'y connecter en SSH.
+const SERVER_SECRETS: [&str; 3] = ["password", "passphrase", "sudo"];
+
+/// Contenu d'un code d'appairage, chiffré avec la phrase de passe de synchronisation.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct Pairing {
+    url: Option<String>,
+    tunnel: Option<SyncTunnel>,
+    token: String,
+    include_secrets: bool,
+    /// Mode privé : le serveur qui héberge la synchronisation, pour que l'autre PC puisse s'y
+    /// connecter avant même sa première synchronisation.
+    server: Option<crate::ServerProfile>,
+    #[serde(default)]
+    server_secrets: BTreeMap<String, String>,
+}
+
+/// Code d'appairage de ce PC : adresse ou serveur privé, jeton et, en mode privé, le profil SSH du
+/// serveur. Chiffré avec la phrase de passe : sans elle, le code ne révèle rien.
+pub fn pairing_code(store: &Store) -> Result<String, String> {
+    use base64::Engine;
+    let cfg = store
+        .read(|d| d.sync.clone())
+        .filter(|c| c.mode == SyncMode::Server)
+        .ok_or("la synchronisation par serveur n'est pas configurée")?;
+    let passphrase = secrets::get(SECRET_OWNER, "passphrase").ok_or("phrase de passe de synchronisation manquante")?;
+    let token = secrets::get(SECRET_OWNER, "token").ok_or("jeton du serveur de synchronisation manquant")?;
+    let server = cfg.tunnel.as_ref().and_then(|t| store.server(&t.server_id).ok());
+    let server_secrets = server
+        .as_ref()
+        .map(|s| SERVER_SECRETS.iter().filter_map(|k| secrets::get(&s.id, k).map(|v| (k.to_string(), v))).collect())
+        .unwrap_or_default();
+    let pairing = Pairing { url: cfg.url, tunnel: cfg.tunnel, token, include_secrets: cfg.include_secrets, server, server_secrets };
+    let sealed = export::seal_value(&serde_json::to_value(&pairing).map_err(|e| e.to_string())?, &passphrase, PAIRING_FORMAT)?;
+    Ok(format!("{PAIRING_PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(sealed)))
+}
+
+/// Rejoint la synchronisation avec le code d'un autre PC : ajoute au besoin le serveur privé,
+/// enregistre jeton et phrase de passe, et règle ce PC comme l'autre. La première synchronisation
+/// (fusion) reste à lancer.
+pub fn join(store: &Store, code: &str, passphrase: &str) -> Result<(), String> {
+    use base64::Engine;
+    let raw = code.trim().strip_prefix(PAIRING_PREFIX).ok_or("ce n'est pas un code d'appairage Zenytt (il commence par zenytt-pair:)")?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(raw.trim()).map_err(|_| "code d'appairage incomplet ou abîmé")?;
+    let text = String::from_utf8(bytes).map_err(|_| "code d'appairage illisible")?;
+    let pairing: Pairing =
+        serde_json::from_value(export::open_value(&text, passphrase, PAIRING_FORMAT)?).map_err(|_| "code d'appairage illisible")?;
+    if let Some(server) = &pairing.server {
+        if store.server(&server.id).is_err() {
+            store.write(|d| d.servers.push(server.clone()))?;
+            for (kind, value) in &pairing.server_secrets {
+                if SERVER_SECRETS.contains(&kind.as_str()) {
+                    secrets::set(&server.id, kind, value)?;
+                }
+            }
+        }
+    }
+    secrets::set(SECRET_OWNER, "token", &pairing.token)?;
+    secrets::set(SECRET_OWNER, "passphrase", passphrase)?;
+    store.write(|d| {
+        d.sync = Some(SyncConfig {
+            mode: SyncMode::Server,
+            url: pairing.url,
+            tunnel: pairing.tunnel,
+            include_secrets: pairing.include_secrets,
+            ..Default::default()
+        })
+    })
+}
 
 /// Contenu distant : numéro de révision et enveloppe chiffrée.
 #[derive(Debug, Clone)]
@@ -402,6 +488,25 @@ mod tests {
         assert!(b.read(|d| d.servers.is_empty()));
 
         assert!(run(&b, &t, "mauvaise").unwrap_err().contains("incorrecte"));
+    }
+
+    #[test]
+    fn pairing_content_is_sealed_with_the_passphrase() {
+        let pairing = Pairing {
+            url: None,
+            tunnel: Some(SyncTunnel { server_id: "vps".into(), port: 8091 }),
+            token: "jeton-secret".into(),
+            include_secrets: true,
+            server: Some(server("vps")),
+            server_secrets: BTreeMap::from([("password".into(), "mdp".into())]),
+        };
+        let sealed = export::seal_value(&serde_json::to_value(&pairing).unwrap(), "phrase de passe", PAIRING_FORMAT).unwrap();
+        assert!(!sealed.contains("jeton-secret") && !sealed.contains("vps.exemple"), "rien en clair");
+        let back: Pairing = serde_json::from_value(export::open_value(&sealed, "phrase de passe", PAIRING_FORMAT).unwrap()).unwrap();
+        assert_eq!(back, pairing);
+        assert!(export::open_value(&sealed, "autre", PAIRING_FORMAT).unwrap_err().contains("incorrecte"));
+        assert!(export::open_value(&sealed, "phrase de passe", "zenytt-export").is_err(), "un autre format est refusé");
+        assert!(join(&store(tempfile::tempdir().unwrap().path()), "zenytt-share:abc", "x").unwrap_err().contains("zenytt-pair:"));
     }
 
     #[test]

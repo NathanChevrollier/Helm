@@ -211,8 +211,12 @@ pub struct ShareInfo {
 
 /// Adresse et jeton du relais : ceux de la synchronisation, déjà configurés.
 fn relay_config(store: &Store) -> Result<(String, String), String> {
-    let url = store
-        .read(|d| d.sync.as_ref().and_then(|c| c.url.clone()))
+    let cfg = store.read(|d| d.sync.clone()).unwrap_or_default();
+    if cfg.tunnel.is_some() {
+        return Err("ta synchronisation est en mode privé (par SSH) : personne d'autre ne peut joindre ce serveur. Le partage de terminal demande un serveur de synchronisation public (sous-domaine HTTPS, Réglages → Synchronisation).".into());
+    }
+    let url = cfg
+        .url
         .filter(|u| !u.is_empty())
         .ok_or("configure d'abord un serveur de synchronisation (Réglages → Synchronisation) : il sert aussi de relais")?;
     let token =

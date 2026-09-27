@@ -96,6 +96,10 @@ impl Tunnels {
         Ok(())
     }
 
+    pub fn is_running(&self, id: &str) -> bool {
+        self.0.lock().unwrap().contains_key(id)
+    }
+
     pub fn stop(&self, id: &str) {
         if let Some(r) = self.0.lock().unwrap().remove(id) {
             r.task.abort();

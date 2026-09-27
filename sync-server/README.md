@@ -14,7 +14,21 @@ version chiffrée et un numéro de révision, et refuse tout contenu non chiffr�
 > Pas envie d'héberger un serveur ? Dans Zenytt, choisis plutôt la synchronisation par **fichier**,
 > dans un dossier déjà synchronisé (OneDrive, Dropbox, Syncthing, partage réseau).
 
-## Installation sur le VPS (Docker + nginx)
+## Installation assistée (recommandée)
+
+Dans Zenytt : **Réglages → Synchronisation → Installer mon serveur de synchro**. Choisis le serveur
+et le mode :
+
+- **privé, par SSH** (par défaut) : aucun port ouvert ni nom de domaine, tes PC joignent le serveur
+  par un tunnel SSH ;
+- **public, en HTTPS** : un sous-domaine avec certificat, nécessaire pour partager un terminal avec
+  quelqu'un qui n'a pas accès au serveur.
+
+Zenytt envoie le serveur (embarqué dans l'app), l'installe dans `/opt/stacks/zenytt-sync`, génère le
+jeton, vérifie qu'il répond et règle ton PC. Sur tes autres PC : **Rejoindre avec un code**, avec le
+code affiché à la fin. « Mettre à jour le serveur » y remet la version de ton app.
+
+## Installation manuelle sur le VPS (Docker + nginx)
 
 ```sh
 # 1. Copier ce dossier sur le VPS, par exemple dans /opt/zenytt-sync
