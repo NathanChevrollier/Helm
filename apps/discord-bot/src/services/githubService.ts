@@ -15,6 +15,8 @@ export class GitHubService {
   /** Lecture du projet : jeton dédié si fourni (un jeton « fine-grained » ne lit pas les projets d'un compte personnel). */
   private readonly projectClient: Octokit;
   private projectNumber: number | undefined;
+  /** Titre du projet lu, pour dire dans le panneau d'où vient la roadmap. */
+  private projectTitle: string | undefined;
 
   public constructor(
     private readonly owner: string,
@@ -109,6 +111,12 @@ export class GitHubService {
     }
   }
 
+  /** Projet lu par la dernière synchronisation : « titre » (#numéro). */
+  public projectLabel(): string {
+    const number = this.projectNumber ? ` (#${this.projectNumber})` : "";
+    return this.projectTitle ? `« ${this.projectTitle} »${number}` : number.trim();
+  }
+
   private async findProjectNumber(): Promise<number> {
     if (this.projectNumber) return this.projectNumber;
     const response = await this.projectClient.graphql<{
@@ -122,6 +130,7 @@ export class GitHubService {
     }
     console.info(`[roadmap] projet GitHub utilisé : #${found.number} « ${found.title} »`);
     this.projectNumber = found.number;
+    this.projectTitle = found.title;
     return found.number;
   }
 

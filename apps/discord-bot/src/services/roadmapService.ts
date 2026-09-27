@@ -15,6 +15,8 @@ export interface RoadmapSnapshot {
   test: RoadmapIssue[];
   done: RoadmapIssue[];
   updatedAt: Date;
+  /** D'où viennent les chantiers (projet GitHub ou étiquettes) : affiché dans le panneau. */
+  source: string;
 }
 
 export class RoadmapService {
@@ -27,11 +29,21 @@ export class RoadmapService {
     private readonly github: GitHubService,
   ) {}
 
+  /** Le projet GitHub est lu dès qu'un numéro ou un jeton de lecture des projets est fourni. */
+  private get useProject(): boolean {
+    return Boolean(this.env.GITHUB_PROJECT_NUMBER || this.env.GITHUB_PROJECT_TOKEN);
+  }
+
   public start(): void {
     if (!this.env.ROADMAP_CHANNEL_ID) {
       console.info("[roadmap] synchronisation désactivée: ROADMAP_CHANNEL_ID absent");
       return;
     }
+    console.info(
+      this.useProject
+        ? "[roadmap] source : projet GitHub"
+        : "[roadmap] source : étiquettes GitHub (GITHUB_PROJECT_TOKEN absent : le projet GitHub n'est pas lu)",
+    );
     void this.sync().catch((error: unknown) => console.error("[roadmap] première synchronisation échouée:", error));
     this.timer = setInterval(() => {
       void this.sync().catch((error: unknown) => console.error("[roadmap] synchronisation échouée:", error));
@@ -53,8 +65,7 @@ export class RoadmapService {
   }
 
   public async getCurrent(): Promise<RoadmapSnapshot> {
-    // Projet GitHub dès qu'un numéro ou un jeton de lecture des projets est fourni, sinon labels.
-    const issues = this.env.GITHUB_PROJECT_NUMBER || this.env.GITHUB_PROJECT_TOKEN
+    const issues = this.useProject
       ? this.github.getProjectRoadmapIssues(this.env.GITHUB_PROJECT_NUMBER)
       : this.github.getRoadmapIssues({
           brainstorming: this.env.GITHUB_BRAINSTORMING_LABEL,
@@ -62,11 +73,11 @@ export class RoadmapService {
           test: this.env.GITHUB_TEST_LABEL,
           done: this.env.GITHUB_DONE_LABEL,
         });
-    return issues
-      .then((issues) => ({
-      ...issues,
-      updatedAt: new Date(),
-      }));
+    const columns = await issues;
+    const source = this.useProject
+      ? `projet GitHub ${this.github.projectLabel()}`.trim()
+      : "étiquettes GitHub (ajoute GITHUB_PROJECT_TOKEN pour lire le projet)";
+    return { ...columns, updatedAt: new Date(), source };
   }
 
   public formatText(snapshot: RoadmapSnapshot): string {
@@ -87,9 +98,18 @@ export class RoadmapService {
 
   private async performSync(): Promise<RoadmapSnapshot> {
     const channel = await this.getRoadmapChannel();
-    const snapshot = await this.getCurrent();
-    const embed = buildRoadmapEmbed(snapshot);
     const message = await this.findExistingMessage(channel);
+    let snapshot: RoadmapSnapshot;
+    try {
+      snapshot = await this.getCurrent();
+    } catch (error) {
+      // Visible dans Discord : sinon le panneau garde l'ancien contenu sans dire pourquoi.
+      const failed = buildRoadmapErrorEmbed(error instanceof Error ? error.message : String(error));
+      if (message) await message.edit({ embeds: [failed] });
+      else await channel.send({ embeds: [failed] });
+      throw error;
+    }
+    const embed = buildRoadmapEmbed(snapshot);
 
     if (message) {
       await message.edit({ embeds: [embed] });
@@ -136,7 +156,16 @@ export function buildRoadmapEmbed(snapshot: RoadmapSnapshot): EmbedBuilder {
       { name: "🧪 En test", value: formatIssueTable(snapshot.test), inline: false },
       { name: "✅ Terminé", value: formatIssueTable(snapshot.done), inline: false },
     )
-    .setFooter({ text: `Dernière synchronisation automatique : ${snapshot.updatedAt.toLocaleString("fr-FR")} · Consultez ces tâches avant de soumettre une nouvelle suggestion` });
+    .setFooter({ text: `Source : ${snapshot.source} · Dernière synchronisation : ${snapshot.updatedAt.toLocaleString("fr-FR")}` });
+}
+
+/** Panneau affiché quand la roadmap ne peut pas être lue : la raison, telle quelle. */
+export function buildRoadmapErrorEmbed(reason: string): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(0xd29922)
+    .setTitle(ROADMAP_TITLE)
+    .setDescription(`⚠️ La roadmap n'a pas pu être lue.\n\n${truncate(reason, 1500)}`)
+    .setFooter({ text: `Dernière tentative : ${new Date().toLocaleString("fr-FR")} · nouvel essai automatique` });
 }
 
 /** Une ligne par chantier (Discord n'affiche pas les tableaux Markdown dans un embed). */
