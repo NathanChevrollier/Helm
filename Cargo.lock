@@ -7688,7 +7688,7 @@ dependencies = [
 
 [[package]]
 name = "zenytt-ai"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -7697,7 +7697,7 @@ dependencies = [
 
 [[package]]
 name = "zenytt-core"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
  "futures",
@@ -7714,7 +7714,7 @@ dependencies = [
 
 [[package]]
 name = "zenytt-desktop"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
@@ -7750,7 +7750,7 @@ dependencies = [
 
 [[package]]
 name = "zenytt-mcp"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "regex",
  "rmcp",
@@ -7764,7 +7764,7 @@ dependencies = [
 
 [[package]]
 name = "zenytt-profiles"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
  "dirs 6.0.0",
@@ -7778,7 +7778,7 @@ dependencies = [
 
 [[package]]
 name = "zenytt-protocol"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -7786,7 +7786,7 @@ dependencies = [
 
 [[package]]
 name = "zenyttd"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "libc",
  "serde",
