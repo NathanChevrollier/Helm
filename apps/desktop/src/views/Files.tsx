@@ -3,11 +3,12 @@ import { create } from "zustand";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowLeftRight, ArrowUp, ChevronRight, Copy, Download, Eye, File, FileArchive, FileDiff, FilePlus, Filter, Folder, FolderOpen, FolderPlus, HardDrive, History, House, Link2,
+  ArrowLeftRight, ArrowUp, ChevronRight, Container, Copy, Download, Eye, File, FileArchive, FileDiff, FilePlus, Filter, Folder, FolderOpen, FolderPlus, HardDrive, History, House, Link2,
   PackageOpen, PanelLeft, Pencil, PenLine, Plus, RefreshCw, Search, Shield, SlidersHorizontal, SquareTerminal, Star, Trash2, Upload, X,
 } from "lucide-react";
 import { api, ARCHIVE_EXTENSIONS, errorMessage, formatBytes, shellQuote, type ArchiveFormat, type FsEntry, type Listing } from "../lib/api";
 import { track } from "../lib/transfers";
+import { composeFileIn, isComposeFile } from "../lib/compose";
 import TransfersBar from "../components/TransfersBar";
 import { useAutoRefresh } from "../lib/refresh";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
@@ -22,6 +23,7 @@ import { useTheme } from "../lib/theme";
 const FileEditor = lazy(() => import("../components/FileEditor"));
 const FileSearch = lazy(() => import("../components/FileSearch"));
 const DiffView = lazy(() => import("../components/DiffView"));
+const ComposeFileDialog = lazy(() => import("../components/ComposeFileDialog"));
 
 const isDir = (e: FsEntry) => e.kind === "dir" || e.targetIsDir;
 
@@ -167,6 +169,8 @@ function Explorer({
   const [filter, setFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [chmodOf, setChmodOf] = useState<FsEntry | null>(null);
+  /** Fichier docker compose ouvert dans le dialogue « Docker Compose ». */
+  const [composeFile, setComposeFile] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [miniTerminalOpen, setMiniTerminalOpen] = useState(false);
   const [miniCommand, setMiniCommand] = useState("");
@@ -290,6 +294,8 @@ function Explorer({
   }, [listing, showHidden, filter]);
 
   const selectedEntries = entries.filter((e) => selected.has(e.path));
+  /** Fichier compose du dossier affiché, pour le lancer sans avoir à le sélectionner. */
+  const composeInCwd = composeFileIn((listing?.entries ?? []).filter((e) => !isDir(e)).map((e) => e.name));
 
   const upload = async (paths: string[]) => {
     if (!paths.length || !cwd) return;
@@ -405,14 +411,33 @@ function Explorer({
   const rename = async (e: FsEntry) => {
     const name = await ask({ title: `Renommer ${e.name}`, input: { label: "Nouveau nom", initial: e.name }, confirmLabel: "Renommer" });
     if (typeof name !== "string" || !name.trim() || name === e.name) return;
-    await act(() => api.fsRename(serverId, e.path, join(name.trim())));
+    const to = join(name.trim());
+    // Docker retrouve un projet compose par le chemin de son fichier : renommer le dossier sans
+    // précaution le rend introuvable. Zenytt arrête, renomme puis relance.
+    const projects = isDir(e) ? await api.dockerProjectsUnder(serverId, e.path).catch(() => []) : [];
+    if (projects.length > 0) {
+      const ok = await ask({
+        title: `« ${e.name} » contient des projets Docker`,
+        body: "Docker retrouve ces projets grâce au chemin de leur fichier compose : renommé tel quel, le dossier les rendrait introuvables. Zenytt va les arrêter, renommer le dossier, puis relancer ceux qui tournaient depuis le nouvel emplacement (volumes conservés, coupure de quelques secondes).",
+        code: projects.map((p) => `${p.name} — ${p.status}`).join("\n"),
+        confirmLabel: "Arrêter, renommer et relancer",
+      });
+      if (!ok) return;
+      if (await act(() => api.dockerMoveFolder(serverId, e.path, to))) notify(`« ${e.name} » renommé, projets Docker relancés depuis le nouvel emplacement.`, "success");
+      return;
+    }
+    await act(() => api.fsRename(serverId, e.path, to));
   };
 
   const remove = async (items: FsEntry[]) => {
     if (!items.length) return;
+    const projects = (await Promise.all(items.filter(isDir).map((d) => api.dockerProjectsUnder(serverId, d.path).catch(() => [])))).flat();
+    const dockerWarning = projects.length
+      ? ` Attention : ${projects.length > 1 ? "les projets Docker" : "le projet Docker"} ${projects.map((p) => `« ${p.name} »`).join(", ")} ${projects.length > 1 ? "ont leur fichier" : "a son fichier"} ici. Leurs conteneurs continueront de tourner, mais plus personne ne pourra les reconstruire : arrête-les d'abord depuis la section Docker si tu n'en as plus besoin.`
+      : "";
     const ok = await ask({
       title: `Supprimer ${items.length > 1 ? `${items.length} éléments` : `« ${items[0].name} »`} ?`,
-      body: "Suppression définitive sur le serveur. Les dossiers sont supprimés avec tout leur contenu.",
+      body: `Suppression définitive sur le serveur. Les dossiers sont supprimés avec tout leur contenu.${dockerWarning}`,
       code: items.map((i) => i.path).join("\n"),
       confirmLabel: "Supprimer définitivement",
       danger: true,
@@ -496,6 +521,7 @@ function Explorer({
           ] as MenuItem[])),
       { label: "Compresser…", icon: <FileArchive size={14} />, onClick: () => setArchiving(sel.map((x) => x.path)) },
       ...(!many && isArchive(e) ? [{ label: "Extraire ici", icon: <PackageOpen size={14} />, onClick: () => void extract(e) }] : []),
+      ...(!many && !isDir(e) && isComposeFile(e.name) ? [{ label: "Docker Compose…", icon: <Container size={14} />, onClick: () => setComposeFile(e.path) }] : []),
       ...(pair && selected.has(e.path) ? [{ label: "Comparer les deux fichiers", icon: <FileDiff size={14} />, onClick: () => void compare(pair[0], pair[1]) }] : []),
       ...(!many && isDir(e)
         ? ([
@@ -685,6 +711,7 @@ function Explorer({
             "separator",
             { label: "Ouvrir un terminal ici", icon: <SquareTerminal size={14} />, disabled: !cwd, onClick: () => terminalHere(cwd) },
             { label: "Copier le chemin du dossier", icon: <Copy size={14} />, disabled: !cwd, onClick: () => copyPath(cwd) },
+            ...(composeInCwd ? [{ label: `Docker Compose (${composeInCwd})…`, icon: <Container size={14} />, onClick: () => setComposeFile(join(composeInCwd)) }] : []),
           ]}
         />
       </div>
@@ -892,6 +919,11 @@ function Explorer({
           }}
           onDownload={() => void download([preview])}
         />
+      )}
+      {composeFile && (
+        <Suspense fallback={null}>
+          <ComposeFileDialog serverId={serverId} file={composeFile} onClose={() => setComposeFile(null)} />
+        </Suspense>
       )}
       {chmodOf && <ChmodDialog entry={chmodOf} onClose={() => setChmodOf(null)} onApply={(mode) => act(() => api.fsChmod(serverId, chmodOf.path, mode))} />}
       {searchOpen && (

@@ -267,7 +267,7 @@ pub async fn logs(conn: &Connection, access: Access, sudo: Option<&str>, id: &st
 
 // ---------- Projets compose ----------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ComposeProject {
     #[serde(alias = "Name")]
@@ -276,6 +276,22 @@ pub struct ComposeProject {
     pub status: String,
     #[serde(alias = "ConfigFiles")]
     pub config_files: String,
+    /// Le fichier compose noté par Docker n'existe plus (dossier renommé, déplacé ou supprimé) :
+    /// seules les actions qui se passent du fichier restent possibles.
+    #[serde(default)]
+    pub missing: bool,
+}
+
+impl ComposeProject {
+    /// Premier fichier compose du projet (celui qui fixe le dossier de travail).
+    pub fn file(&self) -> &str {
+        self.config_files.split(',').map(str::trim).find(|f| !f.is_empty()).unwrap_or("")
+    }
+
+    /// Des conteneurs du projet tournent (`running(2)`, `running(1), exited(1)`…).
+    pub fn is_running(&self) -> bool {
+        self.status.contains("running")
+    }
 }
 
 pub async fn compose_projects(conn: &Connection, access: Access, sudo: Option<&str>) -> Result<Vec<ComposeProject>> {
@@ -284,8 +300,40 @@ pub async fn compose_projects(conn: &Connection, access: Access, sudo: Option<&s
         // docker compose v1 ou plugin absent.
         return Ok(Vec::new());
     }
-    serde_json::from_str(out.stdout.trim()).map_err(|e| Error::Other(format!("docker compose ls : {e}")))
+    let mut list: Vec<ComposeProject> =
+        serde_json::from_str(out.stdout.trim()).map_err(|e| Error::Other(format!("docker compose ls : {e}")))?;
+    mark_missing(conn, access, sudo, &mut list).await;
+    Ok(list)
 }
+
+/// Signale les projets dont le fichier compose a disparu. Le test tourne avec les mêmes droits que
+/// Docker : un dossier illisible pour l'utilisateur SSH ne passe pas pour absent.
+async fn mark_missing(conn: &Connection, access: Access, sudo: Option<&str>, list: &mut [ComposeProject]) {
+    let script: Vec<String> =
+        list.iter().map(|p| p.file()).filter(|f| !f.is_empty()).map(|f| format!("[ -e {q} ] || echo {q}", q = shell_quote(f))).collect();
+    if script.is_empty() {
+        return;
+    }
+    let script = script.join("; ");
+    let out = match access {
+        Access::Sudo => conn.exec_sudo(&script, sudo, None).await,
+        _ => conn.exec(&script, None).await,
+    };
+    let Ok(out) = out else { return };
+    let gone: std::collections::HashSet<&str> = out.stdout.lines().collect();
+    for p in list.iter_mut() {
+        p.missing = gone.contains(p.file());
+    }
+}
+
+/// Arguments `compose` d'un projet dont on n'a que le nom (fichier disparu) : suffisent pour
+/// arrêter, supprimer, redémarrer et lire les journaux.
+fn compose_args_by_name(project: &ComposeProject) -> Result<String> {
+    Ok(format!("compose -p {}", shell_quote(valid_ref(&project.name)?)))
+}
+
+/// Actions possibles sans le fichier compose.
+const WITHOUT_FILE: &[&str] = &["stop", "down", "restart"];
 
 /// Construit les arguments `compose` pour un projet : fichiers de config et dossier de travail.
 fn compose_args(project: &ComposeProject) -> Result<String> {
@@ -301,7 +349,8 @@ fn compose_args(project: &ComposeProject) -> Result<String> {
 
 /// Commande shell complète pour un projet compose (utilisée aussi pour les terminaux de logs).
 pub fn compose_command(project: &ComposeProject, sub: &str) -> Result<String> {
-    Ok(format!("{PODMAN_SHIM}docker {} {sub}", compose_args(project)?))
+    let args = if project.missing { compose_args_by_name(project)? } else { compose_args(project)? };
+    Ok(format!("{PODMAN_SHIM}docker {args} {sub}"))
 }
 
 pub async fn compose_action(
@@ -312,8 +361,19 @@ pub async fn compose_action(
     action: &str,
 ) -> Result<String> {
     crate::ssh::long(async move {
+        if project.missing {
+            if !WITHOUT_FILE.contains(&action) {
+                return Err(Error::Other(format!(
+                    "le fichier compose de « {} » est introuvable ({}) : le dossier a sans doute été renommé ou déplacé. Utilise « Relier au nouveau dossier » pour le retrouver.",
+                    project.name,
+                    project.file()
+                )));
+            }
+            return run_ok(conn, access, sudo, &format!("{} {action} 2>&1", compose_args_by_name(project)?)).await;
+        }
         let sub = match action {
             "up" => "up -d --remove-orphans",
+            "up-build" => "up -d --build --remove-orphans",
             "pull" => "pull",
             "update" => "pull",
             "rebuild" => "down",
@@ -335,6 +395,145 @@ pub async fn compose_action(
         Ok(out)
     })
     .await
+}
+
+// ---------- Fichier compose ouvert depuis l'explorateur ----------
+
+/// Ce que Docker fait déjà du projet décrit par un fichier compose.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ComposeFileState {
+    /// Docker refuse le fichier (syntaxe, variable manquante…) : message de `docker compose config`.
+    Invalid { message: String },
+    /// Aucun projet de ce nom : on peut le lancer.
+    NotRunning,
+    /// Le projet existe déjà, lancé depuis ce fichier (`running` : au moins un conteneur tourne).
+    Same { project: ComposeProject, running: bool },
+    /// Un projet du même nom existe, lancé depuis un autre fichier (souvent : dossier déplacé).
+    Conflict { project: ComposeProject },
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeFileInfo {
+    pub file: String,
+    /// Nom du projet tel que Docker le calcule (clé `name:` du fichier, sinon nom du dossier).
+    pub project: String,
+    /// Au moins un service se construit depuis un Dockerfile (`build:`).
+    pub has_build: bool,
+    /// Ports publiés sur le serveur par ce fichier.
+    pub ports: Vec<u16>,
+    /// Ports publiés déjà occupés sur le serveur (vérifié seulement avant un premier lancement).
+    pub busy_ports: Vec<u16>,
+    pub state: ComposeFileState,
+}
+
+/// Nom du projet, présence d'un `build:` et ports publiés, d'après `docker compose config --format json`.
+pub(crate) fn parse_compose_config(json: &str) -> Result<(String, bool, Vec<u16>)> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| Error::Other(format!("docker compose config : {e}")))?;
+    let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let services = v.get("services").and_then(|s| s.as_object());
+    let has_build = services.is_some_and(|s| s.values().any(|svc| svc.get("build").is_some()));
+    let mut ports: Vec<u16> = services
+        .into_iter()
+        .flat_map(|s| s.values())
+        .filter_map(|svc| svc.get("ports").and_then(|p| p.as_array()))
+        .flatten()
+        .filter_map(|p| {
+            // `published` est une chaîne dans les versions récentes, un nombre dans les anciennes.
+            let published = p.get("published")?;
+            published.as_u64().map(|n| n as u16).or_else(|| published.as_str()?.split('-').next()?.parse().ok())
+        })
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    Ok((name, has_build, ports))
+}
+
+/// Situation d'un fichier au regard des projets existants.
+pub(crate) fn file_state(file: &str, name: &str, projects: &[ComposeProject]) -> ComposeFileState {
+    match projects.iter().find(|p| p.name == name) {
+        None => ComposeFileState::NotRunning,
+        Some(p) if p.file() == file => ComposeFileState::Same { running: p.is_running(), project: p.clone() },
+        Some(p) => ComposeFileState::Conflict { project: p.clone() },
+    }
+}
+
+/// Ports TCP en écoute d'après `ss -Htln` (colonne de l'adresse locale, `0.0.0.0:80`, `[::]:443`…).
+pub(crate) fn listening_ports(ss: &str) -> std::collections::HashSet<u16> {
+    ss.lines().filter_map(|l| l.split_whitespace().nth(3)?.rsplit(':').next()?.parse().ok()).collect()
+}
+
+pub async fn compose_file_info(conn: &Connection, access: Access, sudo: Option<&str>, file: &str) -> Result<ComposeFileInfo> {
+    let dir = crate::sftp::parent(file);
+    let config = run(
+        conn,
+        access,
+        sudo,
+        &format!("compose --project-directory {} -f {} config --format json 2>&1", shell_quote(&dir), shell_quote(file)),
+    )
+    .await?;
+    let mut info = ComposeFileInfo {
+        file: file.to_string(),
+        project: String::new(),
+        has_build: false,
+        ports: Vec::new(),
+        busy_ports: Vec::new(),
+        state: ComposeFileState::NotRunning,
+    };
+    if !config.success() {
+        info.state = ComposeFileState::Invalid { message: format!("{}{}", config.stdout, config.stderr).trim().to_string() };
+        return Ok(info);
+    }
+    let (name, has_build, ports) = parse_compose_config(&config.stdout)?;
+    let projects = compose_projects(conn, access, sudo).await?;
+    info.state = file_state(file, &name, &projects);
+    if info.state == ComposeFileState::NotRunning && !ports.is_empty() {
+        if let Ok(out) = conn.exec("ss -Htln 2>/dev/null", None).await {
+            let busy = listening_ports(&out.stdout);
+            info.busy_ports = ports.iter().copied().filter(|p| busy.contains(p)).collect();
+        }
+    }
+    (info.project, info.has_build, info.ports) = (name, has_build, ports);
+    Ok(info)
+}
+
+/// Lance le projet décrit par `file` sous le nom `name`. `replace` : projet du même nom lancé
+/// depuis un autre fichier, supprimé d'abord (par son nom : son fichier a pu disparaître) pour que
+/// les conteneurs soient recréés avec le nouveau chemin.
+pub async fn compose_launch(
+    conn: &Connection,
+    access: Access,
+    sudo: Option<&str>,
+    file: &str,
+    name: &str,
+    build: bool,
+    replace: Option<&str>,
+) -> Result<String> {
+    crate::ssh::long(async move {
+        let mut log = String::new();
+        if let Some(old) = replace {
+            let old = ComposeProject { name: old.to_string(), status: String::new(), config_files: String::new(), missing: true };
+            log.push_str(&run_ok(conn, access, sudo, &format!("{} down 2>&1", compose_args_by_name(&old)?)).await?);
+        }
+        let project = ComposeProject { name: name.to_string(), status: String::new(), config_files: file.to_string(), missing: false };
+        let up = if build { "up -d --build --remove-orphans" } else { "up -d --remove-orphans" };
+        log.push_str(&run_ok(conn, access, sudo, &format!("{} {up} 2>&1", compose_args(&project)?)).await?);
+        Ok(log)
+    })
+    .await
+}
+
+/// Projets dont le fichier compose se trouve dans `dir` (ou un de ses sous-dossiers).
+pub fn projects_under(projects: &[ComposeProject], dir: &str) -> Vec<ComposeProject> {
+    let prefix = format!("{}/", dir.trim_end_matches('/'));
+    projects.iter().filter(|p| p.file().starts_with(&prefix)).cloned().collect()
+}
+
+/// Chemin d'un fichier après le déplacement de `from` vers `to` (`None` s'il n'est pas dedans).
+pub fn relocate(file: &str, from: &str, to: &str) -> Option<String> {
+    let rest = file.strip_prefix(&format!("{}/", from.trim_end_matches('/')))?;
+    Some(format!("{}/{rest}", to.trim_end_matches('/')))
 }
 
 // ---------- Images, volumes, nettoyage ----------
@@ -568,10 +767,82 @@ mod tests {
 
     #[test]
     fn compose_args_quote_paths() {
-        let p = ComposeProject { name: "web".into(), status: "running(1)".into(), config_files: "/opt/web/docker-compose.yml".into() };
+        let p = ComposeProject {
+            name: "web".into(),
+            status: "running(1)".into(),
+            config_files: "/opt/web/docker-compose.yml".into(),
+            missing: false,
+        };
         assert!(compose_command(&p, "logs -f")
             .unwrap()
             .ends_with("docker compose --project-directory '/opt/web' -p 'web' -f '/opt/web/docker-compose.yml' logs -f"));
+    }
+
+    fn project(name: &str, status: &str, file: &str) -> ComposeProject {
+        ComposeProject { name: name.into(), status: status.into(), config_files: file.into(), missing: false }
+    }
+
+    #[test]
+    fn missing_file_limits_actions_to_project_name() {
+        let mut p = project("bot", "running(1)", "/opt/ancien/bot/docker-compose.yml");
+        p.missing = true;
+        assert!(compose_command(&p, "logs -f").unwrap().ends_with("docker compose -p 'bot' logs -f"), "journaux sans le fichier");
+        assert!(WITHOUT_FILE.contains(&"down") && WITHOUT_FILE.contains(&"stop") && !WITHOUT_FILE.contains(&"up"));
+    }
+
+    #[test]
+    fn compose_config_name_build_and_ports() {
+        let json = r#"{"name":"discord-bot","services":{
+            "bot":{"build":{"context":"."},"ports":[{"published":"8080","target":80},{"published":8443,"target":443}]},
+            "db":{"image":"postgres","ports":[{"published":"8080","target":5432}]},
+            "range":{"image":"x","ports":[{"published":"9000-9001","target":9000}]},
+            "internal":{"image":"redis"}}}"#;
+        let (name, build, ports) = parse_compose_config(json).unwrap();
+        assert_eq!(name, "discord-bot");
+        assert!(build);
+        assert_eq!(ports, vec![8080, 8443, 9000], "triés, sans doublon, début d'une plage");
+        let (_, build, ports) = parse_compose_config(r#"{"name":"x","services":{"a":{"image":"nginx"}}}"#).unwrap();
+        assert!(!build && ports.is_empty());
+    }
+
+    #[test]
+    fn file_state_detects_moved_project() {
+        let projects =
+            vec![project("bot", "running(1)", "/opt/helm/bot/docker-compose.yml"), project("web", "exited(1)", "/srv/web/compose.yaml")];
+        assert_eq!(file_state("/opt/zenytt/bot/docker-compose.yml", "blog", &projects), ComposeFileState::NotRunning);
+        assert_eq!(
+            file_state("/srv/web/compose.yaml", "web", &projects),
+            ComposeFileState::Same { project: projects[1].clone(), running: false }
+        );
+        assert_eq!(
+            file_state("/opt/zenytt/bot/docker-compose.yml", "bot", &projects),
+            ComposeFileState::Conflict { project: projects[0].clone() },
+            "même nom, autre fichier : le dossier a été déplacé"
+        );
+    }
+
+    #[test]
+    fn listening_ports_from_ss() {
+        let ss = "LISTEN 0      4096         0.0.0.0:8080      0.0.0.0:*\nLISTEN 0      511             [::]:443          [::]:*\nLISTEN 0      128      127.0.0.1%lo:53        0.0.0.0:*\n";
+        let ports = listening_ports(ss);
+        assert!(ports.contains(&8080) && ports.contains(&443) && ports.contains(&53));
+        assert!(!ports.contains(&80));
+    }
+
+    #[test]
+    fn projects_under_and_relocate() {
+        let projects = vec![
+            project("bot", "running(1)", "/opt/helm/apps/bot/docker-compose.yml"),
+            project("helmet", "running(1)", "/opt/helmet/compose.yaml"),
+        ];
+        let under = projects_under(&projects, "/opt/helm/");
+        assert_eq!(under.len(), 1, "/opt/helmet n'est pas dans /opt/helm");
+        assert_eq!(under[0].name, "bot");
+        assert_eq!(
+            relocate("/opt/helm/apps/bot/docker-compose.yml", "/opt/helm", "/opt/zenytt").as_deref(),
+            Some("/opt/zenytt/apps/bot/docker-compose.yml")
+        );
+        assert_eq!(relocate("/opt/helmet/compose.yaml", "/opt/helm", "/opt/zenytt"), None);
     }
 
     #[test]
@@ -580,7 +851,13 @@ mod tests {
             serde_json::from_str(r#"[{"Name":"web","Status":"running(1)","ConfigFiles":"/a.yml"}]"#).unwrap();
         let from_ui: ComposeProject = serde_json::from_str(r#"{"name":"web","status":"running(1)","configFiles":"/a.yml"}"#).unwrap();
         assert_eq!(from_docker[0].name, from_ui.name);
-        assert_eq!(serde_json::to_string(&from_ui).unwrap(), r#"{"name":"web","status":"running(1)","configFiles":"/a.yml"}"#);
+        assert_eq!(
+            serde_json::to_string(&from_ui).unwrap(),
+            r#"{"name":"web","status":"running(1)","configFiles":"/a.yml","missing":false}"#
+        );
+        let gone: ComposeProject =
+            serde_json::from_str(r#"{"name":"web","status":"running(1)","configFiles":"/a.yml","missing":true}"#).unwrap();
+        assert!(gone.missing, "l'interface renvoie l'état « fichier introuvable » avec le projet");
     }
 
     #[test]

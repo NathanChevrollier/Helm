@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { Cable, FileCode2, GitBranch, Layers, Lock, Package, Play, Plus, Rocket, RotateCw, ScrollText, Square, SquareTerminal, UploadCloud } from "lucide-react";
+import { Cable, FileCode2, FolderSearch, GitBranch, Layers, Lock, Package, Play, Plus, Rocket, RotateCw, ScrollText, Square, SquareTerminal, UploadCloud } from "lucide-react";
 import { api, errorMessage, type ComposeProject, type Container, type DockerOverview } from "../../lib/api";
 import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, MenuButton, Modal, StatusDot, useContextMenu, type MenuItem } from "../../components/ui";
@@ -9,6 +9,7 @@ import PortChips, { isExposed } from "./PortChips";
 import { stateTone, useContainerActions, useContainerStats } from "./shared";
 
 const FileEditor = lazy(() => import("../../components/FileEditor"));
+const ComposeFileDialog = lazy(() => import("../../components/ComposeFileDialog"));
 
 /** Colonnes d'une ligne de service : nom et état, image, ports, CPU, mémoire, actions. */
 const SERVICE_GRID = "grid grid-cols-[minmax(140px,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_64px_72px_96px] items-center gap-3";
@@ -23,6 +24,8 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
   const [github, setGithub] = useState<ComposeProject | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restrict, setRestrict] = useState<{ project: ComposeProject; port: number } | null>(null);
+  /** Nouveau fichier compose choisi pour un projet dont le fichier a disparu. */
+  const [relinkFile, setRelinkFile] = useState<string | null>(null);
   const portMenu = useContextMenu();
   if (data.projects.length === 0) {
     return (
@@ -64,6 +67,32 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
 
   const containersOf = (name: string) => data.containers.filter((c) => c.composeProject === name).sort((a, b) => (a.composeService ?? a.name).localeCompare(b.composeService ?? b.name, "fr"));
   const projectOf = (c: Container) => data.projects.find((x) => x.name === c.composeProject);
+
+  /** Projet dont le fichier a disparu : on demande où il se trouve maintenant, puis le dialogue
+   *  du fichier propose de remplacer l'ancien projet par celui-ci. */
+  const relink = async (p: ComposeProject) => {
+    const old = p.configFiles.split(",")[0];
+    const path = await ask({
+      title: `Relier « ${p.name} » à son nouveau dossier`,
+      body: `Docker cherchait ${old}, qui n'existe plus. Indique le chemin complet du fichier compose à son nouvel emplacement.`,
+      input: { label: "Fichier compose", initial: old },
+      confirmLabel: "Continuer",
+    });
+    if (typeof path === "string" && path.trim()) setRelinkFile(path.trim());
+  };
+
+  /** Sans fichier, seules les actions qui se font par le nom du projet restent possibles. */
+  const missingItems = (p: ComposeProject): MenuItem[] => [
+    { label: "Relier au nouveau dossier…", icon: <FolderSearch size={14} />, onClick: () => void relink(p) },
+    "separator",
+    { label: "Arrêter (stop)", icon: <Square size={14} />, onClick: () => void act(p, "stop", "Arrêter") },
+    {
+      label: "Arrêter et supprimer (down)…",
+      icon: <Square size={14} />,
+      danger: true,
+      onClick: () => void act(p, "down", "Arrêter et supprimer (down)", "Les conteneurs du projet seront arrêtés et supprimés (les volumes nommés sont conservés)."),
+    },
+  ];
 
   const projectItems = (p: ComposeProject, file: string, stopped: boolean): MenuItem[] => [
     { label: "Mettre à jour (pull + up)", icon: <UploadCloud size={14} />, onClick: () => void act(p, "update", "Mettre à jour (pull + up)") },
@@ -116,18 +145,35 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                   <Badge tone={arrete ? "muted" : enMarche === services.length ? "ok" : "warn"}>
                     {services.length > 0 ? `${enMarche}/${services.length} en cours` : p.status}
                   </Badge>
+                  {p.missing && (
+                    <Badge tone="warn" title="Le dossier du projet a sans doute été renommé, déplacé ou supprimé">
+                      Fichier introuvable
+                    </Badge>
+                  )}
                   {enMarche > 0 && <span className="shrink-0 text-xs text-muted tabular-nums">CPU {cpu.toFixed(1)} %</span>}
                 </div>
-                <button type="button" className="block max-w-full truncate font-mono text-xs text-muted hover:text-accent" title={`${p.configFiles}\nClic : éditer le fichier`} onClick={() => setEditing(file)}>
-                  {file}
-                </button>
+                {p.missing ? (
+                  <span className="block max-w-full truncate font-mono text-xs text-faint line-through" title={`${p.configFiles}\nCe fichier n'existe plus`}>
+                    {file}
+                  </span>
+                ) : (
+                  <button type="button" className="block max-w-full truncate font-mono text-xs text-muted hover:text-accent" title={`${p.configFiles}\nClic : éditer le fichier`} onClick={() => setEditing(file)}>
+                    {file}
+                  </button>
+                )}
               </div>
               {/* Les actions courantes en clair, le reste rangé derrière « … ». */}
               <div className="flex shrink-0 items-center gap-1.5">
-                <Button size="sm" variant="primary" icon={<Rocket size={12} />} title="Nouvelles images, redémarrage, vérification, et retour à la version précédente si elle échoue" onClick={() => void deployProject(serverId, p)}>
-                  Déployer
-                </Button>
-                {arrete ? (
+                {p.missing ? (
+                  <Button size="sm" variant="primary" icon={<FolderSearch size={12} />} title="Retrouver le fichier compose à son nouvel emplacement et relancer le projet depuis là" onClick={() => void relink(p)}>
+                    Relier au nouveau dossier
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="primary" icon={<Rocket size={12} />} title="Nouvelles images, redémarrage, vérification, et retour à la version précédente si elle échoue" onClick={() => void deployProject(serverId, p)}>
+                    Déployer
+                  </Button>
+                )}
+                {arrete && !p.missing ? (
                   <Button size="sm" icon={<Play size={12} />} loading={b("up")} onClick={() => void act(p, "up", "Démarrer (up -d)")}>
                     Démarrer
                   </Button>
@@ -149,7 +195,7 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                 >
                   Logs
                 </Button>
-                <MenuButton size="sm" title="Autres actions" items={() => projectItems(p, file, arrete)} />
+                <MenuButton size="sm" title="Autres actions" items={() => (p.missing ? missingItems(p) : projectItems(p, file, arrete))} />
               </div>
             </header>
 
@@ -230,6 +276,18 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
         );
       })}
       {portMenu.menu}
+      {relinkFile && (
+        <Suspense fallback={null}>
+          <ComposeFileDialog
+            serverId={serverId}
+            file={relinkFile}
+            onClose={() => {
+              setRelinkFile(null);
+              void reload();
+            }}
+          />
+        </Suspense>
+      )}
       {selected && (
         <ContainerDrawer
           key={selected.id}

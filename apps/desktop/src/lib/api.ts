@@ -437,6 +437,26 @@ export interface ComposeProject {
   name: string;
   status: string;
   configFiles: string;
+  /** Le fichier compose noté par Docker n'existe plus (dossier renommé, déplacé ou supprimé). */
+  missing?: boolean;
+}
+
+/** Ce que Docker fait déjà du projet d'un fichier compose choisi dans l'explorateur. */
+export type ComposeFileState =
+  | { kind: "invalid"; message: string }
+  | { kind: "notRunning" }
+  | { kind: "same"; project: ComposeProject; running: boolean }
+  | { kind: "conflict"; project: ComposeProject };
+
+export interface ComposeFileInfo {
+  file: string;
+  /** Nom du projet calculé par Docker (clé `name:`, sinon nom du dossier). */
+  project: string;
+  hasBuild: boolean;
+  ports: number[];
+  /** Ports publiés déjà occupés sur le serveur (vérifié avant un premier lancement). */
+  busyPorts: number[];
+  state: ComposeFileState;
 }
 
 export interface DockerOverview {
@@ -1227,6 +1247,13 @@ export const api = {
   dockerAction: (serverId: string, id: string, action: string) => invoke<void>("docker_container_action", { serverId, id, action }),
   dockerInspect: (serverId: string, id: string) => invoke<string>("docker_inspect", { serverId, id }),
   dockerLogs: (serverId: string, id: string, tail = 500) => invoke<string>("docker_logs", { serverId, id, tail }),
+  composeFileInfo: (serverId: string, file: string) => invoke<ComposeFileInfo>("docker_compose_file_info", { serverId, file }),
+  /** Lance le projet d'un fichier ; `replace` : projet du même nom lancé depuis un autre dossier, supprimé d'abord. */
+  composeLaunch: (serverId: string, file: string, name: string, build: boolean, replace: string | null) =>
+    invoke<string>("docker_compose_launch", { serverId, file, name, build, replace }),
+  dockerProjectsUnder: (serverId: string, dir: string) => invoke<ComposeProject[]>("docker_projects_under", { serverId, dir }),
+  /** Déplace un dossier en arrêtant puis relançant les projets compose qu'il contient. */
+  dockerMoveFolder: (serverId: string, from: string, to: string) => invoke<string>("docker_move_folder", { serverId, from, to }),
   composeAction: (serverId: string, project: ComposeProject, action: string) =>
     invoke<string>("docker_compose_action", { serverId, project, action }),
   composeCommand: (project: ComposeProject, sub: string) => invoke<string>("docker_compose_command", { project, sub }),

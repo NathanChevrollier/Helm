@@ -167,6 +167,116 @@ pub async fn docker_compose_action(
     track(&audit, &store, &server_id, "docker.compose", &detail, r)
 }
 
+/// Situation d'un fichier compose choisi dans l'explorateur : valide ou non, projet déjà lancé
+/// depuis ce fichier, ou projet du même nom lancé depuis un autre dossier.
+#[tauri::command]
+pub async fn docker_compose_file_info(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    file: String,
+) -> Result<docker::ComposeFileInfo, String> {
+    let c = ctx(&store, &sessions, &cache, &server_id).await?;
+    docker::compose_file_info(&c.conn, c.access, c.sudo.as_deref(), &file).await.map_err(err)
+}
+
+/// Lance le projet d'un fichier compose, en remplaçant au besoin le projet du même nom lancé
+/// depuis un autre dossier (`replace`).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn docker_compose_launch(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    file: String,
+    name: String,
+    build: bool,
+    replace: Option<String>,
+) -> Result<String, String> {
+    let detail = match &replace {
+        Some(old) => format!("{name} ({file}, remplace {old})"),
+        None => format!("{name} ({file})"),
+    };
+    let r: Result<String, String> = async {
+        if replace.is_none() && !docker::valid_project_name(&name) {
+            return Err("nom de projet invalide : minuscules, chiffres, - et _ seulement".into());
+        }
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        docker::compose_launch(&c.conn, c.access, c.sudo.as_deref(), &file, &name, build, replace.as_deref()).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "docker.compose_launch", &detail, r)
+}
+
+/// Projets compose dont le fichier est dans ce dossier. Liste vide si Docker est absent : ce n'est
+/// qu'une vérification avant de renommer ou supprimer un dossier.
+#[tauri::command]
+pub async fn docker_projects_under(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    dir: String,
+) -> Result<Vec<ComposeProject>, String> {
+    let Ok(c) = ctx(&store, &sessions, &cache, &server_id).await else { return Ok(Vec::new()) };
+    let projects = docker::compose_projects(&c.conn, c.access, c.sudo.as_deref()).await.unwrap_or_default();
+    Ok(docker::projects_under(&projects, &dir))
+}
+
+/// Renomme ou déplace un dossier qui contient des projets compose sans les perdre : ils sont
+/// supprimés (conteneurs seulement, les volumes restent), le dossier est déplacé, puis ceux qui
+/// tournaient sont relancés depuis leur nouvel emplacement. Si le déplacement échoue, ils sont
+/// relancés depuis l'ancien.
+#[tauri::command]
+pub async fn docker_move_folder(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, DockerAccess>,
+    server_id: String,
+    from: String,
+    to: String,
+) -> Result<String, String> {
+    let detail = format!("{from} → {to}");
+    let r: Result<String, String> = async {
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        let s = c.sudo.as_deref();
+        let projects = docker::compose_projects(&c.conn, c.access, s).await.map_err(err)?;
+        let under = docker::projects_under(&projects, &from);
+        let mut log = String::new();
+        for p in &under {
+            log.push_str(&docker::compose_action(&c.conn, c.access, s, p, "down").await.map_err(err)?);
+        }
+        let sftp = sessions.sftp(&store, &server_id).await?;
+        if let Err(e) = zenytt_core::sftp::rename(&sftp, &from, &to).await {
+            for p in under.iter().filter(|p| p.is_running()) {
+                let _ = docker::compose_action(&c.conn, c.access, s, p, "up").await;
+            }
+            return Err(format!("déplacement impossible ({e}) : les projets ont été relancés depuis l'ancien dossier"));
+        }
+        for p in under.iter().filter(|p| p.is_running()) {
+            let moved: Vec<String> = p
+                .config_files
+                .split(',')
+                .map(str::trim)
+                .map(|f| docker::relocate(f, &from, &to).unwrap_or_else(|| f.to_string()))
+                .collect();
+            let np = ComposeProject { config_files: moved.join(","), missing: false, ..p.clone() };
+            log.push_str(
+                &docker::compose_action(&c.conn, c.access, s, &np, "up")
+                    .await
+                    .map_err(|e| format!("dossier déplacé, mais « {} » n'a pas redémarré : {e}", p.name))?,
+            );
+        }
+        Ok(log)
+    }
+    .await;
+    track(&audit, &store, &server_id, "docker.move_folder", &detail, r)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComposeCreated {
