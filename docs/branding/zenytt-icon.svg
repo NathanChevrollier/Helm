@@ -5,9 +5,9 @@
       <stop offset="1" stop-color="#0b1120"/>
     </linearGradient>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <rect x="32" y="32" width="960" height="960" rx="214" fill="url(#bg)"/>
   <!-- Symbole « Zénith » dessiné sur une grille de 100 : l'étoile perce l'horizon par le haut. -->
-  <g transform="translate(162 190) scale(7)">
+  <g transform="translate(62 98) scale(9)">
     <!-- Horizon, ouvert au zénith -->
     <path d="M62.31 16.17 A36 36 0 1 1 37.69 16.17" fill="none" stroke="#e9eef7" stroke-width="4.5" stroke-linecap="round"/>
     <!-- Étoile polaire, deux facettes -->
