@@ -8,7 +8,8 @@ hauteur sur ses serveurs et le cap pour les piloter.
 
 | Fichier | Usage |
 |---|---|
-| `zenytt-icon.svg` | Icône de l'application (tuile arrondie). Source de toutes les icônes : `apps/desktop/app-icon.svg` |
+| `zenytt-icon.svg` | Icône de l'application : tuile qui remplit le carré, symbole à ~93 %. Source : `apps/desktop/app-icon.svg` |
+| `zenytt-icon-small.svg` | Même icône pour 16 à 32 px (barre des tâches, zone de notification) : trait épaissi, sans micro-détails. Source : `apps/desktop/app-icon-small.svg` |
 | `zenytt-logo.svg` / `zenytt-logo-light.svg` | Logo horizontal, sur fond sombre / sur fond clair |
 | `zenytt-mark.svg` / `zenytt-mark-light.svg` | Symbole seul, sur fond sombre / sur fond clair |
 | `zenytt-wordmark.svg` / `zenytt-wordmark-light.svg` | Nom seul |
@@ -32,6 +33,11 @@ Régénérer les icônes de l'application après une modification du symbole :
 ```sh
 cd apps/desktop && pnpm exec tauri icon app-icon.svg   # puis supprimer src-tauri/icons/android et ios
 ```
+
+`tauri icon` dessine toutes les tailles depuis une seule image : il faut ensuite reconstruire
+`src-tauri/icons/icon.ico` (et `32x32.png`) avec la version simplifiée d'`app-icon-small.svg` pour
+16, 24 et 32 px, et la version complète au-delà. Windows prend dans le `.ico` l'image de la taille
+affichée : c'est ce qui garde l'icône nette dans la barre des tâches.
 
 ## Couleurs
 
