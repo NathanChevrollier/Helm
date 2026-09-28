@@ -48,9 +48,12 @@ publiés sur la page [Releases](https://github.com/NathanChevrollier/Zenytt/rele
 | Système | Fichier |
 | --- | --- |
 | Windows 10/11 | `Zenytt_x.y.z_x64-setup.exe` |
-| macOS Apple Silicon | `Zenytt_x.y.z_aarch64.dmg` |
-| macOS Intel | `Zenytt_x.y.z_x64.dmg` |
+| Mac Apple Silicon (puce M1, M2, M3…) | `Zenytt_x.y.z_aarch64.dmg` |
+| Mac Intel | `Zenytt_x.y.z_x64.dmg` |
 | Linux | `.AppImage` (mises à jour automatiques), `.deb` ou `.rpm` |
+
+Mac Apple Silicon ou Intel ? Menu  → *À propos de ce Mac* : la ligne « Puce » (Apple M…) ou
+« Processeur » (Intel) le dit.
 
 Zenytt vérifie au démarrage si une nouvelle version existe et propose de l'installer
 (Réglages → Maintenance → Mises à jour). Les paquets sont signés : une version altérée est refusée.

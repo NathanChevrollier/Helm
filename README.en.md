@@ -47,9 +47,12 @@ Or download an installer from the [Releases](https://github.com/NathanChevrollie
 | System | File |
 | --- | --- |
 | Windows 10/11 | `Zenytt_x.y.z_x64-setup.exe` |
-| macOS Apple Silicon | `Zenytt_x.y.z_aarch64.dmg` |
-| macOS Intel | `Zenytt_x.y.z_x64.dmg` |
+| Mac Apple Silicon (M1, M2, M3… chip) | `Zenytt_x.y.z_aarch64.dmg` |
+| Mac Intel | `Zenytt_x.y.z_x64.dmg` |
 | Linux | `.AppImage` (auto-updates), `.deb` or `.rpm` |
+
+Apple Silicon or Intel? Apple menu  → *About This Mac*: the "Chip" (Apple M…) or "Processor"
+(Intel) line tells you.
 
 Zenytt checks for new versions at startup and offers to install them. Update packages are signed: a
 tampered version is rejected.

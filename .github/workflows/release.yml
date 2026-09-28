@@ -226,4 +226,10 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" --jq '.assets[].name' | sort
           gh api "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" --jq '.assets[].name' | grep -qx latest.json \
             || { echo "::error::latest.json manquant : les mises à jour automatiques ne verraient pas cette version"; exit 1; }
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" -F draft=false
+          # Guide « quel fichier télécharger » en tête des notes : les noms bruts (x64, aarch64) ne
+          # parlent pas aux utilisateurs Mac, qui prennent souvent le mauvais installeur.
+          notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" --jq .body)
+          guide=$(sed "s/{v}/${GITHUB_REF_NAME#v}/g" .github/release-download.md)
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/${{ needs.draft.outputs.release_id }}" -f body="$guide
+
+          $notes" -F draft=false
