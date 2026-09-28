@@ -12,7 +12,7 @@ mod vnc_bridge;
 
 use commands::{
     assistant, backups, dashboard, databases, deploy, docker, files, identities, logs, mesh, monitoring, rdp, redis, security, servers,
-    share, sites, sync, terminal, tunnels, workspace,
+    share, sites, sync, terminal, tunnels, vms, workspace,
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
@@ -81,6 +81,7 @@ pub fn run() {
             app.manage(sessions::Sessions::new());
             app.manage(monitoring::Monitor::default());
             app.manage(docker::DockerAccess::default());
+            app.manage(vms::VmAccess::default());
             app.manage(files::Transfers::default());
             app.manage(dashboard::DashboardCache::default());
             app.manage(tunnels::Tunnels::default());
@@ -246,6 +247,11 @@ pub fn run() {
             mesh::mesh_repair,
             mesh::mesh_delete,
             mesh::mesh_status,
+            vms::vm_overview,
+            vms::vm_detail,
+            vms::vm_stats,
+            vms::vm_action,
+            vms::vm_delete,
             docker::docker_compose_launch,
             docker::docker_projects_under,
             docker::docker_move_folder,

@@ -18,6 +18,7 @@ pub mod sites;
 pub mod sync;
 pub mod terminal;
 pub mod tunnels;
+pub mod vms;
 pub mod workspace;
 
 use zenytt_core::Connection;
