@@ -14,6 +14,7 @@ pub mod domains;
 pub mod fail2ban;
 pub mod firewall;
 pub mod legacy;
+pub mod mesh;
 pub mod nginx;
 pub mod redis;
 pub mod registry;
