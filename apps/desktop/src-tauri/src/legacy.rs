@@ -58,8 +58,14 @@ pub fn migrate_local(config_dir: &Path) {
 pub fn start(app: &AppHandle) {
     let _ = APP.set(app.clone());
     let product = app.config().product_name.clone().unwrap_or_else(|| "Zenytt".into());
+    let identifier = app.config().identifier.clone();
+    let config_dir = app.path().app_config_dir().ok();
     std::thread::spawn(move || {
         remove_previous_app(&product);
+        // Arrivée par la mise à jour de l'ancienne application : aucun raccourci n'a été créé.
+        if let Some(dir) = &config_dir {
+            crate::shortcut::ensure_start_menu_shortcut(dir, &product, &identifier);
+        }
         // Cache de l'interface et journaux de l'ancienne application : rien à reprendre.
         for dir in zenytt_profiles::legacy::old_leftover_dirs() {
             if dir.exists() && std::fs::remove_dir_all(&dir).is_ok() {

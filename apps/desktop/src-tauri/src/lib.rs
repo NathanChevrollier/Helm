@@ -5,6 +5,7 @@ mod commands;
 mod legacy;
 mod rdp_bridge;
 mod sessions;
+mod shortcut;
 mod store;
 mod tray;
 mod vnc_bridge;
