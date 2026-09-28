@@ -27,6 +27,7 @@ pub mod ssh;
 pub mod sync_server;
 pub mod system;
 pub mod tmux;
+pub mod vm;
 
 pub use russh;
 pub use russh_sftp;

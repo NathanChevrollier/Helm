@@ -1,0 +1,37 @@
+Domain: 'cirros-test'
+  cpu.time=5420282800
+  cpu.user=4960000000
+  cpu.system=440000000
+  cpu.cache.monitor.count=0
+  cpu.haltpoll.success.time=0
+  cpu.haltpoll.fail.time=0
+  balloon.current=131072
+  balloon.maximum=131072
+  balloon.swap_in=0
+  balloon.swap_out=0
+  balloon.major_fault=0
+  balloon.minor_fault=0
+  balloon.unused=47240
+  balloon.available=73508
+  balloon.usable=55016
+  balloon.last-update=1790601090
+  balloon.disk_caches=3888
+  balloon.hugetlb_pgalloc=0
+  balloon.hugetlb_pgfail=0
+  balloon.rss=271512
+  vcpu.current=1
+  vcpu.maximum=1
+  vcpu.0.state=1
+  vcpu.0.time=4960000000
+  vcpu.0.wait=0
+  vcpu.0.delay=110400
+
+Domain: 'spice-test'
+  cpu.time=1380000000
+  cpu.user=710000000
+  cpu.system=670000000
+  balloon.current=131072
+  balloon.maximum=131072
+  vcpu.current=1
+  vcpu.maximum=1
+

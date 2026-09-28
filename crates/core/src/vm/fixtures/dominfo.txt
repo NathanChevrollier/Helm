@@ -1,0 +1,45 @@
+@@ 11111111-2222-3333-4444-555555555555
+Id:             -
+Name:           l'été 2 "test"
+UUID:           11111111-2222-3333-4444-555555555555
+OS Type:        hvm
+State:          shut off
+CPU(s):         2
+Max memory:     1048576 KiB
+Used memory:    1048576 KiB
+Persistent:     yes
+Autostart:      enable
+Managed save:   no
+Security model: none
+Security DOI:   0
+
+@@ 9a9bfdef-7742-4220-868f-fcef6e871e62
+Id:             -
+Name:           cirros-test
+UUID:           9a9bfdef-7742-4220-868f-fcef6e871e62
+OS Type:        hvm
+State:          shut off
+CPU(s):         1
+Max memory:     131072 KiB
+Used memory:    131072 KiB
+Persistent:     yes
+Autostart:      disable
+Managed save:   no
+Security model: none
+Security DOI:   0
+
+@@ 350a6bbb-9ad8-44bb-af70-081fb04bb71a
+Id:             -
+Name:           spice-test
+UUID:           350a6bbb-9ad8-44bb-af70-081fb04bb71a
+OS Type:        hvm
+State:          shut off
+CPU(s):         1
+Max memory:     131072 KiB
+Used memory:    131072 KiB
+Persistent:     yes
+Autostart:      disable
+Managed save:   no
+Security model: none
+Security DOI:   0
+
