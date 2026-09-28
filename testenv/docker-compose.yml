@@ -4,6 +4,7 @@
 #   pnpm testenv                      (ou : docker compose -f testenv/docker-compose.yml up -d --build)
 #   SSH : 127.0.0.1:2222   root / zenytt   ou   deploy / deploy (sudo avec mot de passe)
 #   Second VPS « Debian réaliste » : 127.0.0.1:2223   admin / admin (sudo avec mot de passe, fail2ban actif)
+#   Réseau privé : 127.0.0.1:2225 (mesh-a) et 127.0.0.1:2226 (mesh-b), root / zenytt ou deploy / deploy
 #   Débannir le PC après des tests fail2ban :  docker exec zenytt-test-debian fail2ban-client unban --all
 #   Tout supprimer :  docker compose -f testenv/docker-compose.yml down -v
 services:
@@ -41,6 +42,28 @@ services:
     ports:
       - "127.0.0.1:2223:6666"
 
+  # Deux membres d'un réseau privé WireGuard (section Réseau privé) : voir mesh/Dockerfile.
+  mesh-a:
+    build: ./mesh
+    container_name: zenytt-test-mesh-a
+    hostname: mesh-a
+    cap_add: [NET_ADMIN]
+    networks: [default, meshnet]
+    ports:
+      - "127.0.0.1:2225:22"
+
+  mesh-b:
+    build: ./mesh
+    container_name: zenytt-test-mesh-b
+    hostname: mesh-b
+    cap_add: [NET_ADMIN]
+    networks: [default, meshnet]
+    ports:
+      - "127.0.0.1:2226:22"
+
 volumes:
   dind-run:
   dind-data:
+
+networks:
+  meshnet:
