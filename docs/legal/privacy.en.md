@@ -21,7 +21,8 @@ Uninstalling Zenytt and deleting its configuration folder and credential entries
 
 Zenytt connects over SSH to the servers you configure. The private network (WireGuard) links the
 servers you choose: each server generates its own private key, which never leaves it; traffic flows
-directly between your servers, encrypted, never through the publisher or a third party. Tools a
+directly between your servers, encrypted, never through the publisher or a third party. A virtual machine's screen is shown through an SSH tunnel;
+its VNC password, if any, is read from the server and kept in memory only for the session. Tools a
 feature needs (WireGuard, restic, tmux…) are installed with the server's package manager, which
 contacts your distribution's repositories.
 

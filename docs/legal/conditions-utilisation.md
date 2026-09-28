@@ -27,7 +27,7 @@ avoir été modifiée.
 
 Zenytt est un outil d'administration : il exécute sur tes serveurs les actions que tu demandes
 (commandes, suppression de fichiers ou de conteneurs, modification de configurations nginx ou
-Apache, pare-feu, sauvegardes, restaurations, déploiements, réseaux privés entre serveurs…). Ces actions peuvent être
+Apache, pare-feu, sauvegardes, restaurations, déploiements, réseaux privés entre serveurs, machines virtuelles…). Ces actions peuvent être
 **irréversibles** ou rendre un serveur inaccessible.
 
 Tu es seul responsable :

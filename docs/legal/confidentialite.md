@@ -47,6 +47,9 @@ sa propre clé privée, qui **ne quitte jamais le serveur** (Zenytt ne la lit pa
 publiques et les adresses sont connues de Zenytt. Le trafic du réseau privé circule directement
 entre tes serveurs, chiffré, sans passer par l'éditeur ni par un service tiers.
 
+L'**écran d'une machine virtuelle** s'affiche par un tunnel SSH ; si la VM a un mot de passe VNC,
+Zenytt le lit sur le serveur et ne le garde qu'en mémoire, le temps de la session.
+
 Pour installer un outil nécessaire à une fonction (WireGuard, restic, tmux…), Zenytt utilise le
 gestionnaire de paquets du serveur, qui contacte les dépôts de ta distribution.
 
