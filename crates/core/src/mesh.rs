@@ -6,6 +6,9 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
+use crate::ssh::shell_quote;
+use crate::{Connection, Error, Result};
+
 pub const IFACE: &str = "zenytt";
 pub const CONF: &str = "/etc/wireguard/zenytt.conf";
 pub const KEY: &str = "/etc/wireguard/zenytt.key";
@@ -200,6 +203,131 @@ pub fn parse_peers(dump: &str) -> Vec<Link> {
         .collect()
 }
 
+/// Installe wireguard-tools si besoin, fait générer la clé par le serveur (une seule fois), puis
+/// décrit le serveur. La clé privée n'est jamais affichée : seule la clé publique sort.
+const PREPARE_SCRIPT: &str = r#"set -e
+if ! command -v wg >/dev/null || ! command -v wg-quick >/dev/null; then
+  if command -v apt-get >/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard-tools >&2 || { apt-get update >&2 && DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard-tools >&2; }
+  elif command -v dnf >/dev/null; then dnf install -y wireguard-tools >&2
+  elif command -v apk >/dev/null; then apk add wireguard-tools >&2
+  elif command -v pacman >/dev/null; then pacman -S --noconfirm wireguard-tools >&2
+  else echo "installe wireguard-tools sur ce serveur (gestionnaire de paquets inconnu)" >&2; exit 1; fi
+fi
+mkdir -p /etc/wireguard && chmod 700 /etc/wireguard
+[ -s /etc/wireguard/zenytt.key ] || (umask 077 && wg genkey > /etc/wireguard/zenytt.key)
+echo @@key; wg pubkey < /etc/wireguard/zenytt.key
+echo @@addr; ip -4 -o addr show scope global || true
+echo @@route; ip -4 -o route || true
+echo @@udp; ss -Hlun 2>/dev/null | awk '{print $4}' || true
+echo @@conf; head -n1 /etc/wireguard/zenytt.conf 2>/dev/null || true
+echo @@port; sed -n 's/^ListenPort *= *//p' /etc/wireguard/zenytt.conf 2>/dev/null || true
+"#;
+
+/// Écrit la clé dans la configuration envoyée, ouvre le port UDP dans le pare-feu local, puis
+/// lève l'interface ou la met à jour sans couper les liens. `$1` : port UDP.
+const APPLY_SCRIPT: &str = r#"set -e
+C=/etc/wireguard/zenytt.conf
+chmod 600 "$C"
+K=$(cat /etc/wireguard/zenytt.key)
+sed -i "s|@ZENYTT_KEY@|$K|" "$C"
+if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow "$1/udp" comment zenytt >&2; fi
+if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --add-port="$1/udp" >&2 && firewall-cmd --reload >&2; fi
+if ip link show zenytt >/dev/null 2>&1; then
+  T=$(mktemp); wg-quick strip zenytt > "$T"; wg syncconf zenytt "$T"; rm -f "$T"
+else
+  if [ -d /run/systemd/system ]; then systemctl enable --now wg-quick@zenytt >&2; else wg-quick up zenytt >&2; fi
+fi
+"#;
+
+const STATUS_SCRIPT: &str = r#"echo @@conf; head -n1 /etc/wireguard/zenytt.conf 2>/dev/null || true
+echo @@up; if ip link show zenytt >/dev/null 2>&1; then echo yes; else echo no; fi
+echo @@peers; wg show zenytt dump 2>/dev/null | tail -n +2 || true
+"#;
+
+/// `$1` : port UDP à refermer.
+const REMOVE_SCRIPT: &str = r#"if [ -d /run/systemd/system ]; then systemctl disable --now wg-quick@zenytt >/dev/null 2>&1 || true; fi
+if ip link show zenytt >/dev/null 2>&1; then wg-quick down zenytt >&2 || ip link delete zenytt; fi
+rm -f /etc/wireguard/zenytt.conf /etc/wireguard/zenytt.key
+if command -v ufw >/dev/null; then ufw delete allow "$1/udp" >/dev/null 2>&1 || true; fi
+if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --remove-port="$1/udp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 || true; fi
+"#;
+
+fn section<'a>(out: &'a str, name: &str) -> &'a str {
+    let marker = format!("@@{name}\n");
+    let Some(start) = out.find(&marker) else { return "" };
+    let rest = &out[start + marker.len()..];
+    match rest.find("\n@@") {
+        Some(end) => &rest[..end],
+        None => rest,
+    }
+}
+
+/// Ce que le PC doit savoir d'un serveur avant de l'ajouter à un réseau.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Prepared {
+    pub public_key: String,
+    pub public_ips: Vec<String>,
+    pub routes: String,
+    pub busy_udp: HashSet<u16>,
+    /// Réseau Zenytt dont ce serveur est déjà membre.
+    pub existing: Option<(String, String)>,
+    pub existing_port: Option<u16>,
+}
+
+pub fn parse_prepared(out: &str) -> Result<Prepared> {
+    let public_key = section(out, "key").trim().to_string();
+    if public_key.is_empty() {
+        return Err(Error::Other("clé WireGuard non générée sur le serveur".into()));
+    }
+    Ok(Prepared {
+        public_key,
+        public_ips: public_ipv4(section(out, "addr")),
+        routes: section(out, "route").to_string(),
+        busy_udp: section(out, "udp").lines().filter_map(|l| l.trim().rsplit(':').next()?.parse().ok()).collect(),
+        existing: parse_header(section(out, "conf")),
+        existing_port: section(out, "port").trim().parse().ok(),
+    })
+}
+
+pub async fn prepare(conn: &Connection, sudo: Option<&str>) -> Result<Prepared> {
+    let cmd = format!("sh -c {}", shell_quote(PREPARE_SCRIPT));
+    let out = crate::ssh::long(conn.exec_sudo(&cmd, sudo, None)).await?.into_result()?;
+    parse_prepared(&out.stdout)
+}
+
+pub async fn apply(conn: &Connection, sudo: Option<&str>, c: &NodeConfig) -> Result<()> {
+    conn.write_file_sudo(CONF, &render_config(c), sudo).await?;
+    let cmd = format!("sh -c {} zenytt-mesh {}", shell_quote(APPLY_SCRIPT), c.port);
+    crate::ssh::long(conn.exec_sudo(&cmd, sudo, None)).await?.into_result()?;
+    Ok(())
+}
+
+/// État de l'interface d'un membre, lu sur le serveur.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeStatus {
+    pub network_id: Option<String>,
+    pub up: bool,
+    pub links: Vec<Link>,
+}
+
+pub async fn status(conn: &Connection, sudo: Option<&str>) -> Result<NodeStatus> {
+    let cmd = format!("sh -c {}", shell_quote(STATUS_SCRIPT));
+    let out = conn.exec_sudo(&cmd, sudo, None).await?.into_result()?.stdout;
+    Ok(NodeStatus {
+        network_id: parse_header(section(&out, "conf")).map(|(id, _)| id),
+        up: section(&out, "up").trim() == "yes",
+        links: parse_peers(section(&out, "peers")),
+    })
+}
+
+pub async fn remove(conn: &Connection, sudo: Option<&str>, port: u16) -> Result<()> {
+    let cmd = format!("sh -c {} zenytt-mesh {port}", shell_quote(REMOVE_SCRIPT));
+    crate::ssh::long(conn.exec_sudo(&cmd, sudo, None)).await?.into_result()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +426,22 @@ mod tests {
         assert_eq!(links[0], Link { public_key: "KB=".into(), endpoint: Some("95.0.0.2:51820".into()), last_handshake: Some(1790000000), rx: 1200, tx: 3400 });
         assert_eq!(links[1].endpoint, None);
         assert_eq!(links[1].last_handshake, None, "0 = jamais d'échange");
+    }
+
+    #[test]
+    fn parse_prepare_output() {
+        let out = "@@key\nPUBKEY=\n@@addr\n2: eth0    inet 51.89.1.2/32 scope global eth0\n@@route\n172.17.0.0/16 dev docker0\n@@udp\n0.0.0.0:51820\n[::]:5353\n*:68\n@@conf\n# zenytt-network: abc Prod\n@@port\n51820\n";
+        let p = parse_prepared(out).unwrap();
+        assert_eq!(p.public_key, "PUBKEY=");
+        assert_eq!(p.public_ips, vec!["51.89.1.2".to_string()]);
+        assert!(p.routes.contains("docker0"));
+        assert_eq!(p.busy_udp, [51820, 5353, 68].into());
+        assert_eq!(p.existing, Some(("abc".into(), "Prod".into())));
+        assert_eq!(p.existing_port, Some(51820));
+    }
+
+    #[test]
+    fn prepare_without_key_is_an_error() {
+        assert!(parse_prepared("@@key\n\n@@addr\n").is_err());
     }
 }
