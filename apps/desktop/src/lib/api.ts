@@ -472,6 +472,56 @@ export interface DockerOverview {
   occasional: string[];
 }
 
+/** Membre d'un réseau privé WireGuard. */
+export interface MeshMember {
+  serverId: string;
+  address: string;
+  publicKey: string;
+  /** IP ou nom public ; null : serveur derrière un NAT. */
+  endpoint: string | null;
+  port: number;
+}
+
+export interface MeshNetwork {
+  id: string;
+  name: string;
+  cidr: string;
+  members: MeshMember[];
+}
+
+export interface MeshLink {
+  publicKey: string;
+  endpoint: string | null;
+  /** Horodatage Unix (s) du dernier échange ; null : jamais. */
+  lastHandshake: number | null;
+  rx: number;
+  tx: number;
+}
+
+export interface MeshNodeStatus {
+  networkId: string | null;
+  up: boolean;
+  links: MeshLink[];
+}
+
+export interface MeshMemberStatus {
+  serverId: string;
+  error: string | null;
+  status: MeshNodeStatus | null;
+}
+
+export interface MeshMemberResult {
+  serverId: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface MeshReport {
+  network: MeshNetwork | null;
+  results: MeshMemberResult[];
+  warnings: string[];
+}
+
 export interface ContainerStats {
   id: string;
   cpu: number;
@@ -1285,6 +1335,13 @@ export const api = {
     invoke<string>("docker_compose_launch", { serverId, file, name, build, replace }),
   /** Marque un conteneur comme ponctuel (tâche qui s'arrête normalement) ou le démarque. */
   dockerOccasionalSet: (serverId: string, key: string, occasional: boolean) => invoke<void>("docker_occasional_set", { serverId, key, occasional }),
+  meshList: () => invoke<MeshNetwork[]>("mesh_list"),
+  meshCreate: (name: string, serverIds: string[]) => invoke<MeshReport>("mesh_create", { name, serverIds }),
+  meshAdd: (networkId: string, serverId: string) => invoke<MeshReport>("mesh_add", { networkId, serverId }),
+  meshRemove: (networkId: string, serverId: string) => invoke<MeshReport>("mesh_remove", { networkId, serverId }),
+  meshRepair: (networkId: string) => invoke<MeshReport>("mesh_repair", { networkId }),
+  meshDelete: (networkId: string) => invoke<MeshReport>("mesh_delete", { networkId }),
+  meshStatus: (networkId: string) => invoke<MeshMemberStatus[]>("mesh_status", { networkId }),
   dockerProjectsUnder: (serverId: string, dir: string) => invoke<ComposeProject[]>("docker_projects_under", { serverId, dir }),
   /** Déplace un dossier en arrêtant puis relançant les projets compose qu'il contient. */
   dockerMoveFolder: (serverId: string, from: string, to: string) => invoke<string>("docker_move_folder", { serverId, from, to }),
