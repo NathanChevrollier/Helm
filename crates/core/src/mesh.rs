@@ -338,12 +338,16 @@ mod tests {
 
     #[test]
     fn full_mesh_between_public_members() {
-        let members = [m("10.77.0.1", "KA", Some("51.0.0.1")), m("10.77.0.2", "KB", Some("95.0.0.2")), m("10.77.0.3", "KC", Some("5.0.0.3"))];
+        let members =
+            [m("10.77.0.1", "KA", Some("51.0.0.1")), m("10.77.0.2", "KB", Some("95.0.0.2")), m("10.77.0.3", "KC", Some("5.0.0.3"))];
         let c = node_config("net1", "Prod", "10.77.0.0/24", &members, 0);
         assert_eq!(c.address, "10.77.0.1");
         assert_eq!(c.prefix, 24);
         assert_eq!(c.peers.len(), 2);
-        assert_eq!(c.peers[0], Peer { public_key: "KB".into(), allowed_ip: "10.77.0.2/32".into(), endpoint: Some("95.0.0.2:51820".into()), keepalive: false });
+        assert_eq!(
+            c.peers[0],
+            Peer { public_key: "KB".into(), allowed_ip: "10.77.0.2/32".into(), endpoint: Some("95.0.0.2:51820".into()), keepalive: false }
+        );
     }
 
     #[test]
@@ -379,7 +383,8 @@ mod tests {
 
     #[test]
     fn pick_subnet_skips_used_routes() {
-        let routes = "default via 172.31.1.1 dev eth0\n10.77.0.0/16 dev br-1234 proto kernel scope link src 10.77.0.1\n172.17.0.0/16 dev docker0\n";
+        let routes =
+            "default via 172.31.1.1 dev eth0\n10.77.0.0/16 dev br-1234 proto kernel scope link src 10.77.0.1\n172.17.0.0/16 dev docker0\n";
         assert_eq!(pick_subnet(routes), Some("10.78.0.0/24".into()));
         assert_eq!(pick_subnet(""), Some("10.77.0.0/24".into()));
         assert!(overlaps("10.77.0.0/24", routes));
@@ -421,9 +426,19 @@ mod tests {
     #[test]
     fn parse_wg_dump_peers() {
         // `wg show zenytt dump | tail -n +2` : clé publique, clé partagée, adresse, IP autorisées, dernier échange, reçu, envoyé, keepalive.
-        let dump = "KB=\t(none)\t95.0.0.2:51820\t10.77.0.2/32\t1790000000\t1200\t3400\toff\nKC=\t(none)\t(none)\t10.77.0.3/32\t0\t0\t0\t25\n";
+        let dump =
+            "KB=\t(none)\t95.0.0.2:51820\t10.77.0.2/32\t1790000000\t1200\t3400\toff\nKC=\t(none)\t(none)\t10.77.0.3/32\t0\t0\t0\t25\n";
         let links = parse_peers(dump);
-        assert_eq!(links[0], Link { public_key: "KB=".into(), endpoint: Some("95.0.0.2:51820".into()), last_handshake: Some(1790000000), rx: 1200, tx: 3400 });
+        assert_eq!(
+            links[0],
+            Link {
+                public_key: "KB=".into(),
+                endpoint: Some("95.0.0.2:51820".into()),
+                last_handshake: Some(1790000000),
+                rx: 1200,
+                tx: 3400
+            }
+        );
         assert_eq!(links[1].endpoint, None);
         assert_eq!(links[1].last_handshake, None, "0 = jamais d'échange");
     }

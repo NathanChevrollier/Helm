@@ -11,8 +11,8 @@ mod tray;
 mod vnc_bridge;
 
 use commands::{
-    assistant, backups, dashboard, databases, deploy, docker, files, identities, logs, mesh, monitoring, rdp, redis, security, servers, share,
-    sites, sync, terminal, tunnels, workspace,
+    assistant, backups, dashboard, databases, deploy, docker, files, identities, logs, mesh, monitoring, rdp, redis, security, servers,
+    share, sites, sync, terminal, tunnels, workspace,
 };
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};

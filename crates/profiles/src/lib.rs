@@ -467,7 +467,13 @@ mod tests {
             id: "n1".into(),
             name: "Prod".into(),
             cidr: "10.77.0.0/24".into(),
-            members: vec![MeshMember { server_id: "s1".into(), address: "10.77.0.1".into(), public_key: "K=".into(), endpoint: None, port: 51820 }],
+            members: vec![MeshMember {
+                server_id: "s1".into(),
+                address: "10.77.0.1".into(),
+                public_key: "K=".into(),
+                endpoint: None,
+                port: 51820,
+            }],
         };
         let json = serde_json::to_string(&net).unwrap();
         assert!(json.contains("\"serverId\":\"s1\""), "{json}");
