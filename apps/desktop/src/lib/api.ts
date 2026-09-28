@@ -77,6 +77,46 @@ export interface RdpSessionInfo {
 }
 
 /** Session VNC ouverte dans Zenytt (client noVNC intégré). */
+/** État d'une machine virtuelle (libvirt). */
+export type VmState = "running" | "paused" | "shutOff" | "shutdown" | "crashed" | "suspended" | "other";
+export type VmAction = "start" | "shutdown" | "reboot" | "forceOff" | "suspend" | "resume" | "autostartOn" | "autostartOff";
+
+export interface Vm {
+  uuid: string;
+  name: string;
+  state: VmState;
+  vcpus: number;
+  memoryKib: number;
+  autostart: boolean;
+  persistent: boolean;
+}
+
+export interface VmOverview {
+  access: "direct" | "sudo" | "unavailable";
+  version: string;
+  /** Explication quand libvirt est inaccessible (affichée à la place de la liste). */
+  reason: string | null;
+  vms: Vm[];
+}
+
+export type VmGraphics = { kind: "vnc"; port: number | null; listen: string; public: boolean; password: boolean } | { kind: "spice" } | { kind: "none" };
+
+export interface VmDetail {
+  disks: { target: string; device: string; source: string | null; format: string | null }[];
+  nics: { mac: string; source: string; model: string | null }[];
+  graphics: VmGraphics;
+  os: string;
+  machine: string;
+  firmware: "bios" | "uefi";
+  ips: string[];
+}
+
+export interface VmStats {
+  uuid: string;
+  cpuPercent: number;
+  memoryUsedKib: number | null;
+}
+
 /** Écran d'une VM ouvert dans le client VNC intégré. */
 export interface VmConsole {
   session: VncSessionInfo;
@@ -1155,6 +1195,11 @@ export const api = {
   desktopSessionOpen: (id: string) => invoke<RdpSessionInfo>("desktop_session_open", { id }),
   desktopSessionClose: (id: string) => invoke<void>("desktop_session_close", { id }),
   vncSessionOpen: (id: string) => invoke<VncSessionInfo>("vnc_session_open", { id }),
+  vmOverview: (serverId: string) => invoke<VmOverview>("vm_overview", { serverId }),
+  vmDetail: (serverId: string, uuid: string) => invoke<VmDetail>("vm_detail", { serverId, uuid }),
+  vmStats: (serverId: string) => invoke<VmStats[]>("vm_stats", { serverId }),
+  vmAction: (serverId: string, vm: Vm, action: VmAction) => invoke<void>("vm_action", { serverId, uuid: vm.uuid, name: vm.name, action }),
+  vmDelete: (serverId: string, vm: Vm, withStorage: boolean) => invoke<void>("vm_delete", { serverId, uuid: vm.uuid, name: vm.name, withStorage }),
   vmConsoleOpen: (serverId: string, uuid: string, name: string) => invoke<VmConsole>("vm_console_open", { serverId, uuid, name }),
   vmSerialCommand: (serverId: string, uuid: string) => invoke<string>("vm_serial_command", { serverId, uuid }),
   /** `password` : `undefined` = inchangé, `""` = supprimé. */
