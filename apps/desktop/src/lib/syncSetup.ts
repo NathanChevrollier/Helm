@@ -1,10 +1,10 @@
 // Aides de l'installation assistée de la synchronisation.
 
-/** Lettres et chiffres sans ambiguïté à la lecture (pas de 0/O, 1/l/I). */
-const ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
+/** Lettres et chiffres sans ambiguïté à la lecture : ni 0/o, ni 1/i/l. */
+const ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
 
 /**
- * Phrase de passe aléatoire à noter : 5 groupes de 5 caractères (≈ 125 bits), séparés par des
+ * Phrase de passe aléatoire à noter : 5 groupes de 5 caractères (≈ 124 bits), séparés par des
  * tirets pour se relire et se recopier sans erreur.
  */
 export function generatePassphrase(random: (n: number) => Uint8Array = (n) => crypto.getRandomValues(new Uint8Array(n))): string {

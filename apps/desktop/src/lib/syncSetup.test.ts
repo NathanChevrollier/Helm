@@ -5,7 +5,9 @@ describe("syncSetup", () => {
   it("génère une phrase de passe lisible et différente à chaque fois", () => {
     const a = generatePassphrase();
     expect(a).toMatch(/^[a-z2-9]{5}(-[a-z2-9]{5}){4}$/);
-    expect(a).not.toMatch(/[01ilo]/);
+    // Sur un seul tirage, un caractère ambigu passerait souvent inaperçu : on en vérifie 500.
+    const many = Array.from({ length: 500 }, () => generatePassphrase()).join("");
+    expect(many).not.toMatch(/[01ilo]/);
     expect(generatePassphrase()).not.toBe(a);
     expect(generatePassphrase(() => new Uint8Array(25))).toBe("aaaaa-aaaaa-aaaaa-aaaaa-aaaaa");
   });
