@@ -4,6 +4,8 @@
 
 use serde::Serialize;
 
+use crate::ssh::shell_quote;
+
 use crate::{Connection, Error, ExecOutput, Result};
 
 /// Préfixe de toutes les commandes : sortie en anglais stable et connexion système (la session
@@ -132,6 +134,206 @@ pub(crate) fn parse_inventory(text: &str) -> Vec<Vm> {
     vms
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Disk {
+    pub target: String,
+    /// `disk` ou `cdrom`.
+    pub device: String,
+    pub source: Option<String>,
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Nic {
+    pub mac: String,
+    /// Réseau libvirt ou pont auquel la carte est reliée.
+    pub source: String,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Graphics {
+    /// `port` est absent tant que la VM est éteinte (attribution automatique au démarrage).
+    Vnc {
+        port: Option<u16>,
+        listen: String,
+        public: bool,
+        password: bool,
+    },
+    Spice,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VmDetail {
+    pub disks: Vec<Disk>,
+    pub nics: Vec<Nic>,
+    pub graphics: Graphics,
+    pub os: String,
+    pub machine: String,
+    /// `bios` ou `uefi`.
+    pub firmware: String,
+    /// Adresses IP connues (baux DHCP de libvirt, ou agent invité). Remplies par `detail`.
+    pub ips: Vec<String>,
+}
+
+/// Premier enfant d'un nœud XML portant ce nom.
+fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, tag: &str) -> Option<roxmltree::Node<'a, 'i>> {
+    n.children().find(|c| c.has_tag_name(tag))
+}
+
+pub(crate) fn parse_detail(xml: &str) -> Result<VmDetail> {
+    let doc = roxmltree::Document::parse(xml).map_err(|e| Error::Other(format!("description de la VM illisible : {e}")))?;
+    let root = doc.root_element();
+    let os = child(root, "os");
+    let os_type = os.and_then(|o| child(o, "type"));
+    let devices = child(root, "devices");
+    let all = |tag: &'static str| devices.into_iter().flat_map(move |d| d.children().filter(move |c| c.has_tag_name(tag)));
+
+    let disks = all("disk")
+        .map(|d| Disk {
+            target: child(d, "target").and_then(|t| t.attribute("dev")).unwrap_or("").to_string(),
+            device: d.attribute("device").unwrap_or("disk").to_string(),
+            source: child(d, "source")
+                .and_then(|s| s.attribute("file").or(s.attribute("dev")).or(s.attribute("volume")))
+                .map(str::to_string),
+            format: child(d, "driver").and_then(|s| s.attribute("type")).map(str::to_string),
+        })
+        .collect();
+    let nics = all("interface")
+        .map(|i| Nic {
+            mac: child(i, "mac").and_then(|m| m.attribute("address")).unwrap_or("").to_string(),
+            source: child(i, "source")
+                .and_then(|s| s.attribute("network").or(s.attribute("bridge")).or(s.attribute("dev")))
+                .unwrap_or("")
+                .to_string(),
+            model: child(i, "model").and_then(|m| m.attribute("type")).map(str::to_string),
+        })
+        .collect();
+    let graphics = match all("graphics").next() {
+        Some(g) if g.attribute("type") == Some("vnc") => {
+            let listen =
+                child(g, "listen").and_then(|l| l.attribute("address")).or(g.attribute("listen")).unwrap_or("127.0.0.1").to_string();
+            Graphics::Vnc {
+                port: g.attribute("port").and_then(|p| p.parse().ok()).filter(|p: &u16| *p > 0),
+                public: !(listen.starts_with("127.") || listen == "::1" || listen == "localhost"),
+                password: g.attribute("passwd").is_some(),
+                listen,
+            }
+        }
+        Some(_) => Graphics::Spice,
+        None => Graphics::None,
+    };
+    let firmware = if os.and_then(|o| o.attribute("firmware")) == Some("efi") || os.and_then(|o| child(o, "loader")).is_some() {
+        "uefi"
+    } else {
+        "bios"
+    };
+    Ok(VmDetail {
+        disks,
+        nics,
+        graphics,
+        os: os_type.and_then(|t| t.text()).unwrap_or("hvm").to_string(),
+        machine: os_type.and_then(|t| t.attribute("machine")).unwrap_or("").to_string(),
+        firmware: firmware.to_string(),
+        ips: Vec::new(),
+    })
+}
+
+pub async fn detail(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str) -> Result<VmDetail> {
+    if !valid_uuid(uuid) {
+        return Err(Error::Other("identifiant de VM invalide".into()));
+    }
+    let xml = run(conn, access, sudo, &format!("dumpxml {}", shell_quote(uuid))).await?.into_result()?.stdout;
+    let mut d = parse_detail(&xml)?;
+    // Adresses : baux DHCP de libvirt d'abord, agent invité ensuite ; une VM éteinte n'en a pas.
+    for source in ["lease", "agent"] {
+        let out = run(conn, access, sudo, &format!("domifaddr {} --source {source}", shell_quote(uuid))).await?;
+        if out.success() {
+            d.ips = parse_ifaddr(&out.stdout);
+            if !d.ips.is_empty() {
+                break;
+            }
+        }
+    }
+    Ok(d)
+}
+
+/// Adresses de `virsh domifaddr` (colonne « Address », sans le préfixe réseau ni la boucle locale).
+pub(crate) fn parse_ifaddr(text: &str) -> Vec<String> {
+    text.lines()
+        .skip(2)
+        .filter_map(|l| l.split_whitespace().nth(3))
+        .map(|a| a.split('/').next().unwrap_or(a).to_string())
+        .filter(|a| !a.starts_with("127.") && a != "::1")
+        .collect()
+}
+
+/// `domstats` désigne les VM par leur nom : la couche Tauri (tâche 5) le convertit en UUID.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VmStats {
+    pub name: String,
+    pub cpu_percent: f64,
+    pub memory_used_kib: Option<u64>,
+}
+
+pub(crate) fn cpu_percent(before_ns: u64, after_ns: u64, elapsed_ms: u64, vcpus: u32) -> f64 {
+    if after_ns < before_ns || elapsed_ms == 0 || vcpus == 0 {
+        return 0.0;
+    }
+    let pct = (after_ns - before_ns) as f64 / (elapsed_ms as f64 * 1_000_000.0 * vcpus as f64) * 100.0;
+    (pct * 10.0).round().min(1000.0) / 10.0
+}
+
+/// Deux relevés à une seconde d'intervalle des VM en marche.
+const STATS: &str = "VIRSH domstats --raw --state-running --cpu-total --vcpu --balloon; echo @@SEP; sleep 1; VIRSH domstats --raw --state-running --cpu-total";
+
+pub async fn stats(conn: &Connection, access: Access, sudo: Option<&str>) -> Result<Vec<VmStats>> {
+    let script = STATS.replace("VIRSH", VIRSH);
+    let out = match access {
+        Access::Direct => conn.exec(&script, None).await?,
+        Access::Sudo => conn.exec_sudo(&script, sudo, None).await?,
+        Access::Unavailable => return Ok(Vec::new()),
+    };
+    let text = out.into_result()?.stdout;
+    let (first, second) = text.split_once("@@SEP").unwrap_or((&text, ""));
+    let (a, b) = (parse_domstats(first), parse_domstats(second));
+    Ok(a.iter()
+        .map(|(name, s)| {
+            let after = b.get(name).and_then(|x| x.get("cpu.time")).copied().unwrap_or(0);
+            let vcpus = s.get("vcpu.current").copied().unwrap_or(1) as u32;
+            VmStats {
+                name: name.clone(),
+                cpu_percent: cpu_percent(s.get("cpu.time").copied().unwrap_or(0), after, 1000, vcpus),
+                memory_used_kib: s.get("balloon.rss").copied(),
+            }
+        })
+        .collect())
+}
+
+/// `Domain: 'nom'` puis des lignes `clé=valeur` ; seules les valeurs numériques sont gardées.
+pub(crate) fn parse_domstats(text: &str) -> std::collections::HashMap<String, std::collections::HashMap<String, u64>> {
+    let mut out = std::collections::HashMap::new();
+    let mut current: Option<String> = None;
+    for line in text.lines() {
+        if let Some(name) = line.strip_prefix("Domain: ") {
+            let name = name.trim().trim_matches('\'').to_string();
+            out.entry(name.clone()).or_insert_with(std::collections::HashMap::new);
+            current = Some(name);
+        } else if let (Some(name), Some((k, v))) = (&current, line.trim().split_once('=')) {
+            if let Ok(v) = v.parse() {
+                out.get_mut(name).unwrap().insert(k.to_string(), v);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +375,54 @@ mod tests {
         assert_eq!(VmState::parse("pmsuspended"), VmState::Suspended);
         assert_eq!(VmState::parse("crashed"), VmState::Crashed);
         assert_eq!(VmState::parse("???"), VmState::Other);
+    }
+
+    #[test]
+    fn detail_of_running_vm() {
+        let d = parse_detail(include_str!("vm/fixtures/cirros.xml")).unwrap();
+        assert_eq!(d.disks.len(), 1);
+        assert_eq!(d.disks[0].target, "vda");
+        assert!(d.disks[0].source.as_deref().unwrap().ends_with("cirros-test.qcow2"));
+        assert_eq!(d.nics.len(), 1);
+        assert_eq!(d.nics[0].source, "default");
+        match d.graphics {
+            Graphics::Vnc { port, public, .. } => {
+                assert!(port.unwrap() >= 5900, "port attribué au démarrage");
+                assert!(!public);
+            }
+            other => panic!("VNC attendu, reçu {other:?}"),
+        }
+    }
+
+    #[test]
+    fn graphics_spice_and_none() {
+        let d = parse_detail(include_str!("vm/fixtures/spice.xml")).unwrap();
+        assert_eq!(d.graphics, Graphics::Spice);
+        let bare = "<domain><os><type>hvm</type></os><devices/></domain>";
+        assert_eq!(parse_detail(bare).unwrap().graphics, Graphics::None);
+    }
+
+    #[test]
+    fn graphics_listen_public() {
+        let d = parse_detail(include_str!("vm/fixtures/public-vnc.xml")).unwrap();
+        assert!(matches!(d.graphics, Graphics::Vnc { public: true, .. }));
+    }
+
+    #[test]
+    fn cpu_percent_is_bounded() {
+        // 2 vCPU pleinement occupés pendant 1 s = 2 s de temps CPU = 100 %.
+        assert_eq!(cpu_percent(0, 2_000_000_000, 1000, 2), 100.0);
+        assert_eq!(cpu_percent(0, 500_000_000, 1000, 1), 50.0);
+        assert_eq!(cpu_percent(10, 5, 1000, 1), 0.0, "compteur remis à zéro (VM redémarrée)");
+        assert_eq!(cpu_percent(0, 1, 0, 1), 0.0, "durée nulle");
+    }
+    #[test]
+    fn domstats_and_ifaddr() {
+        let s = parse_domstats(include_str!("vm/fixtures/domstats.txt"));
+        let cirros = &s["cirros-test"];
+        assert!(cirros["cpu.time"] > 0);
+        assert_eq!(cirros["vcpu.current"], 1);
+        let ips = parse_ifaddr(" Name       MAC address          Protocol     Address\n-------------------------------------------------------------------------------\n vnet0      52:54:00:ab:cd:ef    ipv4         192.168.122.45/24\n");
+        assert_eq!(ips, vec!["192.168.122.45"]);
     }
 }
