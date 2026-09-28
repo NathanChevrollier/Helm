@@ -90,6 +90,8 @@ export interface Settings {
   showHiddenFiles: boolean;
   /** Fermeture de la fenêtre : demander, réduire dans la zone de notification, ou quitter. */
   closeAction: CloseAction;
+  /** Avant de quitter, avertir s'il reste des tunnels, transferts ou terminaux ouverts. */
+  confirmQuit: boolean;
 }
 
 export type CloseAction = "ask" | "tray" | "quit";
@@ -292,7 +294,7 @@ export const useApp = create<State>((set, get) => ({
     setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
   },
 
-  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15, showHiddenFiles: false, closeAction: "ask" },
+  settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15, showHiddenFiles: false, closeAction: "ask", confirmQuit: true },
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   tabs: [],

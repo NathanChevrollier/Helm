@@ -109,7 +109,8 @@ pub async fn dashboard_summary(
         let mut out = Summary { connected: true, agent, metrics, alerts, docker, certificates, ..Default::default() };
         if let Some(list) = list {
             out.containers_running = list.iter().filter(|c| c.state == "running").count();
-            let stopped: Vec<_> = list.iter().filter(|c| c.state != "running").collect();
+            let occasional = crate::commands::docker::occasional_keys(&store, &server_id);
+            let stopped: Vec<_> = list.iter().filter(|c| c.state != "running" && !occasional.contains(&c.key())).collect();
             out.containers_stopped = stopped.len();
             out.stopped_names = stopped.iter().take(5).map(|c| c.name.clone()).collect();
         }

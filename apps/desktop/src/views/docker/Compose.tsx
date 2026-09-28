@@ -7,6 +7,7 @@ import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from 
 import ContainerDrawer from "./ContainerDrawer";
 import PortChips, { isExposed } from "./PortChips";
 import { stateTone, useContainerActions, useContainerStats } from "./shared";
+import { containerKey, projectCounts } from "../../lib/compose";
 
 const FileEditor = lazy(() => import("../../components/FileEditor"));
 const ComposeFileDialog = lazy(() => import("../../components/ComposeFileDialog"));
@@ -124,6 +125,15 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
   ];
 
   const selected = data.containers.find((c) => c.id === selectedId);
+  const occasional = new Set(data.occasional);
+  const setOccasional = async (c: Container, value: boolean) => {
+    try {
+      await api.dockerOccasionalSet(serverId, containerKey(c), value);
+      await reload();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
 
   return (
     // Une colonne tant qu'il n'y a pas la place pour deux projets lisibles côte à côte.
@@ -134,17 +144,27 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
         const services = containersOf(p.name);
         const enMarche = services.filter((c) => c.state === "running").length;
         const arrete = services.length > 0 && enMarche === 0;
+        // Les conteneurs ponctuels ne comptent pas : seul le « migrator » arrêté ne rend pas le projet incomplet.
+        const counts = projectCounts(services, occasional);
         const cpu = services.reduce((n, c) => n + (stats[c.id]?.cpu ?? 0), 0);
         return (
           <section key={p.name} className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-panel">
             <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
               <Layers size={16} className="shrink-0 text-accent" />
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-semibold">{p.name}</span>
-                  <Badge tone={arrete ? "muted" : enMarche === services.length ? "ok" : "warn"}>
-                    {services.length > 0 ? `${enMarche}/${services.length} en cours` : p.status}
+              {/* Largeur minimale : les boutons passent à la ligne plutôt que d'écraser le nom du projet. */}
+              <div className="min-w-[min(100%,18rem)] flex-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="truncate font-semibold" title={p.name}>
+                    {p.name}
+                  </span>
+                  <Badge tone={counts.running === 0 ? "muted" : counts.running === counts.expected ? "ok" : "warn"}>
+                    {services.length > 0 ? `${counts.running}/${counts.expected} en cours` : p.status}
                   </Badge>
+                  {counts.occasional > 0 && (
+                    <Badge tone="muted" title="Conteneurs ponctuels : leur arrêt n'est pas signalé">
+                      +{counts.occasional} ponctuel{counts.occasional > 1 ? "s" : ""}
+                    </Badge>
+                  )}
                   {p.missing && (
                     <Badge tone="warn" title="Le dossier du projet a sans doute été renommé, déplacé ou supprimé">
                       Fichier introuvable
@@ -153,8 +173,8 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                   {enMarche > 0 && <span className="shrink-0 text-xs text-muted tabular-nums">CPU {cpu.toFixed(1)} %</span>}
                 </div>
                 {p.missing ? (
-                  <span className="block max-w-full truncate font-mono text-xs text-faint line-through" title={`${p.configFiles}\nCe fichier n'existe plus`}>
-                    {file}
+                  <span className="block max-w-full truncate font-mono text-xs text-faint" title={`${p.configFiles}\nCe fichier n'existe plus`}>
+                    Ancien fichier : {file}
                   </span>
                 ) : (
                   <button type="button" className="block max-w-full truncate font-mono text-xs text-muted hover:text-accent" title={`${p.configFiles}\nClic : éditer le fichier`} onClick={() => setEditing(file)}>
@@ -223,7 +243,10 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                           <span className="flex min-w-0 items-center gap-2.5">
                             <StatusDot tone={stateTone(c.state)} className="size-2!" />
                             <span className="min-w-0">
-                              <span className="block truncate font-medium">{c.composeService ?? c.name}</span>
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span className="truncate font-medium">{c.composeService ?? c.name}</span>
+                                {occasional.has(containerKey(c)) && <Badge tone="muted">ponctuel</Badge>}
+                              </span>
                               <span className="block truncate text-[11.5px] text-muted">{c.status}</span>
                             </span>
                           </span>
@@ -304,6 +327,8 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
             const project = projectOf(selected);
             if (project) setRestrict({ project, port });
           }}
+          occasional={occasional.has(containerKey(selected))}
+          onOccasional={(v) => void setOccasional(selected, v)}
         />
       )}
       {restrict && (

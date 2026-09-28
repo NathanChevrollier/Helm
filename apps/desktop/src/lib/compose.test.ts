@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeChoices, composeFileIn, isComposeFile } from "./compose";
+import { composeChoices, composeFileIn, containerKey, isComposeFile, projectCounts } from "./compose";
 import type { ComposeFileInfo, ComposeFileState } from "./api";
 
 const info = (state: ComposeFileState, hasBuild = false): ComposeFileInfo => ({ file: "/opt/app/docker-compose.yml", project: "app", hasBuild, ports: [], busyPorts: [], state });
@@ -22,5 +22,21 @@ describe("compose", () => {
     expect(composeChoices(info({ kind: "same", project, running: false }))).toEqual(["start", "down"]);
     expect(composeChoices(info({ kind: "same", project, running: false }, true))).toEqual(["launchBuild", "down"]);
     expect(composeChoices(info({ kind: "conflict", project }))).toEqual(["replace", "launchAs"]);
+  });
+});
+
+
+describe("conteneurs ponctuels", () => {
+  const svc = (service: string, state: string) => ({ name: `infra_${service}_1`, state, composeProject: "infra", composeService: service });
+
+  it("identifie un conteneur compose par projet et service", () => {
+    expect(containerKey(svc("migrator", "exited"))).toBe("infra/migrator");
+    expect(containerKey({ name: "seul", composeProject: null, composeService: null })).toBe("seul");
+  });
+
+  it("ne compte pas les conteneurs ponctuels", () => {
+    const services = [svc("api", "running"), svc("db", "running"), svc("migrator", "exited")];
+    expect(projectCounts(services, new Set())).toEqual({ running: 2, expected: 3, occasional: 0 });
+    expect(projectCounts(services, new Set(["infra/migrator"]))).toEqual({ running: 2, expected: 2, occasional: 1 });
   });
 });

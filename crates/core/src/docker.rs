@@ -126,6 +126,17 @@ pub struct Container {
     pub compose_service: Option<String>,
 }
 
+impl Container {
+    /// Identifiant stable du conteneur : `projet/service` pour un conteneur compose (le nom change
+    /// quand il est recréé sous docker-compose v1), sinon son nom.
+    pub fn key(&self) -> String {
+        match (&self.compose_project, &self.compose_service) {
+            (Some(p), Some(s)) => format!("{p}/{s}"),
+            _ => self.name.clone(),
+        }
+    }
+}
+
 /// Analyse la liste de labels `k=v,k2=v2` de `docker ps` (une valeur peut contenir des virgules).
 pub fn parse_labels(s: &str) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
@@ -302,15 +313,63 @@ pub async fn compose_projects(conn: &Connection, access: Access, sudo: Option<&s
     }
     let mut list: Vec<ComposeProject> =
         serde_json::from_str(out.stdout.trim()).map_err(|e| Error::Other(format!("docker compose ls : {e}")))?;
+    resolve_relative(conn, access, sudo, &mut list).await;
     mark_missing(conn, access, sudo, &mut list).await;
     Ok(list)
+}
+
+/// docker-compose v1 note le nom du fichier sans son dossier (`docker-compose.prod.yml`) et le
+/// dossier à part, dans l'étiquette `working_dir` des conteneurs : le chemin est recomposé, sans
+/// quoi le fichier passerait pour introuvable et les actions viseraient le mauvais dossier.
+async fn resolve_relative(conn: &Connection, access: Access, sudo: Option<&str>, list: &mut [ComposeProject]) {
+    if list.iter().all(|p| p.config_files.split(',').map(str::trim).all(|f| f.is_empty() || f.starts_with('/'))) {
+        return;
+    }
+    let format = r#"ps -a --format '{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.project.working_dir"}}'"#;
+    let Ok(out) = run(conn, access, sudo, format).await else { return };
+    let dirs = parse_working_dirs(&out.stdout);
+    for p in list.iter_mut() {
+        if let Some(dir) = dirs.get(&p.name) {
+            p.config_files = resolve_config_files(&p.config_files, dir);
+        }
+    }
+}
+
+/// Dossier de travail de chaque projet, d'après les étiquettes de ses conteneurs (`projet|dossier`).
+pub(crate) fn parse_working_dirs(text: &str) -> HashMap<String, String> {
+    let mut dirs = HashMap::new();
+    for line in text.lines() {
+        if let Some((project, dir)) = line.split_once('|') {
+            if !project.is_empty() && dir.starts_with('/') {
+                dirs.entry(project.to_string()).or_insert_with(|| dir.trim_end_matches('/').to_string());
+            }
+        }
+    }
+    dirs
+}
+
+/// Chemins des fichiers compose rendus absolus par rapport au dossier de travail du projet.
+pub(crate) fn resolve_config_files(config_files: &str, dir: &str) -> String {
+    config_files
+        .split(',')
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .map(|f| if f.starts_with('/') { f.to_string() } else { format!("{dir}/{}", f.trim_start_matches("./")) })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Signale les projets dont le fichier compose a disparu. Le test tourne avec les mêmes droits que
 /// Docker : un dossier illisible pour l'utilisateur SSH ne passe pas pour absent.
 async fn mark_missing(conn: &Connection, access: Access, sudo: Option<&str>, list: &mut [ComposeProject]) {
-    let script: Vec<String> =
-        list.iter().map(|p| p.file()).filter(|f| !f.is_empty()).map(|f| format!("[ -e {q} ] || echo {q}", q = shell_quote(f))).collect();
+    // Seul un chemin absolu peut être vérifié : un chemin relatif resté sans dossier connu n'est
+    // pas déclaré introuvable (ce serait une fausse alerte).
+    let script: Vec<String> = list
+        .iter()
+        .map(|p| p.file())
+        .filter(|f| f.starts_with('/'))
+        .map(|f| format!("[ -e {q} ] || echo {q}", q = shell_quote(f)))
+        .collect();
     if script.is_empty() {
         return;
     }
@@ -788,6 +847,40 @@ mod tests {
         p.missing = true;
         assert!(compose_command(&p, "logs -f").unwrap().ends_with("docker compose -p 'bot' logs -f"), "journaux sans le fichier");
         assert!(WITHOUT_FILE.contains(&"down") && WITHOUT_FILE.contains(&"stop") && !WITHOUT_FILE.contains(&"up"));
+    }
+
+    #[test]
+    fn container_keys() {
+        let mut c = Container {
+            id: "a".into(),
+            name: "infra_migrator_1".into(),
+            image: "x".into(),
+            state: "exited".into(),
+            status: "Exited (0)".into(),
+            ports: vec![],
+            ports_raw: String::new(),
+            created_at: String::new(),
+            compose_project: Some("infra".into()),
+            compose_service: Some("migrator".into()),
+        };
+        assert_eq!(c.key(), "infra/migrator", "stable quand le conteneur est recréé");
+        c.compose_project = None;
+        assert_eq!(c.key(), "infra_migrator_1");
+    }
+
+    #[test]
+    fn compose_v1_relative_files_are_resolved() {
+        let ps = "infra|/srv/infra\ninfra|/srv/infra\nlaravel|/var/www/laravel/\n|\nsans-dossier|\n";
+        let dirs = parse_working_dirs(ps);
+        assert_eq!(dirs.get("infra").map(String::as_str), Some("/srv/infra"));
+        assert_eq!(dirs.get("laravel").map(String::as_str), Some("/var/www/laravel"), "barre finale retirée");
+        assert!(!dirs.contains_key("sans-dossier"));
+        assert_eq!(resolve_config_files("docker-compose.prod.yml", "/srv/infra"), "/srv/infra/docker-compose.prod.yml");
+        assert_eq!(
+            resolve_config_files("./docker-compose.yml, override.yml", "/srv/app"),
+            "/srv/app/docker-compose.yml,/srv/app/override.yml"
+        );
+        assert_eq!(resolve_config_files("/opt/web/compose.yaml", "/ailleurs"), "/opt/web/compose.yaml", "chemin absolu inchangé");
     }
 
     #[test]

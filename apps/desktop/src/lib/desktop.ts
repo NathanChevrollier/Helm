@@ -37,7 +37,8 @@ async function currentActivity(): Promise<Activity> {
 
 /** Quitte vraiment, après confirmation s'il reste des activités en cours. */
 export async function quitApp(): Promise<void> {
-  const lines = activityLines(await currentActivity());
+  // Avertissement désactivé dans les réglages : on quitte sans rien demander.
+  const lines = useApp.getState().settings.confirmQuit ? activityLines(await currentActivity()) : [];
   if (lines.length && !useLock.getState().locked) {
     const ok = await useApp.getState().ask({
       title: "Quitter Zenytt ?",

@@ -58,6 +58,24 @@ pub struct Overview {
     engine: String,
     containers: Vec<Container>,
     projects: Vec<ComposeProject>,
+    /// Clés des conteneurs ponctuels de ce serveur (voir `Container::key`).
+    occasional: Vec<String>,
+}
+
+/// Conteneurs ponctuels d'un serveur.
+pub(crate) fn occasional_keys(store: &Store, server_id: &str) -> Vec<String> {
+    store.read(|d| d.occasional_containers.iter().filter(|o| o.server_id == server_id).map(|o| o.key.clone()).collect())
+}
+
+/// Marque (ou non) un conteneur comme ponctuel : une tâche qui s'arrête normalement.
+#[tauri::command]
+pub fn docker_occasional_set(store: State<'_, Store>, server_id: String, key: String, occasional: bool) -> Result<(), String> {
+    store.write(|d| {
+        d.occasional_containers.retain(|o| !(o.server_id == server_id && o.key == key));
+        if occasional {
+            d.occasional_containers.push(zenytt_profiles::OccasionalContainer { server_id, key });
+        }
+    })
 }
 
 #[tauri::command]
@@ -84,13 +102,14 @@ pub async fn docker_overview(
     cache.0.lock().await.insert(server_id.clone(), access);
     let engine = if version.starts_with("podman") { "podman" } else { "docker" }.to_string();
     if access == Access::Unavailable {
-        return Ok(Overview { access, version, engine, containers: vec![], projects: vec![] });
+        return Ok(Overview { access, version, engine, containers: vec![], projects: vec![], occasional: vec![] });
     }
     let (containers, projects) = match lists {
         Some((a, lists)) if a == access => lists.map_err(err)?,
         _ => tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?,
     };
-    Ok(Overview { access, version, engine, containers, projects })
+    let occasional = occasional_keys(&store, &server_id);
+    Ok(Overview { access, version, engine, containers, projects, occasional })
 }
 
 #[tauri::command]

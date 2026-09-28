@@ -238,6 +238,7 @@ pub fn run() {
             docker::docker_compose_command,
             docker::docker_compose_create,
             docker::docker_compose_file_info,
+            docker::docker_occasional_set,
             docker::docker_compose_launch,
             docker::docker_projects_under,
             docker::docker_move_folder,

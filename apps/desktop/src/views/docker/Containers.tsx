@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { Cable, FileSearch, FolderInput, FolderPlus, Lock, Pause, Pencil, Play, RotateCw, ScrollText, Search, Square, SquareTerminal, Trash2 } from "lucide-react";
-import { type ComposeProject, type Container, type DockerOverview } from "../../lib/api";
+import { api, errorMessage, type ComposeProject, type Container, type DockerOverview } from "../../lib/api";
+import { containerKey } from "../../lib/compose";
 import { useApp } from "../../lib/store";
 import { startDrag } from "../../lib/drag";
 import { askFolderName, toggleCollapsed } from "../../components/Folders";
 import { tunnelTo, RestrictPortDialog } from "../../components/DockerExtras";
-import { DataTable, IconButton, Input, MenuButton, Segmented, Select, StatusDot, useContextMenu, type Column, type MenuItem } from "../../components/ui";
+import { Badge, DataTable, IconButton, Input, MenuButton, Segmented, Select, StatusDot, useContextMenu, type Column, type MenuItem } from "../../components/ui";
 import ContainerDrawer from "./ContainerDrawer";
 import { useContainerActions, useContainerFolders, useContainerStats } from "./shared";
 import PortChips, { isExposed } from "./PortChips";
@@ -16,6 +17,15 @@ type StateFilter = "all" | "running" | "stopped";
 export default function Containers({ serverId, data, docker, reload }: { serverId: string; data: DockerOverview; docker: string; reload: () => Promise<void> }) {
   const stats = useContainerStats(serverId);
   const { busy, act: runAction, shell, logs } = useContainerActions(serverId, docker, reload);
+  const occasional = new Set(data.occasional);
+  const setOccasional = async (c: Container, value: boolean) => {
+    try {
+      await api.dockerOccasionalSet(serverId, containerKey(c), value);
+      await reload();
+    } catch (e) {
+      useApp.getState().notify(errorMessage(e), "error");
+    }
+  };
   const [filter, setFilter] = useState("");
   const [state, setState] = useState<StateFilter>("all");
   const [groupBy, setGroupBy] = useState<GroupBy>(() => {
@@ -108,7 +118,10 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
         <span className="flex min-w-0 items-center gap-2.5">
           <StatusDot tone={c.state === "running" ? "ok" : c.state === "paused" || c.state === "restarting" ? "warn" : c.state === "dead" ? "danger" : "muted"} className="size-2!" />
           <span className="min-w-0">
-            <span className="block truncate font-medium">{c.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-medium">{c.name}</span>
+              {occasional.has(containerKey(c)) && <Badge tone="muted">ponctuel</Badge>}
+            </span>
             <span className="block truncate text-[11.5px] text-muted">{c.status}</span>
           </span>
         </span>
@@ -308,6 +321,8 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
             const project = projectOf(selected);
             if (project) setRestrict({ project, port });
           }}
+          occasional={occasional.has(containerKey(selected))}
+          onOccasional={(v) => void setOccasional(selected, v)}
         />
       )}
       {restrict && (

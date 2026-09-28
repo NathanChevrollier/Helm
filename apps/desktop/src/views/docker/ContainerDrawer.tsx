@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Cable, Eye, EyeOff, Lock, Pause, Play, RotateCw, ScrollText, Square, SquareTerminal, Trash2 } from "lucide-react";
 import { api, errorMessage, type ComposeProject, type Container, type ContainerStats } from "../../lib/api";
-import { Badge, Button, CodeBlock, Drawer, ErrorState, KeyValue, Loading } from "../../components/ui";
+import { Badge, Button, Checkbox, CodeBlock, Drawer, ErrorState, KeyValue, Loading } from "../../components/ui";
 import { stateTone } from "./shared";
 
 type Tab = "summary" | "env" | "mounts" | "inspect";
@@ -32,6 +32,8 @@ export default function ContainerDrawer({
   onLogs,
   onTunnel,
   onRestrict,
+  occasional,
+  onOccasional,
 }: {
   serverId: string;
   container: Container;
@@ -43,6 +45,9 @@ export default function ContainerDrawer({
   onLogs: () => void;
   onTunnel: (port: number) => void;
   onRestrict: (port: number) => void;
+  /** Conteneur ponctuel : son arrêt n'est signalé nulle part. */
+  occasional: boolean;
+  onOccasional: (occasional: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>("summary");
   const [raw, setRaw] = useState<string | null>(null);
@@ -154,6 +159,12 @@ export default function ContainerDrawer({
       {error && <ErrorState message={error} />}
       {tab === "summary" && (
         <div className="flex flex-col gap-5">
+          <Checkbox
+            checked={occasional}
+            onChange={onOccasional}
+            label="Conteneur ponctuel"
+            hint="Une tâche qui s'arrête normalement une fois son travail fait (migration, sauvegarde, cron…) : son arrêt n'est plus signalé, ni dans l'accueil ni dans les compteurs du projet."
+          />
           <KeyValue
             labelWidth={120}
             items={[

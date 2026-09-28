@@ -43,3 +43,24 @@ export function composeChoices(info: ComposeFileInfo): ComposeChoice[] {
       return ["replace", "launchAs"];
   }
 }
+
+/** Identifiant stable d'un conteneur, même règle que le moteur : `projet/service`, sinon son nom. */
+export function containerKey(c: { name: string; composeProject?: string | null; composeService?: string | null }): string {
+  return c.composeProject && c.composeService ? `${c.composeProject}/${c.composeService}` : c.name;
+}
+
+/**
+ * Compteurs d'un projet compose. Les conteneurs ponctuels (tâches qui s'arrêtent normalement) ne
+ * comptent pas : un projet dont seul le « migrator » est arrêté est complet.
+ */
+export function projectCounts(
+  services: { name: string; state: string; composeProject?: string | null; composeService?: string | null }[],
+  occasional: Set<string>,
+): { running: number; expected: number; occasional: number } {
+  const expected = services.filter((c) => !occasional.has(containerKey(c)));
+  return {
+    running: expected.filter((c) => c.state === "running").length,
+    expected: expected.length,
+    occasional: services.length - expected.length,
+  };
+}

@@ -90,6 +90,16 @@ pub struct Snippet {
     pub command: String,
 }
 
+/// Conteneur « ponctuel » : une tâche qui s'arrête normalement (migration, sauvegarde, cron…). Son
+/// arrêt n'est signalé nulle part (accueil, compteurs des projets).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OccasionalContainer {
+    pub server_id: String,
+    /// `projet/service` pour un conteneur compose (stable quand il est recréé), sinon son nom.
+    pub key: String,
+}
+
 /// Constat d'audit de sécurité mis de côté : il n'apparaît plus dans la liste des problèmes,
 /// mais reste consultable dans les constats ignorés.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -268,6 +278,8 @@ pub struct Data {
     /// Constats d'audit ignorés (archivés).
     #[serde(default)]
     pub ignored_findings: Vec<IgnoredFinding>,
+    #[serde(default)]
+    pub occasional_containers: Vec<OccasionalContainer>,
     /// Réglages de l'assistant IA (fournisseur, modèle, autorisations), sans la clé d'API.
     #[serde(default)]
     pub ai: Option<serde_json::Value>,

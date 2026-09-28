@@ -175,6 +175,12 @@ function General() {
             ]}
           />
         </Setting>
+        <Toggle
+          title="Avertir avant de quitter"
+          description="S'il reste des tunnels, des transferts ou des terminaux ouverts, Zenytt les liste et demande confirmation. Désactivé, « Quitter » (et Ctrl+Q) ferme tout immédiatement."
+          checked={settings.confirmQuit}
+          onChange={(confirmQuit) => setSettings({ confirmQuit })}
+        />
       </Group>
       <Group title="Affichage">
         <Setting title="Thème" description={`« Système » suit le thème clair ou sombre de ${OS_NAME}.`}>

@@ -468,6 +468,8 @@ export interface DockerOverview {
   engine: string;
   containers: Container[];
   projects: ComposeProject[];
+  /** Conteneurs ponctuels du serveur (clés `projet/service` ou nom) : leur arrêt n'est pas signalé. */
+  occasional: string[];
 }
 
 export interface ContainerStats {
@@ -1281,6 +1283,8 @@ export const api = {
   /** Lance le projet d'un fichier ; `replace` : projet du même nom lancé depuis un autre dossier, supprimé d'abord. */
   composeLaunch: (serverId: string, file: string, name: string, build: boolean, replace: string | null) =>
     invoke<string>("docker_compose_launch", { serverId, file, name, build, replace }),
+  /** Marque un conteneur comme ponctuel (tâche qui s'arrête normalement) ou le démarque. */
+  dockerOccasionalSet: (serverId: string, key: string, occasional: boolean) => invoke<void>("docker_occasional_set", { serverId, key, occasional }),
   dockerProjectsUnder: (serverId: string, dir: string) => invoke<ComposeProject[]>("docker_projects_under", { serverId, dir }),
   /** Déplace un dossier en arrêtant puis relançant les projets compose qu'il contient. */
   dockerMoveFolder: (serverId: string, from: string, to: string) => invoke<string>("docker_move_folder", { serverId, from, to }),
