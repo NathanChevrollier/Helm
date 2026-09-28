@@ -133,7 +133,7 @@ export default function VncSession() {
   };
 
   return (
-    <div className={`${plein ? "fixed inset-0 z-50" : "absolute inset-0"} flex flex-col bg-bg`}>
+    <div className={`${plein ? "fixed inset-0 z-50" : "absolute inset-0 z-20"} flex flex-col bg-bg`}>
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
         <span className="font-medium">{desktop.name}</span>
         <span className="truncate text-xs text-muted">
