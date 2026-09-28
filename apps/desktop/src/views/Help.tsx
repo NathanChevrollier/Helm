@@ -2,12 +2,13 @@
 // Le « ? » d'une page ouvre, lui, une fenêtre ne contenant que la fiche de cette page (GuideDialog).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowRight, MessagesSquare, Search, X } from "lucide-react";
+import { ArrowRight, Heart, MessagesSquare, Search, X } from "lucide-react";
 import { GUIDES, TOPICS, type Guide } from "../lib/guides";
 import { useAppPick } from "../lib/store";
 import { SECTIONS } from "../sections";
 import PageLayout from "../components/PageLayout";
 import GuideContent from "../components/GuideContent";
+import { SPONSORS_URL } from "../lib/links";
 import { Badge, Button, FOCUS_RING, Input, Kbd } from "../components/ui";
 
 /** Tout le texte d'une fiche, pour la recherche. */
@@ -104,6 +105,9 @@ export default function HelpView() {
             </span>
             <button type="button" className={`flex items-center gap-1.5 rounded hover:text-fg ${FOCUS_RING}`} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")}>
               <MessagesSquare size={13} /> Une question ? Le Discord de Zenytt
+            </button>
+            <button type="button" className={`flex items-center gap-1.5 rounded hover:text-fg ${FOCUS_RING}`} onClick={() => void openUrl(SPONSORS_URL)}>
+              <Heart size={13} /> Zenytt te plaît ? Soutiens le projet
             </button>
           </div>
         </aside>

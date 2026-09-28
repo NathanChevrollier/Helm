@@ -4,6 +4,7 @@ import {
   Bot,
   CheckCircle2,
   Download,
+  Heart,
   History,
   Keyboard,
   Lock,
@@ -18,6 +19,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import { SPONSORS_URL } from "../lib/links";
 import { api, errorMessage, importHasWarnings, importMessage, type AuditEntry, type McpConfig } from "../lib/api";
 import { useAppPick } from "../lib/store";
 import { useTabIntent } from "../lib/shell";
@@ -304,6 +306,11 @@ function Maintenance() {
       <Setting title="Journaux de Zenytt" description="Connexions, actions et erreurs de l'app, sans aucun secret. Utile pour comprendre un problème.">
         <Button size="sm" onClick={() => void api.logsOpenDir().catch((e) => notify(errorMessage(e), "error"))}>
           Ouvrir le dossier
+        </Button>
+      </Setting>
+      <Setting title="Soutenir Zenytt" description="Zenytt est gratuit et développé sur mon temps libre. S'il te rend service, un don sur GitHub Sponsors aide à le faire avancer.">
+        <Button size="sm" icon={<Heart size={14} />} onClick={() => void openUrl(SPONSORS_URL)}>
+          Soutenir
         </Button>
       </Setting>
       <Setting title="Licence et confidentialité" description="Zenytt n'envoie aucune télémétrie : tes données restent sur ton ordinateur. © 2026 Nathan Chevrollier, licence PolyForm Shield 1.0.0.">

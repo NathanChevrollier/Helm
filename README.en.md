@@ -3,6 +3,7 @@
 [![CI](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/NathanChevrollier/Zenytt?label=version)](https://github.com/NathanChevrollier/Zenytt/releases/latest)
 [![PolyForm Shield License](https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-blue)](LICENSE)
+[![Sponsor](https://img.shields.io/github/sponsors/NathanChevrollier?label=sponsor&logo=githubsponsors)](https://github.com/sponsors/NathanChevrollier)
 
 *[Version française](README.md)*
 
@@ -12,6 +13,9 @@ monitoring, Docker, databases, websites, backups and security auditing in a sing
 **Everything goes over SSH.** Zenytt installs no web panel, opens no port on your server and depends
 on no third-party service. Credentials stay in your operating system's keychain, and anything that
 passes through a relay server is end-to-end encrypted.
+
+Zenytt is free and built in my spare time. If it helps you, you can
+[support the project on GitHub Sponsors](https://github.com/sponsors/NathanChevrollier) ❤️
 
 > The application interface is currently in French. This page describes what it does for readers
 > evaluating it; an English interface is on the roadmap.

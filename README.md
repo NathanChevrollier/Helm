@@ -3,6 +3,7 @@
 [![CI](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml/badge.svg)](https://github.com/NathanChevrollier/Zenytt/actions/workflows/ci.yml)
 [![Dernière version](https://img.shields.io/github/v/release/NathanChevrollier/Zenytt?label=version)](https://github.com/NathanChevrollier/Zenytt/releases/latest)
 [![Licence PolyForm Shield](https://img.shields.io/badge/licence-PolyForm%20Shield%201.0.0-blue)](LICENSE)
+[![Soutenir](https://img.shields.io/github/sponsors/NathanChevrollier?label=soutenir&logo=githubsponsors)](https://github.com/sponsors/NathanChevrollier)
 
 *[English version](README.en.md)*
 
@@ -13,6 +14,9 @@ une seule fenêtre.
 **Tout passe par SSH.** Zenytt n'installe aucun panneau web, n'ouvre aucun port sur le serveur et ne
 dépend d'aucun service tiers. Les identifiants restent dans le coffre-fort du système
 d'exploitation, et tout ce qui transite par un serveur de relais est chiffré de bout en bout.
+
+Zenytt est gratuit et développé sur mon temps libre. S'il te rend service, tu peux
+[soutenir le projet sur GitHub Sponsors](https://github.com/sponsors/NathanChevrollier) ❤️
 
 ## Sommaire
 
