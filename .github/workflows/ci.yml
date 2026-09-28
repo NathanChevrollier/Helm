@@ -72,7 +72,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --prod --audit-level high
 
-  # Tests de bout en bout contre les deux faux VPS (Ubuntu root, Debian non-root avec fail2ban).
+  # Tests de bout en bout contre les faux VPS (Ubuntu root, Debian non-root avec fail2ban, membres
+  # d'un réseau privé WireGuard).
   e2e:
     needs: check
     runs-on: ubuntu-latest
@@ -84,7 +85,7 @@ jobs:
         run: docker compose -f testenv/docker-compose.yml up -d --build
       - name: Attente de SSH
         run: |
-          for port in 2222 2223; do
+          for port in 2222 2223 2225 2226; do
             for i in $(seq 1 90); do
               (echo > /dev/tcp/127.0.0.1/$port) 2>/dev/null && head -c 4 < /dev/tcp/127.0.0.1/$port | grep -q SSH && break
               sleep 2
@@ -94,6 +95,8 @@ jobs:
       - run: cargo run -p zenytt-core --example smoke
       - run: cargo run -p zenytt-core --example nginx_smoke
       - run: cargo run -p zenytt-core --example debian_smoke
+      # Réseau privé WireGuard entre les serveurs de test mesh-a et mesh-b (module noyau du runner).
+      - run: cargo run -p zenytt-core --example mesh_smoke
       - name: Journaux des faux VPS en cas d'échec
         if: failure()
         run: |
