@@ -8,6 +8,7 @@ import {
   FolderTree,
   Globe,
   LayoutDashboard,
+  Monitor,
   Network,
   ScrollText,
   Server,
@@ -24,6 +25,7 @@ export type SectionId =
   | "files"
   | "monitoring"
   | "docker"
+  | "vms"
   | "databases"
   | "sites"
   | "logs"
@@ -59,6 +61,7 @@ export const SECTIONS: Section[] = [
   { id: "monitoring", group: "serveur", label: "Supervision", icon: Activity, perServer: true, description: "CPU, RAM, disque, réseau, processus, services systemd et alertes." },
   { id: "files", group: "serveur", label: "Fichiers", icon: FolderTree, perServer: true, description: "Explorateur SFTP, recherche et grep distants, archives, comparaison, transferts entre serveurs, édition distante." },
   { id: "docker", group: "serveur", label: "Docker", icon: Container, perServer: true, description: "Conteneurs, logs en direct, exec, stats, compose, catalogue d'applications 1-clic, registres privés et nettoyage de disque." },
+  { id: "vms", group: "serveur", label: "Machines virtuelles", icon: Monitor, perServer: true, description: "VM KVM/QEMU (libvirt) : démarrage, arrêt, écran et console série, sans rien exposer sur Internet." },
   { id: "databases", group: "serveur", label: "Bases de données", icon: Database, perServer: true, description: "Bases MySQL/MariaDB, PostgreSQL et SQLite : tables, requêtes SQL, édition en place, export CSV, et explorateur Redis." },
   { id: "sites", group: "serveur", label: "Sites", icon: Globe, perServer: true, description: "Sous-domaines nginx, certificats SSL, sauvegardes de configuration." },
   { id: "logs", group: "serveur", label: "Journaux", icon: ScrollText, perServer: true, description: "Logs Docker, systemd et nginx en direct, fusionnés et filtrables." },

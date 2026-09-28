@@ -44,6 +44,7 @@ const VIEWS: Partial<Record<SectionId, ComponentType>> = {
   files: lazy(() => import("./views/Files")),
   monitoring: lazy(() => import("./views/Monitoring")),
   docker: lazy(() => import("./views/Docker")),
+  vms: lazy(() => import("./views/Vms")),
   databases: lazy(() => import("./views/Databases")),
   sites: lazy(() => import("./views/Sites")),
   logs: lazy(() => import("./views/Logs")),

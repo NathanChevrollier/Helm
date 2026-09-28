@@ -22,6 +22,7 @@ export type GuideId =
   | "monitoring"
   | "schedule"
   | "docker"
+  | "vms"
   | "compose"
   | "databases"
   | "sites"
@@ -266,6 +267,38 @@ export const GUIDES: Guide[] = [
       "Une fois connecté à un registre, Docker garde le jeton dans ~/.docker/config.json, simplement encodé en base64 si aucun « credential helper » n'est installé. Zenytt le signale : utilise des jetons en lecture seule plutôt que le mot de passe du compte.",
       "Pour AWS ECR, le client aws (AWS CLI v2) doit être installé sur le serveur : Zenytt lui passe la clé d'accès sur l'entrée standard pour obtenir le jeton du jour.",
     ],
+  },
+  {
+    id: "vms",
+    title: "Machines virtuelles (libvirt)",
+    topic: "exploitation",
+    section: "vms",
+    summary: "Voir et piloter les VM KVM/QEMU d'un serveur : démarrer, éteindre, voir leur écran ou leur console série, sans rien exposer sur Internet.",
+    automatic: "Zenytt détecte libvirt, choisit l'accès direct (groupe libvirt) ou sudo, et ouvre l'écran d'une VM par un tunnel SSH vers 127.0.0.1.",
+    how: [
+      "Zenytt utilise virsh sur le serveur, toujours sur la connexion système (qemu:///system) : la liste est celle de virt-manager.",
+      "Une VM est désignée par son UUID dans chaque commande : un nom avec espaces, accents ou apostrophes ne pose aucun problème.",
+      "L'écran (VNC) s'affiche dans Zenytt à travers un tunnel SSH ; le port VNC n'a jamais besoin d'être ouvert.",
+      "La console série s'ouvre dans un onglet terminal (Ctrl+] pour en sortir).",
+      "Forcer l'arrêt et supprimer demandent toujours confirmation ; chaque action est inscrite dans le journal.",
+    ],
+    requirements: [
+      "libvirt et QEMU installés sur le serveur",
+      "ton utilisateur dans le groupe libvirt, ou le mot de passe sudo renseigné dans le profil",
+      "pour l'écran : un affichage VNC (le SPICE ne s'affiche pas dans Zenytt)",
+    ],
+    steps: [
+      { text: "Installer libvirt (Debian, Ubuntu)", command: "sudo apt install qemu-system-x86 libvirt-daemon-system libvirt-clients virtinst" },
+      { text: "Installer libvirt (Rocky, Alma, Fedora)", command: "sudo dnf install qemu-kvm libvirt virt-install && sudo systemctl enable --now libvirtd" },
+      { text: "Donner l'accès à ton utilisateur, puis te reconnecter", command: "sudo usermod -aG libvirt $USER" },
+      { text: "Passer l'écran d'une VM en VNC, écouté seulement en local", command: "virt-xml <vm> --edit --graphics vnc,listen=127.0.0.1", sudo: true },
+    ],
+    troubleshooting: [
+      { symptom: "« failed to connect to the hypervisor »", answer: "Ton utilisateur n'a pas accès à libvirt : ajoute-le au groupe libvirt (puis reconnecte-toi), ou renseigne le mot de passe sudo dans le profil du serveur.", command: "id -nG" },
+      { symptom: "« Écran » refuse d'ouvrir une VM en SPICE", answer: "Zenytt n'affiche que le VNC : utilise la console série, ou passe l'affichage de la VM en VNC avec la commande ci-dessus." },
+      { symptom: "Aucune adresse IP n'est affichée", answer: "La VM n'a pas de bail DHCP du réseau de libvirt (pont vers le LAN, IP fixe). Installe l'agent invité dans la VM pour que libvirt la connaisse :", command: "sudo apt install qemu-guest-agent" },
+    ],
+    notes: ["La création de VM, les instantanés et le stockage arrivent dans les prochaines versions."],
   },
   {
     id: "compose",
