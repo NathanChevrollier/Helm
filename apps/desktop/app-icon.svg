@@ -1,6 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- Icône Zenytt : symbole « Zénith » (l'étoile perce l'horizon), sur une tuile qui remplit le carré. -->
-  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16213a"/><stop offset="1" stop-color="#0b1120"/></linearGradient></defs>
-  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
-  <g transform="translate(-68.0 1.6) scale(11.6)"><path d="M62.31 16.17 A36 36 0 1 1 37.69 16.17" fill="none" stroke="#e9eef7" stroke-width="5" stroke-linecap="round"/><path d="M50 6 L45 45 L20 50 L45 55 L50 82Z" fill="#9cc0ff"/><path d="M50 6 L55 45 L80 50 L55 55 L50 82Z" fill="#4f8bff"/><path d="M80 73 L81.4 76.6 L85 78 L81.4 79.4 L80 83 L78.6 79.4 L75 78 L78.6 76.6Z" fill="#f5b642"/><circle cx="21" cy="78" r="2" fill="#e9eef7"/></g>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16213a"/>
+      <stop offset="1" stop-color="#0b1120"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="214" fill="url(#bg)"/>
+  <!-- Symbole « Zénith » dessiné sur une grille de 100 : l'étoile perce l'horizon par le haut. -->
+  <g transform="translate(62 98) scale(9)">
+    <!-- Horizon, ouvert au zénith -->
+    <path d="M62.31 16.17 A36 36 0 1 1 37.69 16.17" fill="none" stroke="#e9eef7" stroke-width="4.5" stroke-linecap="round"/>
+    <!-- Étoile polaire, deux facettes -->
+    <path d="M50 6 L45 45 L20 50 L45 55 L50 82Z" fill="#9cc0ff"/>
+    <path d="M50 6 L55 45 L80 50 L55 55 L50 82Z" fill="#4f8bff"/>
+    <!-- Étoile d'accent -->
+    <path d="M80 73 L81.4 76.6 L85 78 L81.4 79.4 L80 83 L78.6 79.4 L75 78 L78.6 76.6Z" fill="#f5b642"/>
+    <circle cx="21" cy="78" r="2" fill="#e9eef7"/>
+  </g>
 </svg>
