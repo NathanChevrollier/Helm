@@ -334,6 +334,64 @@ pub(crate) fn parse_domstats(text: &str) -> std::collections::HashMap<String, st
     out
 }
 
+#[derive(Debug, Clone, Copy, serde::Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum VmAction {
+    Start,
+    /// Arrêt propre (ACPI) : le système invité s'éteint lui-même.
+    Shutdown,
+    Reboot,
+    /// Équivalent d'une coupure de courant : confirmation obligatoire côté interface.
+    ForceOff,
+    Suspend,
+    Resume,
+    AutostartOn,
+    AutostartOff,
+}
+
+pub fn action_args(action: VmAction, uuid: &str) -> String {
+    let u = shell_quote(uuid);
+    match action {
+        VmAction::Start => format!("start {u}"),
+        VmAction::Shutdown => format!("shutdown {u} --mode acpi"),
+        VmAction::Reboot => format!("reboot {u} --mode acpi"),
+        VmAction::ForceOff => format!("destroy {u} --graceful"),
+        VmAction::Suspend => format!("suspend {u}"),
+        VmAction::Resume => format!("resume {u}"),
+        VmAction::AutostartOn => format!("autostart {u}"),
+        VmAction::AutostartOff => format!("autostart {u} --disable"),
+    }
+}
+
+pub async fn act(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str, action: VmAction) -> Result<()> {
+    if !valid_uuid(uuid) {
+        return Err(Error::Other("identifiant de VM invalide".into()));
+    }
+    run(conn, access, sudo, &action_args(action, uuid)).await?.into_result()?;
+    Ok(())
+}
+
+pub fn delete_args(uuid: &str, with_storage: bool, uefi: bool) -> String {
+    let mut args = format!("undefine {} --managed-save --snapshots-metadata", shell_quote(uuid));
+    if uefi {
+        args.push_str(" --nvram");
+    }
+    if with_storage {
+        args.push_str(" --remove-all-storage");
+    }
+    args
+}
+
+/// Supprime la définition de la VM (arrêtée d'abord si besoin), et ses disques si demandé.
+pub async fn delete(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str, with_storage: bool, uefi: bool) -> Result<()> {
+    if !valid_uuid(uuid) {
+        return Err(Error::Other("identifiant de VM invalide".into()));
+    }
+    let _ = run(conn, access, sudo, &format!("destroy {}", shell_quote(uuid))).await;
+    run(conn, access, sudo, &delete_args(uuid, with_storage, uefi)).await?.into_result()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +482,16 @@ mod tests {
         assert_eq!(cirros["vcpu.current"], 1);
         let ips = parse_ifaddr(" Name       MAC address          Protocol     Address\n-------------------------------------------------------------------------------\n vnet0      52:54:00:ab:cd:ef    ipv4         192.168.122.45/24\n");
         assert_eq!(ips, vec!["192.168.122.45"]);
+    }
+
+    #[test]
+    fn action_commands() {
+        let u = "11111111-2222-3333-4444-555555555555";
+        assert_eq!(action_args(VmAction::Start, u), format!("start '{u}'"));
+        assert_eq!(action_args(VmAction::Shutdown, u), format!("shutdown '{u}' --mode acpi"));
+        assert_eq!(action_args(VmAction::ForceOff, u), format!("destroy '{u}' --graceful"));
+        assert_eq!(action_args(VmAction::AutostartOff, u), format!("autostart '{u}' --disable"));
+        assert_eq!(delete_args(u, false, false), format!("undefine '{u}' --managed-save --snapshots-metadata"));
+        assert_eq!(delete_args(u, true, true), format!("undefine '{u}' --managed-save --snapshots-metadata --nvram --remove-all-storage"));
     }
 }
