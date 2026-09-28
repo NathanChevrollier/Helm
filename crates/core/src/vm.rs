@@ -307,7 +307,7 @@ pub(crate) fn cpu_percent(before_ns: u64, after_ns: u64, elapsed_ms: u64, vcpus:
 }
 
 /// Deux relevés à une seconde d'intervalle des VM en marche.
-const STATS: &str = "VIRSH domstats --raw --state-running --cpu-total --vcpu --balloon; echo @@SEP; sleep 1; VIRSH domstats --raw --state-running --cpu-total";
+const STATS: &str = "VIRSH domstats --raw --list-running --cpu-total --vcpu --balloon; echo @@SEP; sleep 1; VIRSH domstats --raw --list-running --cpu-total";
 
 pub async fn stats(conn: &Connection, access: Access, sudo: Option<&str>) -> Result<Vec<VmStats>> {
     let script = STATS.replace("VIRSH", VIRSH);
@@ -517,5 +517,12 @@ mod tests {
         assert_eq!(vnc_password(xml).as_deref(), Some("s3cret"));
         assert!(matches!(parse_detail(xml).unwrap().graphics, Graphics::Vnc { password: true, .. }));
         assert_eq!(vnc_password(include_str!("vm/fixtures/cirros.xml")), None);
+    }
+
+    #[test]
+    fn stats_filter_running_vms_with_a_real_option() {
+        // `--state-running` n'existe pas (virsh refuse la commande) : le filtre est `--list-running`.
+        assert!(!STATS.contains("--state-running"));
+        assert_eq!(STATS.matches("--list-running").count(), 2);
     }
 }

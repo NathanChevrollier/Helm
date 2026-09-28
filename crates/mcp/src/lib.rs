@@ -20,7 +20,7 @@ use rmcp::{schemars, tool, tool_handler, tool_router, ErrorData as McpError, Ser
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use zenytt_core::docker::{self, Access};
-use zenytt_core::{agent, backup, nginx, security, system, Connection};
+use zenytt_core::{agent, backup, nginx, security, system, vm, Connection};
 use zenytt_profiles::audit::AuditLog;
 use zenytt_profiles::{secrets, ServerProfile, Store};
 use zenytt_protocol::proc::{parse_collect, COLLECT_SCRIPT};
@@ -261,6 +261,20 @@ impl Zenytt {
             let list = docker::containers(&c, access, s).await.map_err(e)?;
             let stats = docker::stats(&c, access, s).await.unwrap_or_default();
             json(&serde_json::json!({ "containers": list, "stats": stats })).map_err(|_| "sérialisation impossible".into())
+        })
+        .await
+    }
+
+    #[tool(description = "Machines virtuelles libvirt du serveur : nom, état, vCPU, mémoire.")]
+    async fn list_vms(&self, Parameters(a): Parameters<ServerArg>) -> Result<CallToolResult, McpError> {
+        self.with(&a.server, "list_vms", "", |c, sudo| async move {
+            let s = sudo.as_deref();
+            let (access, reason) = vm::access(&c, s).await.map_err(e)?;
+            if access == vm::Access::Unavailable {
+                return Err(format!("libvirt n'est pas accessible sur ce serveur : {reason}"));
+            }
+            let vms = vm::list(&c, access, s).await.map_err(e)?;
+            json(&serde_json::json!({ "libvirt": reason, "vms": vms })).map_err(|_| "sérialisation impossible".into())
         })
         .await
     }
