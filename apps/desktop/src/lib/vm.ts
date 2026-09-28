@@ -1,5 +1,5 @@
 // Règles d'affichage des machines virtuelles : libellés, actions permises, confirmations.
-import type { Vm, VmAction, VmState } from "./api";
+import type { Vm, VmAction, VmDetail, VmState, VmStats } from "./api";
 
 export function stateLabel(state: VmState): { label: string; tone: "ok" | "warn" | "muted" | "danger" } {
   switch (state) {
@@ -46,4 +46,15 @@ export function formatMemory(kib: number): string {
   const mo = kib / 1024;
   if (mo < 1024) return `${Math.round(mo)} Mo`;
   return `${(mo / 1024).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Go`;
+}
+
+/** Mémoire d'une VM : utilisée / attribuée quand elle tourne et que l'activité est connue. */
+export function memoryText(vm: Vm, stats: VmStats | undefined): string {
+  const max = formatMemory(vm.memoryKib);
+  return vm.state === "running" && stats?.memoryUsedKib != null ? `${formatMemory(stats.memoryUsedKib)} / ${max}` : max;
+}
+
+/** Fichiers supprimés avec la VM (même règle que le serveur) : ni ISO, ni disque partagé ou en lecture seule. */
+export function removableDiskFiles(detail: Pick<VmDetail, "disks">): string[] {
+  return detail.disks.filter((d) => d.device === "disk" && !d.shared && d.source).map((d) => d.source!);
 }

@@ -83,7 +83,10 @@ export const useRdp = create<RdpStore>((set, get) => ({
       if (warning) useApp.getState().notify(warning, "error");
       set({ vnc: session, state: { kind: "connexion" } });
     } catch (e) {
-      set({ state: { kind: "erreur", message: e instanceof Error ? e.message : String(e) } });
+      // VM sans écran VNC (SPICE, aucun, éteinte) : l'écran se referme et l'explication, qui
+      // propose la console série, s'affiche seule. Les conseils d'un bureau VNC n'ont pas de sens ici.
+      set({ desktop: null, session: null, vnc: null, vm: null, state: { kind: "ouverture" } });
+      useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
     }
   },
 

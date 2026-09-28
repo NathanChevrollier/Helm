@@ -102,7 +102,8 @@ export interface VmOverview {
 export type VmGraphics = { kind: "vnc"; port: number | null; listen: string; public: boolean; password: boolean } | { kind: "spice" } | { kind: "none" };
 
 export interface VmDetail {
-  disks: { target: string; device: string; source: string | null; format: string | null }[];
+  /** `shared` : en lecture seule ou partagé avec d'autres VM, jamais supprimé avec la VM. */
+  disks: { target: string; device: string; source: string | null; format: string | null; shared: boolean }[];
   nics: { mac: string; source: string; model: string | null }[];
   graphics: VmGraphics;
   os: string;
@@ -1199,7 +1200,8 @@ export const api = {
   vmDetail: (serverId: string, uuid: string) => invoke<VmDetail>("vm_detail", { serverId, uuid }),
   vmStats: (serverId: string) => invoke<VmStats[]>("vm_stats", { serverId }),
   vmAction: (serverId: string, vm: Vm, action: VmAction) => invoke<void>("vm_action", { serverId, uuid: vm.uuid, name: vm.name, action }),
-  vmDelete: (serverId: string, vm: Vm, withStorage: boolean) => invoke<void>("vm_delete", { serverId, uuid: vm.uuid, name: vm.name, withStorage }),
+  /** Renvoie les fichiers restés sur le serveur (hors d'un pool libvirt, à supprimer à la main). */
+  vmDelete: (serverId: string, vm: Vm, withStorage: boolean) => invoke<string[]>("vm_delete", { serverId, uuid: vm.uuid, name: vm.name, withStorage }),
   vmConsoleOpen: (serverId: string, uuid: string, name: string) => invoke<VmConsole>("vm_console_open", { serverId, uuid, name }),
   vmSerialCommand: (serverId: string, uuid: string) => invoke<string>("vm_serial_command", { serverId, uuid }),
   /** `password` : `undefined` = inchangé, `""` = supprimé. */

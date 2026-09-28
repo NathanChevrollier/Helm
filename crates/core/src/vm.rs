@@ -142,6 +142,8 @@ pub struct Disk {
     pub device: String,
     pub source: Option<String>,
     pub format: Option<String>,
+    /// Disque en lecture seule ou partagé avec d'autres VM : jamais supprimé avec la VM.
+    pub shared: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -202,6 +204,7 @@ pub(crate) fn parse_detail(xml: &str) -> Result<VmDetail> {
                 .and_then(|s| s.attribute("file").or(s.attribute("dev")).or(s.attribute("volume")))
                 .map(str::to_string),
             format: child(d, "driver").and_then(|s| s.attribute("type")).map(str::to_string),
+            shared: child(d, "readonly").is_some() || child(d, "shareable").is_some(),
         })
         .collect();
     let nics = all("interface")
@@ -387,25 +390,58 @@ pub async fn act(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &s
     Ok(())
 }
 
-pub fn delete_args(uuid: &str, with_storage: bool, uefi: bool) -> String {
+/// Disques propres à la VM, supprimables avec elle : ni lecteur CD (une ISO sert souvent à
+/// plusieurs VM), ni disque en lecture seule ou partagé.
+pub fn removable_disks(d: &VmDetail) -> Vec<String> {
+    d.disks.iter().filter(|x| x.device == "disk" && !x.shared && !x.target.is_empty()).map(|x| x.target.clone()).collect()
+}
+
+/// `storage` : disques à supprimer (cibles `vda`…), désignés un par un plutôt que
+/// `--remove-all-storage`, qui prendrait aussi les ISO et les disques partagés.
+pub fn delete_args(uuid: &str, storage: &[String], uefi: bool) -> String {
     let mut args = format!("undefine {} --managed-save --snapshots-metadata", shell_quote(uuid));
     if uefi {
         args.push_str(" --nvram");
     }
-    if with_storage {
-        args.push_str(" --remove-all-storage");
+    if !storage.is_empty() {
+        args.push_str(&format!(" --storage {}", shell_quote(&storage.join(","))));
     }
     args
 }
 
-/// Supprime la définition de la VM (arrêtée d'abord si besoin), et ses disques si demandé.
-pub async fn delete(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str, with_storage: bool, uefi: bool) -> Result<()> {
+/// Fichiers que virsh n'a pas pu supprimer (hors d'un pool libvirt) : il le signale, sans échouer.
+pub fn leftover_files(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter(|l| l.contains("is not managed by libvirt"))
+        .filter_map(|l| {
+            let start = l.find("'(")? + 2;
+            let end = start + l[start..].find(')')?;
+            Some(l[start..end].to_string())
+        })
+        .collect()
+}
+
+/// Supprime la définition de la VM (arrêtée d'abord si besoin) et les disques demandés. Renvoie
+/// les fichiers restés sur le serveur (à supprimer à la main).
+pub async fn delete(
+    conn: &Connection,
+    access: Access,
+    sudo: Option<&str>,
+    uuid: &str,
+    storage: &[String],
+    uefi: bool,
+) -> Result<Vec<String>> {
     if !valid_uuid(uuid) {
         return Err(Error::Other("identifiant de VM invalide".into()));
     }
     let _ = run(conn, access, sudo, &format!("destroy {}", shell_quote(uuid))).await;
-    run(conn, access, sudo, &delete_args(uuid, with_storage, uefi)).await?.into_result()?;
-    Ok(())
+    let out = run(conn, access, sudo, &delete_args(uuid, storage, uefi)).await?.into_result()?;
+    Ok(leftover_files(&format!(
+        "{}
+{}",
+        out.stderr, out.stdout
+    )))
 }
 
 #[cfg(test)]
@@ -507,8 +543,12 @@ mod tests {
         assert_eq!(action_args(VmAction::Shutdown, u), format!("shutdown '{u}' --mode acpi"));
         assert_eq!(action_args(VmAction::ForceOff, u), format!("destroy '{u}' --graceful"));
         assert_eq!(action_args(VmAction::AutostartOff, u), format!("autostart '{u}' --disable"));
-        assert_eq!(delete_args(u, false, false), format!("undefine '{u}' --managed-save --snapshots-metadata"));
-        assert_eq!(delete_args(u, true, true), format!("undefine '{u}' --managed-save --snapshots-metadata --nvram --remove-all-storage"));
+        assert_eq!(delete_args(u, &[], false), format!("undefine '{u}' --managed-save --snapshots-metadata"));
+        // Disques désignés un par un : jamais --remove-all-storage (il prendrait aussi une ISO partagée).
+        assert_eq!(
+            delete_args(u, &["vda".into(), "vdb".into()], true),
+            format!("undefine '{u}' --managed-save --snapshots-metadata --nvram --storage 'vda,vdb'")
+        );
     }
 
     #[test]
@@ -524,5 +564,25 @@ mod tests {
         // `--state-running` n'existe pas (virsh refuse la commande) : le filtre est `--list-running`.
         assert!(!STATS.contains("--state-running"));
         assert_eq!(STATS.matches("--list-running").count(), 2);
+    }
+
+    #[test]
+    fn only_the_vm_own_disks_are_removed() {
+        let d = parse_detail(include_str!("vm/fixtures/cirros.xml")).unwrap();
+        assert_eq!(removable_disks(&d), vec!["vda".to_string()]);
+        let xml = "<domain><os><type>hvm</type></os><devices>            <disk type='file' device='disk'><source file='/v/own.qcow2'/><target dev='vda'/></disk>            <disk type='file' device='cdrom'><source file='/iso/debian.iso'/><target dev='sda'/><readonly/></disk>            <disk type='file' device='disk'><source file='/v/shared.img'/><target dev='vdb'/><shareable/></disk>            <disk type='file' device='disk'><source file='/v/ro.img'/><target dev='vdc'/><readonly/></disk>            </devices></domain>";
+        assert_eq!(removable_disks(&parse_detail(xml).unwrap()), vec!["vda".to_string()]);
+    }
+
+    #[test]
+    fn disks_left_behind_are_reported() {
+        let stderr = "error: Storage volume 'vda'(/var/lib/libvirt/images/jetable.qcow2) is not managed by libvirt. Remove it manually.
+";
+        assert_eq!(leftover_files(stderr), vec!["/var/lib/libvirt/images/jetable.qcow2".to_string()]);
+        assert!(leftover_files(
+            "Domain 'x' has been undefined
+"
+        )
+        .is_empty());
     }
 }

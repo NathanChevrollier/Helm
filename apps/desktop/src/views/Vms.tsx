@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Monitor, Pause, Play, Power, PowerOff, RotateCw, SquareTerminal, Trash2, Zap } from "lucide-react";
 import { api, errorMessage, type Vm, type VmAction, type VmOverview, type VmStats } from "../lib/api";
-import { allowedActions, formatMemory, needsConfirmation, stateLabel } from "../lib/vm";
+import { allowedActions, memoryText, needsConfirmation, removableDiskFiles, stateLabel } from "../lib/vm";
 import { useRdp } from "../lib/rdp";
 import { useApp, useAppPick } from "../lib/store";
 import { useCachedState } from "../lib/cache";
@@ -163,7 +163,7 @@ function Vms({ serverId }: { serverId: string }) {
       },
     },
     { key: "vcpus", header: "vCPU", width: "70px", sortValue: (v) => v.vcpus, render: (v) => <span className="text-xs">{v.vcpus}</span> },
-    { key: "memory", header: "Mémoire", width: "100px", sortValue: (v) => v.memoryKib, render: (v) => <span className="text-xs">{formatMemory(v.memoryKib)}</span> },
+    { key: "memory", header: "Mémoire", width: "140px", sortValue: (v) => v.memoryKib, render: (v) => <span className="text-xs">{memoryText(v, stats[v.uuid])}</span> },
     {
       key: "cpu",
       header: "CPU",
@@ -233,13 +233,16 @@ function Vms({ serverId }: { serverId: string }) {
       )}
       {deleting && (
         <DeleteVmDialog
+          serverId={serverId}
           vm={deleting}
           onClose={() => setDeleting(null)}
           onConfirm={async (withStorage) => {
-            await api.vmDelete(serverId, deleting, withStorage);
+            const left = await api.vmDelete(serverId, deleting, withStorage);
             setDeleting(null);
             setSelected(null);
-            notify(`« ${deleting.name} » supprimée`, "success");
+            // Disques hors d'un pool libvirt : virsh ne les supprime pas, sans échouer. On le dit.
+            if (left.length) notify(`« ${deleting.name} » supprimée, mais ces disques sont restés sur le serveur (hors d'un pool libvirt) : ${left.join(", ")}`, "error");
+            else notify(`« ${deleting.name} » supprimée`, "success");
             await load();
           }}
         />
@@ -248,10 +251,15 @@ function Vms({ serverId }: { serverId: string }) {
   );
 }
 
-function DeleteVmDialog({ vm, onClose, onConfirm }: { vm: Vm; onClose: () => void; onConfirm: (withStorage: boolean) => Promise<void> }) {
+function DeleteVmDialog({ serverId, vm, onClose, onConfirm }: { serverId: string; vm: Vm; onClose: () => void; onConfirm: (withStorage: boolean) => Promise<void> }) {
   const [withStorage, setWithStorage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Fichiers qui seraient supprimés avec la VM, affichés avant de confirmer. */
+  const [files, setFiles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api.vmDetail(serverId, vm.uuid).then((d) => setFiles(removableDiskFiles(d)), () => setFiles([]));
+  }, [serverId, vm.uuid]);
   return (
     <Modal
       title={`Supprimer « ${vm.name} » ?`}
@@ -288,8 +296,26 @@ function DeleteVmDialog({ vm, onClose, onConfirm }: { vm: Vm; onClose: () => voi
           onChange={setWithStorage}
           disabled={busy}
           label="Supprimer aussi ses disques (définitif)"
-          hint="Sans cette case, les fichiers de disque restent sur le serveur et peuvent servir à recréer la VM."
+          hint="Sans cette case, les fichiers de disque restent sur le serveur et peuvent servir à recréer la VM. Les ISO et les disques partagés ne sont jamais supprimés."
         />
+        {withStorage && (
+          <div className="rounded-md border border-border bg-subtle px-3 py-2 text-xs">
+            {files === null ? (
+              <span className="text-muted">Lecture des disques…</span>
+            ) : files.length ? (
+              <>
+                <p className="mb-1 text-muted">Fichiers supprimés :</p>
+                {files.map((f) => (
+                  <p key={f} className="font-mono break-all select-text">
+                    {f}
+                  </p>
+                ))}
+              </>
+            ) : (
+              <span className="text-muted">Aucun disque propre à cette VM : rien d'autre ne sera supprimé.</span>
+            )}
+          </div>
+        )}
         {error && <ErrorState message={error} />}
       </div>
     </Modal>

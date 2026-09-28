@@ -140,7 +140,10 @@ pub async fn vm_action(
     track(&audit, &store, &server_id, &format!("vm.{}", serde_json::to_value(action).unwrap().as_str().unwrap_or("action")), &name, r)
 }
 
+/// Supprime la VM ; avec `with_storage`, ses propres disques seulement (ni ISO ni disque partagé).
+/// Renvoie les fichiers restés sur le serveur, que libvirt ne gère pas (hors d'un pool).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn vm_delete(
     audit: State<'_, AuditLog>,
     store: State<'_, Store>,
@@ -150,11 +153,12 @@ pub async fn vm_delete(
     uuid: String,
     name: String,
     with_storage: bool,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let r = async {
         let c = ctx(&store, &sessions, &cache, &server_id).await?;
         let d = vm::detail(&c.conn, c.access, c.sudo.as_deref(), &uuid).await.map_err(err)?;
-        vm::delete(&c.conn, c.access, c.sudo.as_deref(), &uuid, with_storage, d.firmware == "uefi").await.map_err(err)
+        let storage = if with_storage { vm::removable_disks(&d) } else { Vec::new() };
+        vm::delete(&c.conn, c.access, c.sudo.as_deref(), &uuid, &storage, d.firmware == "uefi").await.map_err(err)
     }
     .await;
     let detail = if with_storage { format!("{name} (avec ses disques)") } else { name };
