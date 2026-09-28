@@ -48,6 +48,7 @@ const VIEWS: Partial<Record<SectionId, ComponentType>> = {
   sites: lazy(() => import("./views/Sites")),
   logs: lazy(() => import("./views/Logs")),
   tunnels: lazy(() => import("./views/Tunnels")),
+  mesh: lazy(() => import("./views/Mesh")),
   backups: lazy(() => import("./views/Backups")),
   security: lazy(() => import("./views/Security")),
   help: lazy(() => import("./views/Help")),

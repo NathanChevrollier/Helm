@@ -8,6 +8,7 @@ import {
   FolderTree,
   Globe,
   LayoutDashboard,
+  Network,
   ScrollText,
   Server,
   Settings,
@@ -27,6 +28,7 @@ export type SectionId =
   | "sites"
   | "logs"
   | "tunnels"
+  | "mesh"
   | "backups"
   | "security"
   | "help"
@@ -52,6 +54,7 @@ export const SECTIONS: Section[] = [
   { id: "home", group: "poste", label: "Accueil", icon: LayoutDashboard, description: "Santé de tous tes serveurs d'un coup d'œil." },
   { id: "terminal", group: "poste", label: "Terminal", icon: SquareTerminal, description: "Sessions SSH persistantes en onglets et panneaux, snippets, diffusion." },
   { id: "tunnels", group: "poste", label: "Tunnels", icon: Cable, description: "Accès local à des services du serveur, sans les exposer sur Internet." },
+  { id: "mesh", group: "poste", label: "Réseau privé", icon: Network, description: "Relie tes serveurs de différents hébergeurs dans un réseau privé chiffré (WireGuard)." },
   { id: "servers", group: "poste", label: "Serveurs", icon: Server, description: "Profils de connexion, clés SSH et secrets stockés dans le keyring de l'OS." },
   { id: "monitoring", group: "serveur", label: "Supervision", icon: Activity, perServer: true, description: "CPU, RAM, disque, réseau, processus, services systemd et alertes." },
   { id: "files", group: "serveur", label: "Fichiers", icon: FolderTree, perServer: true, description: "Explorateur SFTP, recherche et grep distants, archives, comparaison, transferts entre serveurs, édition distante." },

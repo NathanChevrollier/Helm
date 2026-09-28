@@ -29,6 +29,7 @@ export type GuideId =
   | "agent"
   | "backups"
   | "tunnels"
+  | "mesh"
   | "security"
   | "share"
   | "sync"
@@ -461,6 +462,40 @@ export const GUIDES: Guide[] = [
     troubleshooting: [
       { symptom: "« Address already in use » à l'ouverture", answer: "Le port local est déjà pris : en choisir un autre (Zenytt en propose un libre)." },
     ],
+  },
+  {
+    id: "mesh",
+    title: "Réseau privé entre serveurs",
+    topic: "securite",
+    section: "mesh",
+    summary: "Relie des serveurs de différents hébergeurs comme s'ils étaient sur le même réseau local, chiffré par WireGuard : une base de données joignable par ton app sans être exposée sur Internet.",
+    automatic: "Zenytt installe WireGuard, fait générer une clé par chaque serveur, choisit un sous-réseau libre, attribue les adresses, ouvre le port UDP dans ufw ou firewalld et relie tous les serveurs entre eux.",
+    how: [
+      "Chaque serveur reçoit une adresse privée (10.77.0.1, 10.77.0.2…) sur l'interface zenytt, et joint directement chaque autre serveur.",
+      "La clé privée de chaque serveur est générée sur le serveur et n'en sort jamais, même pas vers Zenytt.",
+      "Le sous-réseau est choisi pour ne recouvrir aucune adresse déjà utilisée sur tes serveurs (réseaux Docker, LAN, autre VPN).",
+      "Un serveur derrière une box (NAT) joint les serveurs publics ; deux serveurs derrière NAT ne se joignent pas encore entre eux.",
+      "« Réparer » réapplique la configuration à tous les serveurs sans couper les liens existants.",
+    ],
+    requirements: [
+      "un noyau Linux 5.6 ou plus récent (WireGuard intégré)",
+      "sudo (le mot de passe du profil sert)",
+      "le port UDP 51820 ouvert dans le pare-feu de l'hébergeur pour les serveurs publics",
+    ],
+    steps: [
+      { text: "Voir l'état de l'interface et des liens", command: "wg show zenytt", sudo: true },
+      { text: "Tester un lien vers un autre membre", command: "ping -c3 10.77.0.2" },
+    ],
+    troubleshooting: [
+      {
+        symptom: "« jamais relié » entre deux serveurs publics",
+        answer: "Le port UDP est sans doute bloqué par le pare-feu de l'hébergeur (console OVH, Hetzner, AWS…). L'ouvrir en UDP pour le port affiché, puis vérifier que WireGuard l'écoute :",
+        command: "ss -ulnp | grep 518",
+        sudo: true,
+      },
+      { symptom: "L'interface ne démarre pas", answer: "Voir le message de wg-quick :", command: "wg-quick up zenytt", sudo: true },
+    ],
+    notes: ["Les fichiers gérés par Zenytt sont /etc/wireguard/zenytt.conf et /etc/wireguard/zenytt.key ; un wg0 existant n'est jamais touché."],
   },
   {
     id: "rdp",
