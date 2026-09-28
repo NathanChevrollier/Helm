@@ -11,7 +11,7 @@ mod tray;
 mod vnc_bridge;
 
 use commands::{
-    assistant, backups, dashboard, databases, deploy, docker, files, identities, logs, monitoring, rdp, redis, security, servers, share,
+    assistant, backups, dashboard, databases, deploy, docker, files, identities, logs, mesh, monitoring, rdp, redis, security, servers, share,
     sites, sync, terminal, tunnels, workspace,
 };
 use tauri::Manager;
@@ -239,6 +239,13 @@ pub fn run() {
             docker::docker_compose_create,
             docker::docker_compose_file_info,
             docker::docker_occasional_set,
+            mesh::mesh_list,
+            mesh::mesh_create,
+            mesh::mesh_add,
+            mesh::mesh_remove,
+            mesh::mesh_repair,
+            mesh::mesh_delete,
+            mesh::mesh_status,
             docker::docker_compose_launch,
             docker::docker_projects_under,
             docker::docker_move_folder,

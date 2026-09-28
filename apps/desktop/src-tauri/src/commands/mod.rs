@@ -7,6 +7,7 @@ pub mod docker;
 pub mod files;
 pub mod identities;
 pub mod logs;
+pub mod mesh;
 pub mod monitoring;
 pub mod rdp;
 pub mod redis;
