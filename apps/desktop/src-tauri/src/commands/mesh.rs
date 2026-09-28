@@ -120,6 +120,38 @@ async fn apply_all(store: &Store, sessions: &Sessions, net: &MeshNetwork) -> Vec
     .await
 }
 
+/// Repère, dans un refus, le cas d'un serveur resté dans un réseau que ce PC ne connaît pas :
+/// l'interface propose alors de le reprendre.
+pub const UNKNOWN_NETWORK: &str = "inconnu de ce PC";
+
+/// Ce qu'on fait d'un serveur selon le réseau Zenytt qu'il porte déjà.
+#[derive(Debug, PartialEq)]
+enum Membership {
+    /// Aucun réseau Zenytt sur le serveur.
+    Fresh,
+    /// Déjà configuré pour ce réseau (retiré alors qu'il était injoignable, puis rajouté).
+    Same,
+    /// Configuré pour un réseau inconnu de ce PC, reprise demandée : on l'en retire d'abord.
+    CleanFirst,
+}
+
+/// `known` : réseaux de ce PC. Un membre d'un réseau connu n'est jamais pris à ce réseau.
+fn membership(existing: Option<&(String, String)>, target: Option<&str>, known: &[String], takeover: bool) -> Result<Membership, String> {
+    let Some((id, name)) = existing else { return Ok(Membership::Fresh) };
+    if Some(id.as_str()) == target {
+        return Ok(Membership::Same);
+    }
+    if known.contains(id) {
+        return Err(format!("ce serveur appartient déjà au réseau privé « {name} » : retire-le d'abord de ce réseau"));
+    }
+    if takeover {
+        return Ok(Membership::CleanFirst);
+    }
+    Err(format!(
+        "ce serveur est encore configuré pour le réseau privé « {name} », {UNKNOWN_NETWORK} (supprimé alors que le serveur était injoignable, ou créé depuis un autre PC). Coche « Reprendre les serveurs encore configurés » pour l'en retirer."
+    ))
+}
+
 /// Prépare un serveur et en fait un membre (port choisi, appartenance à un autre réseau refusée).
 /// Sans `cidr` (création), l'adresse est attribuée après le choix du sous-réseau.
 async fn new_member(
@@ -129,15 +161,16 @@ async fn new_member(
     net_id: Option<&str>,
     cidr: Option<&str>,
     used: &[String],
+    takeover: bool,
 ) -> Result<(MeshMember, mesh::Prepared), String> {
     let (conn, sudo) = admin(store, sessions, server_id).await?;
-    let p = mesh::prepare(&conn, sudo.as_deref()).await.map_err(|e| e.to_string())?;
-    if let Some((id, name)) = &p.existing {
-        if Some(id.as_str()) != net_id {
-            return Err(format!(
-                "{} appartient déjà au réseau privé « {name} » : retire-le d'abord de ce réseau",
-                server_name(store, server_id)
-            ));
+    let mut p = mesh::prepare(&conn, sudo.as_deref()).await.map_err(|e| e.to_string())?;
+    let known: Vec<String> = store.read(|d| d.meshes.iter().map(|n| n.id.clone()).collect());
+    match membership(p.existing.as_ref(), net_id, &known, takeover)? {
+        Membership::Fresh | Membership::Same => {}
+        Membership::CleanFirst => {
+            mesh::remove(&conn, sudo.as_deref(), None).await.map_err(|e| e.to_string())?;
+            p = mesh::prepare(&conn, sudo.as_deref()).await.map_err(|e| e.to_string())?;
         }
     }
     if let Some(c) = cidr {
@@ -185,14 +218,16 @@ pub async fn mesh_create(
     sessions: State<'_, Sessions>,
     name: String,
     server_ids: Vec<String>,
+    takeover: Option<bool>,
 ) -> Result<MeshReport, String> {
+    let takeover = takeover.unwrap_or(false);
     let name = valid_name(&name)?;
     let mut seen = std::collections::HashSet::new();
     let ids: Vec<String> = server_ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
     if ids.len() < 2 {
         return Err("choisis au moins deux serveurs".into());
     }
-    let prepared = join_all(ids.iter().map(|id| new_member(&store, &sessions, id, None, None, &[]))).await;
+    let prepared = join_all(ids.iter().map(|id| new_member(&store, &sessions, id, None, None, &[], takeover))).await;
     let mut errors = Vec::new();
     let mut members = Vec::new();
     let mut routes = String::new();
@@ -230,13 +265,15 @@ pub async fn mesh_add(
     sessions: State<'_, Sessions>,
     network_id: String,
     server_id: String,
+    takeover: Option<bool>,
 ) -> Result<MeshReport, String> {
     let mut net = network(&store, &network_id)?;
     if net.members.iter().any(|m| m.server_id == server_id) {
         return Err("ce serveur fait déjà partie du réseau".into());
     }
     let used: Vec<String> = net.members.iter().map(|m| m.address.clone()).collect();
-    let r = new_member(&store, &sessions, &server_id, Some(&net.id), Some(&net.cidr), &used).await.map(|(m, _)| m);
+    let r =
+        new_member(&store, &sessions, &server_id, Some(&net.id), Some(&net.cidr), &used, takeover.unwrap_or(false)).await.map(|(m, _)| m);
     let m = track(&audit, &store, &server_id, "mesh.add", &net.name, r)?;
     net.members.push(m);
     save(&store, &net)?;
@@ -262,7 +299,7 @@ pub async fn mesh_remove(
     save(&store, &net)?;
     let r = async {
         let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
-        mesh::remove(&conn, sudo.as_deref(), gone.port).await.map_err(|e| e.to_string())
+        mesh::remove(&conn, sudo.as_deref(), Some(gone.port)).await.map_err(|e| e.to_string())
     }
     .await;
     let r = track(&audit, &store, &server_id, "mesh.remove", &net.name, r);
@@ -301,7 +338,7 @@ pub async fn mesh_delete(
     let results = join_all(net.members.iter().map(|m| async move {
         let r = async {
             let (conn, sudo) = admin(st, se, &m.server_id).await?;
-            mesh::remove(&conn, sudo.as_deref(), m.port).await.map_err(|e| e.to_string())
+            mesh::remove(&conn, sudo.as_deref(), Some(m.port)).await.map_err(|e| e.to_string())
         }
         .await;
         MemberResult::from_result(&m.server_id, r, "retiré du réseau")
@@ -375,6 +412,21 @@ mod tests {
         let w = nat_warnings(&net, |id| id.to_uppercase());
         assert_eq!(w.len(), 1);
         assert!(w[0].contains("B") && w[0].contains("C"), "{}", w[0]);
+    }
+
+    #[test]
+    fn server_left_in_an_unknown_network_can_be_taken_back() {
+        let old = ("vieux".to_string(), "Ancien".to_string());
+        let known = vec!["prod".to_string()];
+        assert!(matches!(membership(None, None, &known, false), Ok(Membership::Fresh)));
+        assert!(matches!(membership(Some(&old), Some("vieux"), &known, false), Ok(Membership::Same)));
+        // Réseau inconnu de ce PC (supprimé alors que le serveur était injoignable, ou créé ailleurs).
+        let refused = membership(Some(&old), None, &known, false).err().unwrap();
+        assert!(refused.contains(UNKNOWN_NETWORK), "{refused}");
+        assert!(matches!(membership(Some(&old), None, &known, true), Ok(Membership::CleanFirst)));
+        // Réseau connu de ce PC : on ne vole jamais un membre, même avec la reprise cochée.
+        let other = ("prod".to_string(), "Prod".to_string());
+        assert!(membership(Some(&other), None, &known, true).is_err());
     }
 
     #[test]

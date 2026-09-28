@@ -64,6 +64,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(ping.contains(" 0% packet loss"), "{ping}");
     ok("réappliquer ne coupe pas le lien");
 
+    // Adresse d'un membre changée (retiré puis rajouté ailleurs) : l'interface doit la suivre,
+    // `wg syncconf` seul la laisserait sur l'ancienne et les pairs rejetteraient ses paquets.
+    let moved = mesh::next_address(&cidr, &[members[0].address.clone(), members[1].address.clone()]).unwrap();
+    let mut members = members;
+    members[1].address = moved.clone();
+    let cfg = |i| mesh::node_config("smoke", "Test", &cidr, &members, i);
+    mesh::apply(&b, sudo_b, &cfg(1)).await?;
+    mesh::apply(&a, None, &cfg(0)).await?;
+    let addr = b.run("ip -4 -o addr show dev zenytt").await?;
+    assert!(addr.contains(&format!("{moved}/")), "{addr}");
+    // Le membre redémarré renégocie sa session : le lien revient en quelques secondes.
+    let back = a.run(&format!("for i in $(seq 1 20); do ping -c1 -W1 {moved} >/dev/null 2>&1 && echo up && break; sleep 1; done")).await?;
+    assert_eq!(back.trim(), "up", "le lien vers {moved} n'est pas revenu en 20 s");
+    ok("adresse changée : l'interface suit et le lien revient");
+
     let st = mesh::status(&a, None).await?;
     assert!(st.up && st.network_id.as_deref() == Some("smoke"), "{st:?}");
     assert!(st.links.first().and_then(|l| l.last_handshake).is_some(), "{st:?}");
@@ -71,8 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(st_b.up, "{st_b:?}");
     ok("état lu, lien établi (sudo avec mot de passe compris)");
 
-    mesh::remove(&a, None, 51820).await?;
-    mesh::remove(&b, sudo_b, 51820).await?;
+    mesh::remove(&a, None, Some(51820)).await?;
+    // Sans port : repris de la configuration du serveur (serveur resté dans un réseau inconnu).
+    mesh::remove(&b, sudo_b, None).await?;
+    assert!(!mesh::status(&b, sudo_b).await?.up);
     let st = mesh::status(&a, None).await?;
     assert!(!st.up && st.network_id.is_none(), "{st:?}");
     ok("retrait : interface et fichiers supprimés");

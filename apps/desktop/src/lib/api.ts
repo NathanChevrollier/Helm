@@ -1336,8 +1336,9 @@ export const api = {
   /** Marque un conteneur comme ponctuel (tâche qui s'arrête normalement) ou le démarque. */
   dockerOccasionalSet: (serverId: string, key: string, occasional: boolean) => invoke<void>("docker_occasional_set", { serverId, key, occasional }),
   meshList: () => invoke<MeshNetwork[]>("mesh_list"),
-  meshCreate: (name: string, serverIds: string[]) => invoke<MeshReport>("mesh_create", { name, serverIds }),
-  meshAdd: (networkId: string, serverId: string) => invoke<MeshReport>("mesh_add", { networkId, serverId }),
+  /** `takeover` : retire d'abord les serveurs encore configurés pour un réseau inconnu de ce PC. */
+  meshCreate: (name: string, serverIds: string[], takeover = false) => invoke<MeshReport>("mesh_create", { name, serverIds, takeover }),
+  meshAdd: (networkId: string, serverId: string, takeover = false) => invoke<MeshReport>("mesh_add", { networkId, serverId, takeover }),
   meshRemove: (networkId: string, serverId: string) => invoke<MeshReport>("mesh_remove", { networkId, serverId }),
   meshRepair: (networkId: string) => invoke<MeshReport>("mesh_repair", { networkId }),
   meshDelete: (networkId: string) => invoke<MeshReport>("mesh_delete", { networkId }),

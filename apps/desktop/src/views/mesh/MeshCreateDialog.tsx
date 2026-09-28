@@ -4,12 +4,16 @@ import { api, errorMessage, type MeshNetwork, type MeshReport } from "../../lib/
 import { useAppPick } from "../../lib/store";
 import { Button, Checkbox, ErrorState, Field, Input, Modal } from "../../components/ui";
 
+/** Refus d'un serveur resté dans un réseau inconnu de ce PC (même texte que `UNKNOWN_NETWORK` côté Rust). */
+const UNKNOWN_NETWORK = "inconnu de ce PC";
+
 export default function MeshCreateDialog({ network, onClose, onDone }: { network?: MeshNetwork; onClose: () => void; onDone: (report: MeshReport) => void }) {
   const { servers } = useAppPick("servers");
   const [name, setName] = useState("Réseau privé");
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [takeover, setTakeover] = useState(false);
 
   const adding = !!network;
   const candidates = servers.filter((s) => !network?.members.some((m) => m.serverId === s.id));
@@ -21,7 +25,7 @@ export default function MeshCreateDialog({ network, onClose, onDone }: { network
     setBusy(true);
     setError(null);
     try {
-      onDone(adding ? await api.meshAdd(network.id, picked[0]) : await api.meshCreate(name.trim(), picked));
+      onDone(adding ? await api.meshAdd(network.id, picked[0], takeover) : await api.meshCreate(name.trim(), picked, takeover));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -83,6 +87,16 @@ export default function MeshCreateDialog({ network, onClose, onDone }: { network
           </p>
         )}
         {error && <ErrorState message={<span className="whitespace-pre-line">{error}</span>} />}
+        {/* Serveur resté configuré pour un réseau que ce PC ne connaît pas : reprise sur accord explicite. */}
+        {(takeover || error?.includes(UNKNOWN_NETWORK)) && (
+          <Checkbox
+            checked={takeover}
+            onChange={setTakeover}
+            disabled={busy}
+            label="Reprendre les serveurs encore configurés"
+            hint="Ils quittent d'abord leur ancien réseau (interface zenytt et clé supprimées), puis rejoignent celui-ci. Si cet ancien réseau est géré depuis un autre PC, ses autres membres ne les joindront plus."
+          />
+        )}
       </div>
     </Modal>
   );
