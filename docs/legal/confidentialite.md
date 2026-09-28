@@ -1,6 +1,6 @@
 # Politique de confidentialité de Zenytt
 
-*Dernière mise à jour : 27 septembre 2026*
+*Dernière mise à jour : 28 septembre 2026*
 
 Zenytt est une application de bureau qui fonctionne **sur ton ordinateur**. Elle n'a pas de compte
 utilisateur, pas de serveur central et **aucune télémétrie** : l'éditeur ne reçoit ni statistiques
@@ -23,7 +23,7 @@ responsable de ces traitements.
 
 | Donnée | Où | Pourquoi |
 |---|---|---|
-| Profils de serveurs (nom, adresse, port, utilisateur, dossiers, tunnels, snippets, réglages) | Fichier `zenytt.json` dans le dossier de configuration de l'application (`%APPDATA%\dev.zenytt.desktop` sous Windows) | Te reconnecter à tes serveurs |
+| Profils de serveurs (nom, adresse, port, utilisateur, dossiers, tunnels, snippets, réseaux privés — adresses privées et clés publiques WireGuard —, réglages) | Fichier `zenytt.json` dans le dossier de configuration de l'application (`%APPDATA%\dev.zenytt.desktop` sous Windows) | Te reconnecter à tes serveurs |
 | Mots de passe, phrases de passe de clés, clés d'API, jetons | Gestionnaire d'identifiants du système (Windows Credential Manager, trousseau macOS, Secret Service sous Linux), jamais en clair dans un fichier | Authentification |
 | Empreintes des clés d'hôte approuvées | Fichier de configuration | Détecter une usurpation de serveur |
 | Journal technique de l'application (5 fichiers de 2 Mo au plus, rotation automatique) | Dossier des journaux de l'application | Diagnostiquer un problème ; aucun secret n'y est écrit |
@@ -41,6 +41,14 @@ Zenytt se connecte en SSH aux serveurs que **tu** as configurés, pour y exécut
 tu demandes (terminal, fichiers, Docker, nginx, sauvegardes…). L'agent facultatif `zenyttd`, s'il est
 installé, tourne sur ces serveurs et ne communique qu'avec Zenytt via SSH, et avec les services de
 notification que tu as configurés (section 4).
+
+Le **réseau privé** (WireGuard) relie les serveurs que tu choisis entre eux. Chaque serveur génère
+sa propre clé privée, qui **ne quitte jamais le serveur** (Zenytt ne la lit pas) ; seules les clés
+publiques et les adresses sont connues de Zenytt. Le trafic du réseau privé circule directement
+entre tes serveurs, chiffré, sans passer par l'éditeur ni par un service tiers.
+
+Pour installer un outil nécessaire à une fonction (WireGuard, restic, tmux…), Zenytt utilise le
+gestionnaire de paquets du serveur, qui contacte les dépôts de ta distribution.
 
 ## 4. Services tiers (uniquement si tu utilises la fonction)
 

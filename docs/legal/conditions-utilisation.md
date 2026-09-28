@@ -1,6 +1,6 @@
 # Conditions d'utilisation de Zenytt
 
-*Dernière mise à jour : 27 septembre 2026*
+*Dernière mise à jour : 28 septembre 2026*
 
 Ces conditions encadrent l'utilisation de l'application Zenytt, éditée par Nathan Chevrollier (voir
 les [mentions légales](mentions-legales.md)). Installer ou utiliser Zenytt vaut acceptation de ces
@@ -27,7 +27,7 @@ avoir été modifiée.
 
 Zenytt est un outil d'administration : il exécute sur tes serveurs les actions que tu demandes
 (commandes, suppression de fichiers ou de conteneurs, modification de configurations nginx ou
-Apache, pare-feu, sauvegardes, restaurations, déploiements…). Ces actions peuvent être
+Apache, pare-feu, sauvegardes, restaurations, déploiements, réseaux privés entre serveurs…). Ces actions peuvent être
 **irréversibles** ou rendre un serveur inaccessible.
 
 Tu es seul responsable :
@@ -37,7 +37,9 @@ Tu es seul responsable :
 - des actions lancées depuis Zenytt, y compris celles que tu confies à l'assistant IA ;
 - de la conservation de sauvegardes indépendantes de tes données ;
 - de la sécurité de ton poste (session, mot de passe de verrouillage de Zenytt, clés SSH) ;
-- du respect de la réglementation applicable aux données hébergées sur tes serveurs.
+- du respect de la réglementation applicable aux données hébergées sur tes serveurs ;
+- des serveurs que tu relies par un réseau privé : n'y relie que des serveurs que tu administres, et
+  n'en fais pas un relais pour le trafic de tiers.
 
 Zenytt ne doit pas être utilisé pour accéder à un système sans autorisation.
 
