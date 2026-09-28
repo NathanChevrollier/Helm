@@ -109,6 +109,8 @@ mod tests {
         assert_eq!(text, SCRIPT);
     }
 
+    // Chemins Windows : sous Linux, « \ » n'est pas un séparateur et ces chemins n'ont pas de sens.
+    #[cfg(windows)]
     #[test]
     fn only_installed_builds_get_a_shortcut() {
         let local = Path::new(r"C:\Users\a\AppData\Local");
