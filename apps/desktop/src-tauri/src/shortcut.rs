@@ -6,6 +6,9 @@
 //! le menu Démarrer et la recherche Windows. Le raccourci est créé une seule fois : supprimé
 //! ensuite volontairement, il n'est pas recréé.
 
+// Tout ce module ne sert que sous Windows ; ailleurs, seuls ses tests l'utilisent.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::path::{Path, PathBuf};
 
 /// Marqueur, dans le dossier de configuration : la vérification a déjà eu lieu sur ce poste.
