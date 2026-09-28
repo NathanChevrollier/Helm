@@ -100,6 +100,31 @@ pub struct OccasionalContainer {
     pub key: String,
 }
 
+/// Réseau privé WireGuard entre serveurs (section Réseau privé). Propre à ce PC : la vérité est
+/// sur les serveurs (`/etc/wireguard/zenytt.conf`), ceci sert à les orchestrer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeshNetwork {
+    pub id: String,
+    pub name: String,
+    /// Sous-réseau privé, par exemple `10.77.0.0/24`.
+    pub cidr: String,
+    pub members: Vec<MeshMember>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeshMember {
+    pub server_id: String,
+    /// Adresse privée, sans masque.
+    pub address: String,
+    pub public_key: String,
+    /// IP ou nom public ; absent : serveur derrière un NAT.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    pub port: u16,
+}
+
 /// Constat d'audit de sécurité mis de côté : il n'apparaît plus dans la liste des problèmes,
 /// mais reste consultable dans les constats ignorés.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -280,6 +305,9 @@ pub struct Data {
     pub ignored_findings: Vec<IgnoredFinding>,
     #[serde(default)]
     pub occasional_containers: Vec<OccasionalContainer>,
+    /// Réseaux privés entre serveurs.
+    #[serde(default)]
+    pub meshes: Vec<MeshNetwork>,
     /// Réglages de l'assistant IA (fournisseur, modèle, autorisations), sans la clé d'API.
     #[serde(default)]
     pub ai: Option<serde_json::Value>,
@@ -430,6 +458,21 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_files_without_meshes_still_load() {
+        let d: Data = serde_json::from_str(r#"{"servers":[]}"#).unwrap();
+        assert!(d.meshes.is_empty());
+        let net = MeshNetwork {
+            id: "n1".into(),
+            name: "Prod".into(),
+            cidr: "10.77.0.0/24".into(),
+            members: vec![MeshMember { server_id: "s1".into(), address: "10.77.0.1".into(), public_key: "K=".into(), endpoint: None, port: 51820 }],
+        };
+        let json = serde_json::to_string(&net).unwrap();
+        assert!(json.contains("\"serverId\":\"s1\""), "{json}");
+        assert_eq!(serde_json::from_str::<MeshNetwork>(&json).unwrap(), net);
+    }
 
     #[test]
     fn old_files_still_load() {
