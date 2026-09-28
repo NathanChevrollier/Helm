@@ -244,6 +244,22 @@ pub(crate) fn parse_detail(xml: &str) -> Result<VmDetail> {
     })
 }
 
+/// Mot de passe VNC d'une VM, lu dans `dumpxml --security-info` (absent du XML ordinaire).
+pub(crate) fn vnc_password(xml: &str) -> Option<String> {
+    let doc = roxmltree::Document::parse(xml).ok()?;
+    let devices = child(doc.root_element(), "devices")?;
+    devices.children().find(|g| g.has_tag_name("graphics") && g.attribute("type") == Some("vnc"))?.attribute("passwd").map(str::to_string)
+}
+
+/// Mot de passe de l'écran VNC, s'il y en a un.
+pub async fn vnc_password_of(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str) -> Result<Option<String>> {
+    if !valid_uuid(uuid) {
+        return Err(Error::Other("identifiant de VM invalide".into()));
+    }
+    let xml = run(conn, access, sudo, &format!("dumpxml --security-info {}", shell_quote(uuid))).await?.into_result()?.stdout;
+    Ok(vnc_password(&xml))
+}
+
 pub async fn detail(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str) -> Result<VmDetail> {
     if !valid_uuid(uuid) {
         return Err(Error::Other("identifiant de VM invalide".into()));
@@ -493,5 +509,13 @@ mod tests {
         assert_eq!(action_args(VmAction::AutostartOff, u), format!("autostart '{u}' --disable"));
         assert_eq!(delete_args(u, false, false), format!("undefine '{u}' --managed-save --snapshots-metadata"));
         assert_eq!(delete_args(u, true, true), format!("undefine '{u}' --managed-save --snapshots-metadata --nvram --remove-all-storage"));
+    }
+
+    #[test]
+    fn vnc_password_is_read_from_security_info() {
+        let xml = include_str!("vm/fixtures/vnc-password.xml");
+        assert_eq!(vnc_password(xml).as_deref(), Some("s3cret"));
+        assert!(matches!(parse_detail(xml).unwrap().graphics, Graphics::Vnc { password: true, .. }));
+        assert_eq!(vnc_password(include_str!("vm/fixtures/cirros.xml")), None);
     }
 }

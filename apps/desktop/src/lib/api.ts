@@ -77,6 +77,13 @@ export interface RdpSessionInfo {
 }
 
 /** Session VNC ouverte dans Zenytt (client noVNC intégré). */
+/** Écran d'une VM ouvert dans le client VNC intégré. */
+export interface VmConsole {
+  session: VncSessionInfo;
+  /** Écran de la VM écouté sur le réseau : fonctionne par le tunnel, mais à corriger. */
+  warning: string | null;
+}
+
 export interface VncSessionInfo {
   /** Adresse du pont local (WebSocket), jeton compris. */
   url: string;
@@ -1148,6 +1155,8 @@ export const api = {
   desktopSessionOpen: (id: string) => invoke<RdpSessionInfo>("desktop_session_open", { id }),
   desktopSessionClose: (id: string) => invoke<void>("desktop_session_close", { id }),
   vncSessionOpen: (id: string) => invoke<VncSessionInfo>("vnc_session_open", { id }),
+  vmConsoleOpen: (serverId: string, uuid: string, name: string) => invoke<VmConsole>("vm_console_open", { serverId, uuid, name }),
+  vmSerialCommand: (serverId: string, uuid: string) => invoke<string>("vm_serial_command", { serverId, uuid }),
   /** `password` : `undefined` = inchangé, `""` = supprimé. */
   desktopSave: (desktop: RemoteDesktop, password?: string) => invoke<string>("desktop_save", { desktop, password }),
   desktopDelete: (id: string) => invoke<void>("desktop_delete", { id }),

@@ -5,6 +5,14 @@
 // de passerelle attendu par le client web ; l'interface ne connaît que l'adresse et le jeton.
 import { create } from "zustand";
 import { api, type DesktopView, type RdpSessionInfo, type VncSessionInfo } from "./api";
+import { useApp } from "./store";
+
+/** VM dont l'écran est affiché (le bureau affiché porte alors l'identifiant `vm-<uuid>`). */
+export interface VmTarget {
+  serverId: string;
+  uuid: string;
+  name: string;
+}
 
 /** Étape de la session, pour l'affichage. */
 export type RdpState = { kind: "ouverture" } | { kind: "connexion" } | { kind: "connecte" } | { kind: "erreur"; message: string } | { kind: "ferme"; message: string };
@@ -16,7 +24,10 @@ interface RdpStore {
   /** Session VNC : l'une ou l'autre est remplie, selon le protocole du bureau. */
   vnc: VncSessionInfo | null;
   state: RdpState;
+  vm: VmTarget | null;
   open: (desktop: DesktopView) => Promise<void>;
+  /** Écran d'une VM : même client VNC, fermé comme un bureau (clé `vm-<uuid>`). */
+  openVm: (serverId: string, vm: { uuid: string; name: string }) => Promise<void>;
   setState: (state: RdpState) => void;
   close: () => void;
 }
@@ -26,12 +37,16 @@ export const useRdp = create<RdpStore>((set, get) => ({
   session: null,
   vnc: null,
   state: { kind: "ouverture" },
+  vm: null,
 
   open: async (desktop) => {
+    // « Réessayer » sur l'écran d'une VM : on rouvre la VM, pas un bureau enregistré.
+    const vm = get().vm;
+    if (vm && desktop.id === `vm-${vm.uuid}`) return get().openVm(vm.serverId, vm);
     // Une seule session à la fois : la précédente est refermée proprement (pont et tunnel).
     const ouvert = get().desktop;
     if (ouvert) await api.desktopSessionClose(ouvert.id).catch(() => {});
-    set({ desktop, session: null, vnc: null, state: { kind: "ouverture" } });
+    set({ desktop, session: null, vnc: null, vm: null, state: { kind: "ouverture" } });
     try {
       if (desktop.protocol === "vnc") {
         set({ vnc: await api.vncSessionOpen(desktop.id), state: { kind: "connexion" } });
@@ -44,11 +59,39 @@ export const useRdp = create<RdpStore>((set, get) => ({
     }
   },
 
+  openVm: async (serverId, vm) => {
+    const ouvert = get().desktop;
+    if (ouvert) await api.desktopSessionClose(ouvert.id).catch(() => {});
+    const server = useApp.getState().servers.find((s) => s.id === serverId);
+    // Bureau « virtuel » pour l'affichage : l'écran est joint sur la boucle locale du serveur.
+    const desktop: DesktopView = {
+      id: `vm-${vm.uuid}`,
+      name: vm.name,
+      protocol: "vnc",
+      host: server ? `écran de la VM sur ${server.name}` : "écran de la VM",
+      port: 0,
+      username: "",
+      viaServerId: serverId,
+      fullscreen: false,
+      multimon: false,
+      redirectDrives: false,
+      hasPassword: false,
+    };
+    set({ desktop, session: null, vnc: null, vm: { serverId, uuid: vm.uuid, name: vm.name }, state: { kind: "ouverture" } });
+    try {
+      const { session, warning } = await api.vmConsoleOpen(serverId, vm.uuid, vm.name);
+      if (warning) useApp.getState().notify(warning, "error");
+      set({ vnc: session, state: { kind: "connexion" } });
+    } catch (e) {
+      set({ state: { kind: "erreur", message: e instanceof Error ? e.message : String(e) } });
+    }
+  },
+
   setState: (state) => set({ state }),
 
   close: () => {
     const ouvert = get().desktop;
     if (ouvert) void api.desktopSessionClose(ouvert.id).catch(() => {});
-    set({ desktop: null, session: null, vnc: null, state: { kind: "ouverture" } });
+    set({ desktop: null, session: null, vnc: null, vm: null, state: { kind: "ouverture" } });
   },
 }));

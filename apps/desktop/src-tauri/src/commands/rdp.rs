@@ -410,36 +410,55 @@ pub async fn vnc_session_open(
         return Err("ce bureau n'est pas en VNC".into());
     }
     let (user, password) = credentials(&store, &d)?;
-    let tid = tunnel_id(&d.id);
-    let (host, port) = match &d.via_server_id {
-        Some(server) => {
-            tunnels.stop(&tid);
-            let local_port = free_port()?;
-            let def = TunnelDef {
-                id: tid.clone(),
-                server_id: server.clone(),
-                name: format!("VNC {}", d.name),
-                local_port,
-                remote_host: d.host.clone(),
-                remote_port: d.port,
-                auto_start: false,
-            };
-            tunnels.start(&app, def).await?;
-            ("127.0.0.1".to_string(), local_port)
-        }
-        None => (d.host.clone(), d.port),
-    };
+    // Le domaine n'a pas de sens en VNC : seul l'utilisateur est transmis.
+    let username = user.rsplit('\\').next().unwrap_or(&user).to_string();
+    let password = password.unwrap_or_default();
+    if let Some(server) = &d.via_server_id {
+        let session = open_vnc_via(&app, &tunnels, &bridges, &id, server, &d.name, &d.host, d.port, password, username).await?;
+        log::info!("bureau VNC « {} » ouvert dans Zenytt ({}:{} par un tunnel SSH)", d.name, d.host, d.port);
+        return Ok(session);
+    }
+    let (host, port) = (d.host.clone(), d.port);
     let bridge = crate::vnc_bridge::start(host.clone(), port).await?;
-    let session = VncSession {
-        url: bridge.url.clone(),
-        password: password.unwrap_or_default(),
-        // Le domaine n'a pas de sens en VNC : seul l'utilisateur est transmis.
-        username: user.rsplit('\\').next().unwrap_or(&user).to_string(),
-        destination: format!("{host}:{port}"),
-        via_tunnel: d.via_server_id.is_some(),
-    };
+    let session = VncSession { url: bridge.url.clone(), password, username, destination: format!("{host}:{port}"), via_tunnel: false };
     bridges.keep(&id, bridge);
     log::info!("bureau VNC « {} » ouvert dans Zenytt ({host}:{port})", d.name);
+    Ok(session)
+}
+
+/// Écran VNC d'une machine joignable depuis un serveur (bureau enregistré, écran d'une VM) :
+/// tunnel SSH vers `remote_host:port` vu du serveur, puis pont local WebSocket. `key` identifie la
+/// session pour la fermer (`desktop_session_close`). Rien n'est exposé sur Internet.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn open_vnc_via(
+    app: &AppHandle,
+    tunnels: &Tunnels,
+    bridges: &crate::rdp_bridge::Bridges,
+    key: &str,
+    server_id: &str,
+    label: &str,
+    remote_host: &str,
+    port: u16,
+    password: String,
+    username: String,
+) -> Result<VncSession, String> {
+    let tid = tunnel_id(key);
+    tunnels.stop(&tid);
+    let local_port = free_port()?;
+    let def = TunnelDef {
+        id: tid,
+        server_id: server_id.to_string(),
+        name: format!("VNC {label}"),
+        local_port,
+        remote_host: remote_host.to_string(),
+        remote_port: port,
+        auto_start: false,
+    };
+    tunnels.start(app, def).await?;
+    let bridge = crate::vnc_bridge::start("127.0.0.1".to_string(), local_port).await?;
+    let session =
+        VncSession { url: bridge.url.clone(), password, username, destination: format!("{remote_host}:{port}"), via_tunnel: true };
+    bridges.keep(key, bridge);
     Ok(session)
 }
 

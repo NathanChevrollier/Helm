@@ -161,6 +161,83 @@ pub async fn vm_delete(
     track(&audit, &store, &server_id, "vm.delete", &detail, r)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VmConsole {
+    session: crate::commands::rdp::VncSession,
+    /// Écran de la VM écouté sur le réseau : fonctionne par le tunnel, mais à corriger.
+    warning: Option<String>,
+}
+
+/// Écran de la VM dans Zenytt : tunnel SSH vers son port VNC (écouté par QEMU sur le serveur),
+/// puis le client VNC intégré. Fermé par `desktop_session_close("vm-<uuid>")`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn vm_console_open(
+    app: tauri::AppHandle,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, VmAccess>,
+    tunnels: State<'_, crate::commands::tunnels::Tunnels>,
+    bridges: State<'_, crate::rdp_bridge::Bridges>,
+    server_id: String,
+    uuid: String,
+    name: String,
+) -> Result<VmConsole, String> {
+    let c = ctx(&store, &sessions, &cache, &server_id).await?;
+    let d = vm::detail(&c.conn, c.access, c.sudo.as_deref(), &uuid).await.map_err(err)?;
+    let (port, public, has_password) = match d.graphics {
+        vm::Graphics::Vnc { port: Some(p), public, password, .. } => (p, public, password),
+        vm::Graphics::Vnc { port: None, .. } => return Err("la VM est éteinte : démarre-la pour voir son écran".into()),
+        vm::Graphics::Spice => {
+            return Err("cette VM affiche son écran en SPICE, que Zenytt ne sait pas afficher : utilise la console série, ou passe son affichage en VNC".into())
+        }
+        vm::Graphics::None => return Err("cette VM n'a pas d'écran : utilise la console série".into()),
+    };
+    let password = if has_password {
+        vm::vnc_password_of(&c.conn, c.access, c.sudo.as_deref(), &uuid).await.map_err(err)?.unwrap_or_default()
+    } else {
+        String::new()
+    };
+    // L'écran est joint sur la boucle locale du serveur, même s'il écoute aussi ailleurs.
+    let session = crate::commands::rdp::open_vnc_via(
+        &app,
+        &tunnels,
+        &bridges,
+        &format!("vm-{uuid}"),
+        &server_id,
+        &name,
+        "127.0.0.1",
+        port,
+        password,
+        String::new(),
+    )
+    .await?;
+    let warning = public.then(|| {
+        "L'écran de cette VM est accessible depuis le réseau (VNC écouté sur toutes les adresses). Zenytt passe par un tunnel, mais d'autres peuvent s'y connecter : restreins l'écoute à 127.0.0.1."
+            .to_string()
+    });
+    Ok(VmConsole { session, warning })
+}
+
+/// Commande à lancer dans un onglet terminal pour la console série de la VM.
+#[tauri::command]
+pub async fn vm_serial_command(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, VmAccess>,
+    server_id: String,
+    uuid: String,
+) -> Result<String, String> {
+    if !vm::valid_uuid(&uuid) {
+        return Err("identifiant de VM invalide".into());
+    }
+    let c = ctx(&store, &sessions, &cache, &server_id).await?;
+    let base = format!("virsh -c qemu:///system console {}", zenytt_core::ssh::shell_quote(&uuid));
+    // En sudo, le mot de passe est demandé dans le terminal lui-même.
+    Ok(if c.access == Access::Sudo { format!("sudo {base}") } else { base })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
