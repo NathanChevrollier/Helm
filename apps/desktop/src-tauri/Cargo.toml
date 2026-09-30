@@ -43,6 +43,8 @@ ironrdp-rdcleanpath = "0.2"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", features = ["ring"] }
 tauri-plugin-autostart = "~2.5.1"
+maxminddb = "0.32.0"
+flate2 = "1.1.10"
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

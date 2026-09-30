@@ -5,6 +5,7 @@ pub mod databases;
 pub mod deploy;
 pub mod docker;
 pub mod files;
+pub mod geo;
 pub mod identities;
 pub mod logs;
 pub mod mesh;

@@ -7,7 +7,7 @@ Les composants sous MPL-2.0 (@novnc/novnc, cssparser, selectors…) sont utilis�
 modification : leur code source est disponible à l'adresse indiquée pour chacun.
 Les polices IBM Plex Sans et JetBrains Mono sont distribuées sous SIL Open Font License 1.1.
 
-Fichier généré par `scripts/third-party-notices.py` (753 composants).
+Fichier généré par `scripts/third-party-notices.py` (762 composants).
 
 | Composant | Version | Type | Licence | Source | Texte |
 |---|---|---|---|---|---|
@@ -60,6 +60,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | atk | 0.18.2 | crate | MIT | <https://github.com/gtk-rs/gtk3-rs> | [LICENSE](#t-21a2121221d2) |
 | atk-sys | 0.18.2 | crate | MIT | <https://github.com/gtk-rs/gtk3-rs> | [LICENSE](#t-21a2121221d2) |
 | atomic-waker | 1.1.2 | crate | Apache-2.0 OR MIT | <https://github.com/smol-rs/atomic-waker> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-MIT](#t-30fefc3a7d6a), [LICENSE-THIRD-PARTY](#t-20746cc8a2fd) |
+| auto-launch | 0.5.0 | crate | MIT | <https://github.com/zzzgydi/auto-launch.git> | [LICENSE](#t-fbda89b82ff2) |
 | autocfg | 1.5.1 | crate | Apache-2.0 OR MIT | <https://github.com/cuviper/autocfg> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-MIT](#t-99afaa30c178) |
 | aws-lc-rs | 1.18.1 | crate | ISC AND (Apache-2.0 OR ISC) | <https://github.com/aws/aws-lc-rs> | [LICENSE](#t-efbbbcefb4b8) |
 | aws-lc-sys | 0.45.0 | crate | ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) | <https://github.com/aws/aws-lc-rs> | [LICENSE](#t-49f5cc2a2e4d) |
@@ -158,7 +159,9 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | des | 0.9.0 | crate | MIT OR Apache-2.0 | <https://github.com/RustCrypto/block-ciphers> | [LICENSE-APACHE](#t-d6628cde2bfd), [LICENSE-MIT](#t-c576af900417) |
 | digest | 0.10.7 | crate | MIT OR Apache-2.0 | <https://github.com/RustCrypto/traits> | [LICENSE-APACHE](#t-e8541ea93f02), [LICENSE-MIT](#t-9c5127ab88e8) |
 | digest | 0.11.3 | crate | MIT OR Apache-2.0 | <https://github.com/RustCrypto/traits> | [LICENSE-APACHE](#t-e8541ea93f02), [LICENSE-MIT](#t-c8d7f4fd612a) |
+| dirs | 4.0.0 | crate | MIT OR Apache-2.0 | <https://github.com/soc/dirs-rs> | [LICENSE-APACHE](#t-74f1c9127a52), [LICENSE-MIT](#t-f25a5b606859) |
 | dirs | 6.0.0 | crate | MIT OR Apache-2.0 | <https://github.com/soc/dirs-rs> | [LICENSE-APACHE](#t-74f1c9127a52), [LICENSE-MIT](#t-f25a5b606859) |
+| dirs-sys | 0.3.7 | crate | MIT OR Apache-2.0 | <https://github.com/dirs-dev/dirs-sys-rs> | [LICENSE-APACHE](#t-74f1c9127a52), [LICENSE-MIT](#t-f25a5b606859) |
 | dirs-sys | 0.5.0 | crate | MIT OR Apache-2.0 | <https://github.com/dirs-dev/dirs-sys-rs> | [LICENSE-APACHE](#t-74f1c9127a52), [LICENSE-MIT](#t-f25a5b606859) |
 | dispatch2 | 0.3.1 | crate | Zlib OR Apache-2.0 OR MIT | <https://github.com/madsmtm/objc2> | [Zlib](#t-spdx-Zlib), [Apache-2.0](#t-spdx-Apache-2.0), [MIT](#t-spdx-MIT) |
 | displaydoc | 0.2.7 | crate | MIT OR Apache-2.0 | <https://github.com/yaahc/displaydoc> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-MIT](#t-30fefc3a7d6a) |
@@ -288,6 +291,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | infer | 0.19.0 | crate | MIT | <https://github.com/bojand/infer> | [LICENSE](#t-7804ded9273b) |
 | inout | 0.2.2 | crate | MIT OR Apache-2.0 | <https://github.com/RustCrypto/utils> | [LICENSE-APACHE](#t-e8541ea93f02), [LICENSE-MIT](#t-13ec53eb1d4d) |
 | ipnet | 2.12.2 | crate | MIT OR Apache-2.0 | <https://github.com/krisprice/ipnet> | [LICENSE-APACHE](#t-9d8e882729a5), [LICENSE-MIT](#t-c935506fff2e) |
+| ipnetwork | 0.21.1 | crate | MIT OR Apache-2.0 | <https://github.com/achanda/ipnetwork> | [LICENSE-APACHE.md](#t-6dc0e068dcf3), [LICENSE-MIT.md](#t-82690675f309) |
 | ironrdp-rdcleanpath | 0.2.2 | crate | MIT OR Apache-2.0 | <https://github.com/Devolutions/IronRDP> | [LICENSE-APACHE](#t-283ea6cc2997), [LICENSE-MIT](#t-30fefc3a7d6a) |
 | is-docker | 0.2.0 | crate | MIT | <https://github.com/TheLarkInn/is-docker> | [LICENSE](#t-d9da1a97dd07) |
 | is-wsl | 0.4.0 | crate | MIT | <https://github.com/TheLarkInn/is-wsl> | [LICENSE](#t-d9da1a97dd07) |
@@ -331,6 +335,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | marked | 14.0.0 | npm | MIT | <https://marked.js.org> | [LICENSE.md](#t-dd923de97698) |
 | markup5ever | 0.38.0 | crate | MIT OR Apache-2.0 | <https://github.com/servo/html5ever> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-MIT](#t-35af0fd88338) |
 | matchit | 0.8.4 | crate | MIT AND BSD-3-Clause | <https://github.com/ibraheemdev/matchit> | [LICENSE](#t-805009861c8c), [LICENSE.httprouter](#t-2f77e11b6c26) |
+| maxminddb | 0.32.0 | crate | ISC | <https://github.com/oschwald/maxminddb-rust> | [LICENSE](#t-385ad303361d) |
 | md5 | 0.8.1 | crate | Apache-2.0 OR MIT | <https://github.com/stainless-steel/md5> | [LICENSE.md](#t-eb39f06d5dc8) |
 | memchr | 2.8.3 | crate | Unlicense OR MIT | <https://github.com/BurntSushi/memchr> | [COPYING](#t-65314a6c9668), [LICENSE-MIT](#t-154c1af2b38e), [UNLICENSE](#t-ca2abdf69588) |
 | memoffset | 0.9.1 | crate | MIT | <https://github.com/Gilnaa/memoffset> | [LICENSE](#t-3234ac558162) |
@@ -450,6 +455,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | react | 19.3.0 | npm | MIT | <https://react.dev/> | [LICENSE](#t-cf9b17822d1f) |
 | react-dom | 19.3.0 | npm | MIT | <https://react.dev/> | [LICENSE](#t-cf9b17822d1f) |
 | redox_syscall | 0.5.18 | crate | MIT | <https://gitlab.redox-os.org/redox-os/syscall> | [LICENSE](#t-fde59e25bf53) |
+| redox_users | 0.4.6 | crate | MIT | <https://gitlab.redox-os.org/redox-os/users> | [LICENSE](#t-157e9bc5ce84) |
 | redox_users | 0.5.3 | crate | MIT | <https://gitlab.redox-os.org/redox-os/users> | [LICENSE](#t-157e9bc5ce84) |
 | ref-cast | 1.0.27 | crate | MIT OR Apache-2.0 | <https://github.com/dtolnay/ref-cast> | [LICENSE-APACHE](#t-85ad950cce87), [LICENSE-MIT](#t-30fefc3a7d6a) |
 | ref-cast-impl | 1.0.27 | crate | MIT OR Apache-2.0 | <https://github.com/dtolnay/ref-cast> | [LICENSE-APACHE](#t-85ad950cce87), [LICENSE-MIT](#t-30fefc3a7d6a) |
@@ -462,6 +468,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | ring | 0.17.14 | crate | Apache-2.0 AND ISC | <https://github.com/briansmith/ring> | [LICENSE](#t-edb9c6dbff46), [LICENSE-BoringSSL](#t-473867fcf89f), [LICENSE-other-bits](#t-07414b6c33f3) |
 | rmcp | 3.4.0 | crate | Apache-2.0 | <https://github.com/modelcontextprotocol/rust-sdk/> | [Apache-2.0](#t-spdx-Apache-2.0) |
 | rmcp-macros | 3.4.0 | crate | Apache-2.0 | <https://github.com/modelcontextprotocol/rust-sdk/> | [Apache-2.0](#t-spdx-Apache-2.0) |
+| roxmltree | 0.20.0 | crate | MIT OR Apache-2.0 | <https://github.com/RazrFalcon/roxmltree> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-MIT](#t-92f2a160c78f) |
 | rsa | 0.10.0-rc.18 | crate | MIT OR Apache-2.0 | <https://github.com/RustCrypto/RSA> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-MIT](#t-30fefc3a7d6a) |
 | russh | 0.63.3 | crate | Apache-2.0 | <https://github.com/warp-tech/russh> | [Apache-2.0](#t-spdx-Apache-2.0) |
 | russh-cryptovec | 0.62.0 | crate | Apache-2.0 | <https://github.com/warp-tech/russh> | [Apache-2.0](#t-spdx-Apache-2.0) |
@@ -562,6 +569,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | tauri-codegen | 2.6.3 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/tauri> | [LICENSE_APACHE-2.0](#t-4bf96504d6e8), [LICENSE_MIT](#t-89ff9689dcf9) |
 | tauri-macros | 2.6.3 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/tauri> | [LICENSE_APACHE-2.0](#t-4bf96504d6e8), [LICENSE_MIT](#t-89ff9689dcf9) |
 | tauri-plugin | 2.6.3 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/tauri> | [Apache-2.0](#t-spdx-Apache-2.0), [MIT](#t-spdx-MIT) |
+| tauri-plugin-autostart | 2.5.1 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> | [LICENSE.spdx](#t-eb8a6c846304), [LICENSE_APACHE-2.0](#t-4bf96504d6e8), [LICENSE_MIT](#t-89ff9689dcf9) |
 | tauri-plugin-clipboard-manager | 2.3.3 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> | [LICENSE.spdx](#t-eb8a6c846304), [LICENSE_APACHE-2.0](#t-4bf96504d6e8), [LICENSE_MIT](#t-89ff9689dcf9) |
 | tauri-plugin-dialog | 2.7.3 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> | [LICENSE.spdx](#t-eb8a6c846304), [LICENSE_APACHE-2.0](#t-4bf96504d6e8), [LICENSE_MIT](#t-89ff9689dcf9) |
 | tauri-plugin-fs | 2.5.2 | crate | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> | [LICENSE.spdx](#t-eb8a6c846304), [LICENSE_APACHE-2.0](#t-4bf96504d6e8), [LICENSE_MIT](#t-89ff9689dcf9) |
@@ -728,6 +736,7 @@ Fichier généré par `scripts/third-party-notices.py` (753 composants).
 | winnow | 0.5.40 | crate | MIT | <https://github.com/winnow-rs/winnow> | [LICENSE-MIT](#t-8793aa4141de) |
 | winnow | 0.7.15 | crate | MIT | <https://github.com/winnow-rs/winnow> | [LICENSE-MIT](#t-8793aa4141de) |
 | winnow | 1.0.4 | crate | MIT | <https://github.com/winnow-rs/winnow> | [LICENSE-MIT](#t-8793aa4141de) |
+| winreg | 0.10.1 | crate | MIT | <https://github.com/gentoo90/winreg-rs> | [LICENSE](#t-d9ba37d9bbdf) |
 | winreg | 0.55.0 | crate | MIT | <https://github.com/gentoo90/winreg-rs> | [LICENSE](#t-d9ba37d9bbdf) |
 | winreg | 0.56.0 | crate | MIT | <https://github.com/gentoo90/winreg-rs> | [LICENSE](#t-d9ba37d9bbdf) |
 | wit-bindgen | 0.57.1 | crate | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | <https://github.com/bytecodealliance/wit-bindgen> | [LICENSE-APACHE](#t-954f335b8baf), [LICENSE-Apache-2.0_WITH_LLVM-exception](#t-2f213ec6b135), [LICENSE-MIT](#t-30fefc3a7d6a) |
@@ -3731,6 +3740,33 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+<a id="t-fbda89b82ff2"></a>
+### LICENSE (fbda89b82ff2)
+
+```text
+MIT License
+
+Copyright (c) 2022 zzzgydi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 <a id="t-99afaa30c178"></a>
@@ -12975,6 +13011,37 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+<a id="t-82690675f309"></a>
+### LICENSE-MIT.md (82690675f309)
+
+```text
+Copyright 2020 Developers of the ipnetwork project
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 <a id="t-d9da1a97dd07"></a>
 ### LICENSE (d9da1a97dd07)
 
@@ -14027,6 +14094,27 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+<a id="t-385ad303361d"></a>
+### LICENSE (385ad303361d)
+
+```text
+ISC License
+
+Copyright (c) 2015, Gregory J. Oschwald <oschwald@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
 <a id="t-eb39f06d5dc8"></a>
@@ -17747,6 +17835,33 @@ SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
 OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
+<a id="t-92f2a160c78f"></a>
+### LICENSE-MIT (92f2a160c78f)
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2018 Yevhenii Reizner
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 <a id="t-29fbc81a3f88"></a>

@@ -176,6 +176,75 @@ pub async fn f2b_set_ignore(
     track(&audit, &store, &server_id, "fail2ban.ignoreip", &detail, r)
 }
 
+/// Bannit une adresse, pour la durée du jail choisi ou pour 7 jours, 30 jours ou toujours.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn f2b_ban(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    jail: String,
+    ip: String,
+    duration: fail2ban::BanDuration,
+) -> Result<(), String> {
+    let detail = format!("{jail} {ip} {duration:?}");
+    let r = async {
+        let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+        fail2ban::ban(&conn, sudo.as_deref(), &jail, &ip, duration).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "fail2ban.ban", &detail, r)
+}
+
+/// Derniers événements du journal de fail2ban (tous, ou ceux d'une adresse).
+#[tauri::command]
+pub async fn f2b_events(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    ip: Option<String>,
+    limit: usize,
+) -> Result<Vec<fail2ban::Event>, String> {
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    fail2ban::events(&conn, sudo.as_deref(), ip.as_deref(), limit).await.map_err(err)
+}
+
+/// Lignes des journaux du service (SSH…) où apparaît l'adresse : ses tentatives.
+#[tauri::command]
+pub async fn f2b_attempts(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    ip: String,
+) -> Result<Vec<String>, String> {
+    let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
+    fail2ban::attempts(&conn, sudo.as_deref(), &ip, 200).await.map_err(err)
+}
+
+/// Étiquettes posées sur des adresses IP (communes à tous les serveurs).
+#[tauri::command]
+pub fn ip_labels_list(store: State<'_, Store>) -> Vec<zenytt_profiles::IpLabel> {
+    store.read(|d| d.ip_labels.clone())
+}
+
+/// Pose, modifie ou (étiquette vide) retire l'étiquette d'une adresse.
+#[tauri::command]
+pub fn ip_label_set(store: State<'_, Store>, ip: String, label: String, note: String) -> Result<(), String> {
+    if !fail2ban::valid_address(ip.trim()) {
+        return Err("adresse IP invalide".into());
+    }
+    let ip = ip.trim().to_string();
+    let label: String = label.trim().chars().take(60).collect();
+    let note: String = note.trim().chars().take(500).collect();
+    store.write(|d| {
+        d.ip_labels.retain(|l| l.ip != ip);
+        if !label.is_empty() || !note.is_empty() {
+            d.ip_labels.push(zenytt_profiles::IpLabel { ip, label, note });
+        }
+    })
+}
+
 /// IP publique du PC (pour « Ajouter mon IP »).
 #[tauri::command]
 pub async fn my_public_ip() -> Option<String> {
