@@ -1,6 +1,6 @@
 # Politique de confidentialité de Zenytt
 
-*Dernière mise à jour : 28 septembre 2026*
+*Dernière mise à jour : 30 septembre 2026*
 
 Zenytt est une application de bureau qui fonctionne **sur ton ordinateur**. Elle n'a pas de compte
 utilisateur, pas de serveur central et **aucune télémétrie** : l'éditeur ne reçoit ni statistiques
@@ -24,11 +24,13 @@ responsable de ces traitements.
 | Donnée | Où | Pourquoi |
 |---|---|---|
 | Profils de serveurs (nom, adresse, port, utilisateur, dossiers, tunnels, snippets, réseaux privés — adresses privées et clés publiques WireGuard —, réglages) | Fichier `zenytt.json` dans le dossier de configuration de l'application (`%APPDATA%\dev.zenytt.desktop` sous Windows) | Te reconnecter à tes serveurs |
-| Mots de passe, phrases de passe de clés, clés d'API, jetons | Gestionnaire d'identifiants du système (Windows Credential Manager, trousseau macOS, Secret Service sous Linux), jamais en clair dans un fichier | Authentification |
+| Mots de passe (y compris les comptes de bases de données que tu enregistres), phrases de passe de clés, clés d'API, jetons | Gestionnaire d'identifiants du système (Windows Credential Manager, trousseau macOS, Secret Service sous Linux), jamais en clair dans un fichier | Authentification |
 | Empreintes des clés d'hôte approuvées | Fichier de configuration | Détecter une usurpation de serveur |
 | Journal technique de l'application (5 fichiers de 2 Mo au plus, rotation automatique) | Dossier des journaux de l'application | Diagnostiquer un problème ; aucun secret n'y est écrit |
 | Journal des actions sensibles effectuées dans Zenytt | Local | Te permettre de retrouver ce qui a été fait |
 | État de l'interface (onglets ouverts, préférences d'affichage) | Local | Retrouver ton espace de travail |
+| Étiquettes et notes posées sur des adresses IP (fail2ban), réglages des points de montage, conteneurs marqués « arrêtés volontairement » | Fichier `zenytt.json` | Reconnaître une adresse, régler la supervision, éviter les fausses alertes |
+| Bases de localisation des adresses IP (DB-IP Lite), si tu actives la localisation | Dossier de données de l'application (`geo`) | Situer les adresses des journaux fail2ban **sur ton PC**, sans les envoyer à personne |
 
 Tu peux tout supprimer à tout moment : désinstalle Zenytt puis efface son dossier de configuration
 et ses entrées dans le gestionnaire d'identifiants du système.
@@ -50,6 +52,11 @@ entre tes serveurs, chiffré, sans passer par l'éditeur ni par un service tiers
 L'**écran d'une machine virtuelle** s'affiche par un tunnel SSH ; si la VM a un mot de passe VNC,
 Zenytt le lit sur le serveur et ne le garde qu'en mémoire, le temps de la session.
 
+Les **sauvegardes de bases de données** lancées depuis Zenytt sont écrites sur le serveur, dans le
+dossier `~/zenytt-sauvegardes-bdd` de l'utilisateur SSH (accès réservé à cet utilisateur) ; elles ne
+quittent le serveur que si tu les télécharges. Les mots de passe des comptes de base de données que
+tu crées ou modifies passent par une connexion SSH chiffrée et ne sont pas conservés par Zenytt.
+
 Pour installer un outil nécessaire à une fonction (WireGuard, restic, tmux…), Zenytt utilise le
 gestionnaire de paquets du serveur, qui contacte les dépôts de ta distribution.
 
@@ -59,6 +66,7 @@ gestionnaire de paquets du serveur, qui contacte les dépôts de ta distribution
 |---|---|---|---|
 | Mises à jour | GitHub (GitHub, Inc., États-Unis) | Ton adresse IP et la version installée, comme pour tout téléchargement | Au démarrage, pour vérifier s'il existe une nouvelle version |
 | Diagnostic d'accès (fail2ban, pare-feu) | api.ipify.org | Ton adresse IP, pour connaître ton IP publique | Quand tu lances le diagnostic |
+| Localisation des adresses IP (fail2ban, inactive par défaut) | download.db-ip.com (DB-IP) | Ton adresse IP, comme pour tout téléchargement. **Aucune adresse de tes journaux n'est envoyée** : Zenytt télécharge une base libre (CC BY 4.0) et la consulte sur ton PC | Quand tu actives ou rafraîchis la localisation (environ une fois par mois) |
 | Détection de l'IP publique d'un serveur | api.ipify.org, **depuis le serveur** | L'adresse IP du serveur | Pages Sites et domaines |
 | Expiration des noms de domaine | rdap.org et les registres de domaines | Les noms de domaine de tes sites | Page Sites, vérification des domaines |
 | Assistant IA (inactif tant qu'aucun fournisseur n'est configuré) | Le fournisseur que tu choisis : Anthropic, OpenAI, Mistral, OpenRouter, ou un modèle local | Tes messages et les informations que l'assistant lit sur tes serveurs (journaux, configurations, état des services). Les mots de passe, clés et jetons détectés sont masqués avant l'envoi, sans garantie absolue | Quand tu utilises l'assistant, avec **ta** clé d'API |
