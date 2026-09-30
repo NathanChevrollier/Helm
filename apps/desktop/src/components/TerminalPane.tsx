@@ -332,6 +332,30 @@ export default function TerminalPane({
       }
       const hasTmux = !command && tmux ? await tmuxAvailable(serverId) : null;
       const useTmux = hasTmux === true;
+      // Console série d'une VM (virsh console) : l'invite de connexion n'apparaît qu'après une
+      // touche. On envoie donc un retour à la ligne une fois connecté, puis, si la VM reste muette,
+      // on explique pourquoi (aucune session ouverte sur son port série) au lieu d'un écran figé.
+      const serial = !!command && /\bvirsh\b.*\bconsole\b/.test(command);
+      let serialSeen = "";
+      let serialStage: "attente" | "relance" | "fini" = serial ? "attente" : "fini";
+      let serialBytesAfter = 0;
+      const serialNudge = () => {
+        serialStage = "relance";
+        serialBytesAfter = 0;
+        window.setTimeout(() => idRef.current != null && void api.termWrite(idRef.current, "\r"), 500);
+        window.setTimeout(() => {
+          if (disposed || serialStage !== "relance") return;
+          serialStage = "fini";
+          // Seul l'écho du retour à la ligne est revenu : rien n'écoute sur ttyS0 dans la VM.
+          if (serialBytesAfter <= 4) {
+            term.write(
+              "\r\n\x1b[33m[Zenytt] La VM ne répond pas sur sa console série. Son système n'y ouvre sans doute pas de session :\r\n" +
+                "  dans la VM, lance « sudo systemctl enable --now serial-getty@ttyS0 » (ou ajoute console=ttyS0 au noyau).\r\n" +
+                "  Ctrl+] pour quitter la console ; l'écran (VNC) reste disponible depuis la liste des VM.\x1b[0m\r\n",
+            );
+          }
+        }, 5000);
+      };
       // Nouveau shell : son PID et son dossier seront annoncés à nouveau.
       usePanes.getState().set(paneId, { tmux: useTmux ? tmux : undefined, pid: undefined, cwd: undefined });
       try {
@@ -343,6 +367,11 @@ export default function TerminalPane({
             if (e.type === "data") {
               const bytes = decode(e.data);
               term.write(bytes);
+              if (serialStage === "relance") serialBytesAfter += bytes.length;
+              else if (serialStage === "attente") {
+                serialSeen = (serialSeen + new TextDecoder().decode(bytes)).slice(-2000);
+                if (serialSeen.includes("Escape character is")) serialNudge();
+              }
               const rec = recording.current;
               if (rec) rec.events.push([(performance.now() - rec.start) / 1000, "o", rec.decoder.decode(bytes, { stream: true })]);
               scanFailureRef.current();

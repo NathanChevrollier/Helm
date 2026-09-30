@@ -140,6 +140,25 @@ pub async fn vm_action(
     track(&audit, &store, &server_id, &format!("vm.{}", serde_json::to_value(action).unwrap().as_str().unwrap_or("action")), &name, r)
 }
 
+/// Restreint l'écran VNC de la VM à 127.0.0.1 (pris en compte au prochain démarrage de la VM).
+#[tauri::command]
+pub async fn vm_vnc_restrict(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    cache: State<'_, VmAccess>,
+    server_id: String,
+    uuid: String,
+    name: String,
+) -> Result<(), String> {
+    let r = async {
+        let c = ctx(&store, &sessions, &cache, &server_id).await?;
+        vm::restrict_vnc(&c.conn, c.access, c.sudo.as_deref(), &uuid).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "vm.vnc_restrict", &name, r)
+}
+
 /// Supprime la VM ; avec `with_storage`, ses propres disques seulement (ni ISO ni disque partagé).
 /// Renvoie les fichiers restés sur le serveur, que libvirt ne gère pas (hors d'un pool).
 #[tauri::command]
@@ -190,20 +209,25 @@ pub async fn vm_console_open(
 ) -> Result<VmConsole, String> {
     let c = ctx(&store, &sessions, &cache, &server_id).await?;
     let d = vm::detail(&c.conn, c.access, c.sudo.as_deref(), &uuid).await.map_err(err)?;
-    let (port, public, has_password) = match d.graphics {
-        vm::Graphics::Vnc { port: Some(p), public, password, .. } => (p, public, password),
+    let (port, listen, public, has_password) = match d.graphics {
+        vm::Graphics::Vnc { port: Some(p), listen, public, password } => (p, listen, public, password),
         vm::Graphics::Vnc { port: None, .. } => return Err("la VM est éteinte : démarre-la pour voir son écran".into()),
         vm::Graphics::Spice => {
             return Err("cette VM affiche son écran en SPICE, que Zenytt ne sait pas afficher : utilise la console série, ou passe son affichage en VNC".into())
         }
         vm::Graphics::None => return Err("cette VM n'a pas d'écran : utilise la console série".into()),
+        vm::Graphics::VncSocket => {
+            return Err("l'écran de cette VM passe par un socket Unix, pas par un port : utilise la console série, ou fais-le écouter sur 127.0.0.1 (virsh edit, balise <graphics>)".into())
+        }
     };
     let password = if has_password {
         vm::vnc_password_of(&c.conn, c.access, c.sudo.as_deref(), &uuid).await.map_err(err)?.unwrap_or_default()
     } else {
         String::new()
     };
-    // L'écran est joint sur la boucle locale du serveur, même s'il écoute aussi ailleurs.
+    // L'écran est joint depuis le serveur : sur sa boucle locale s'il écoute partout (0.0.0.0),
+    // sinon sur l'adresse précise choisie pour QEMU (une IP du réseau local ne répond pas sur 127.0.0.1).
+    let host = vm::vnc_connect_host(&listen);
     let session = crate::commands::rdp::open_vnc_via(
         &app,
         &tunnels,
@@ -211,7 +235,7 @@ pub async fn vm_console_open(
         &format!("vm-{uuid}"),
         &server_id,
         &name,
-        "127.0.0.1",
+        &host,
         port,
         password,
         String::new(),

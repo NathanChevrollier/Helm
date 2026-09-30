@@ -165,8 +165,23 @@ pub enum Graphics {
         public: bool,
         password: bool,
     },
+    /// VNC sur un socket Unix (`<listen type='socket'>`) : rien à joindre par un tunnel TCP.
+    VncSocket,
     Spice,
     None,
+}
+
+/// Adresse à joindre, depuis le serveur, pour atteindre l'écran VNC d'une VM.
+///
+/// Une adresse joker (`0.0.0.0`, `::`) ou de boucle locale se joint par `127.0.0.1`. Une adresse
+/// précise (ex. l'IP du réseau local) n'écoute pas sur la boucle locale : il faut viser celle-là.
+pub fn vnc_connect_host(listen: &str) -> String {
+    let l = listen.trim().trim_start_matches('[').trim_end_matches(']');
+    match l {
+        "" | "0.0.0.0" | "::" | "*" | "localhost" | "::1" => "127.0.0.1".into(),
+        _ if l.starts_with("127.") => "127.0.0.1".into(),
+        _ => l.to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -218,6 +233,10 @@ pub(crate) fn parse_detail(xml: &str) -> Result<VmDetail> {
         })
         .collect();
     let graphics = match all("graphics").next() {
+        // Écran VNC sur un socket Unix : pas de port TCP à joindre par un tunnel.
+        Some(g) if g.attribute("type") == Some("vnc") && child(g, "listen").and_then(|l| l.attribute("type")) == Some("socket") => {
+            Graphics::VncSocket
+        }
         Some(g) if g.attribute("type") == Some("vnc") => {
             let listen =
                 child(g, "listen").and_then(|l| l.attribute("address")).or(g.attribute("listen")).unwrap_or("127.0.0.1").to_string();
@@ -261,6 +280,52 @@ pub async fn vnc_password_of(conn: &Connection, access: Access, sudo: Option<&st
     }
     let xml = run(conn, access, sudo, &format!("dumpxml --security-info {}", shell_quote(uuid))).await?.into_result()?.stdout;
     Ok(vnc_password(&xml))
+}
+
+fn xml_attr(value: &str) -> String {
+    value.replace('&', "&amp;").replace('\'', "&apos;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Réécrit la définition d'une VM pour que son écran VNC n'écoute plus que sur 127.0.0.1.
+///
+/// Seul l'élément `<graphics type='vnc'>` est reconstruit (mêmes attributs et enfants, sauf
+/// l'adresse d'écoute) : le reste du XML est repris octet pour octet.
+pub fn restrict_vnc_xml(xml: &str) -> Result<String> {
+    let doc = roxmltree::Document::parse(xml).map_err(|e| Error::Other(format!("définition de VM illisible : {e}")))?;
+    let g = doc
+        .descendants()
+        .find(|n| n.has_tag_name("graphics") && n.attribute("type") == Some("vnc"))
+        .ok_or_else(|| Error::Other("cette VM n'a pas d'écran VNC".into()))?;
+    let mut out = String::from("<graphics");
+    for a in g.attributes().filter(|a| a.name() != "listen") {
+        out.push_str(&format!(" {}='{}'", a.name(), xml_attr(a.value())));
+    }
+    out.push_str(" listen='127.0.0.1'>\n      <listen type='address' address='127.0.0.1'/>");
+    for c in g.children().filter(|c| c.is_element() && !c.has_tag_name("listen")) {
+        out.push_str("\n      ");
+        out.push_str(&xml[c.range()]);
+    }
+    out.push_str("\n    </graphics>");
+    let r = g.range();
+    Ok(format!("{}{}{}", &xml[..r.start], out, &xml[r.end..]))
+}
+
+/// Restreint l'écran VNC d'une VM à 127.0.0.1 (effectif au prochain démarrage de la VM).
+pub async fn restrict_vnc(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str) -> Result<()> {
+    if !valid_uuid(uuid) {
+        return Err(Error::Other("identifiant de VM invalide".into()));
+    }
+    // Définition persistante (pas l'état en cours), avec le mot de passe VNC s'il y en a un.
+    let xml = run(conn, access, sudo, &format!("dumpxml --inactive --security-info {}", shell_quote(uuid))).await?.into_result()?.stdout;
+    let new = restrict_vnc_xml(&xml)?;
+    let cmd = format!("{VIRSH} define /dev/stdin");
+    let out = match access {
+        Access::Direct => conn.exec(&cmd, Some(new.as_bytes())).await?,
+        Access::Sudo => conn.exec_sudo(&cmd, sudo, Some(new.as_bytes())).await?,
+        Access::Unavailable => return Err(Error::Other("libvirt n'est pas accessible sur ce serveur".into())),
+    };
+    out.into_result()?;
+    Ok(())
 }
 
 pub async fn detail(conn: &Connection, access: Access, sudo: Option<&str>, uuid: &str) -> Result<VmDetail> {
@@ -516,6 +581,43 @@ mod tests {
     fn graphics_listen_public() {
         let d = parse_detail(include_str!("vm/fixtures/public-vnc.xml")).unwrap();
         assert!(matches!(d.graphics, Graphics::Vnc { public: true, .. }));
+    }
+
+    #[test]
+    fn vnc_host_follows_listen_address() {
+        assert_eq!(vnc_connect_host("0.0.0.0"), "127.0.0.1");
+        assert_eq!(vnc_connect_host("::"), "127.0.0.1");
+        assert_eq!(vnc_connect_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(vnc_connect_host(""), "127.0.0.1");
+        // Écoute sur une IP précise : la boucle locale ne répond pas, il faut viser cette IP.
+        assert_eq!(vnc_connect_host("192.168.1.20"), "192.168.1.20");
+        assert_eq!(vnc_connect_host("[fd00::5]"), "fd00::5");
+    }
+
+    #[test]
+    fn restrict_vnc_rewrites_only_graphics() {
+        let xml = include_str!("vm/fixtures/public-vnc.xml");
+        let new = restrict_vnc_xml(xml).unwrap();
+        let d = parse_detail(&new).unwrap();
+        match &d.graphics {
+            Graphics::Vnc { listen, public, .. } => {
+                assert_eq!(listen, "127.0.0.1");
+                assert!(!public);
+            }
+            other => panic!("VNC attendu, reçu {other:?}"),
+        }
+        assert!(!new.contains("0.0.0.0"), "plus aucune écoute publique");
+        // Le reste de la définition est intact.
+        let before = parse_detail(xml).unwrap();
+        assert_eq!((d.disks.len(), d.nics.len(), d.firmware), (before.disks.len(), before.nics.len(), before.firmware));
+        // Idempotent.
+        assert_eq!(parse_detail(&restrict_vnc_xml(&new).unwrap()).unwrap().graphics, d.graphics);
+    }
+
+    #[test]
+    fn graphics_vnc_socket() {
+        let xml = "<domain type='kvm'><name>s</name><uuid>2f1c8a3e-0b7d-4c55-9a61-3e2b1f0d9c11</uuid><devices><graphics type='vnc' socket='/run/x.sock'><listen type='socket' socket='/run/x.sock'/></graphics></devices></domain>";
+        assert_eq!(parse_detail(xml).unwrap().graphics, Graphics::VncSocket);
     }
 
     #[test]
