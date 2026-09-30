@@ -1,17 +1,17 @@
 // Barre latérale « serveur d'abord » : le serveur actif en tête (il donne le contexte de tout le
 // groupe « Serveur »), puis les sections groupées, avec des badges sur ce qui demande une action.
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Lock, MessagesSquare, PanelLeftClose, PanelLeftOpen, Sparkles, type LucideIcon } from "lucide-react";
+import { ChevronsUpDown, EyeOff, Lock, MessagesSquare, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, type LucideIcon } from "lucide-react";
 import { AppLogo } from "../AppLogo";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useApp } from "../../lib/store";
-import { useShell } from "../../lib/shell";
+import { navigate, useShell } from "../../lib/shell";
 import { useLock } from "../../lib/lock";
 import { useAssistant } from "../../lib/assistant";
 import { badgesOf, useHealth } from "../../lib/health";
 import { display, shortcutOf } from "../../lib/shortcuts";
-import { SECTIONS, type SectionId } from "../../sections";
-import { Avatar, FOCUS_RING, StatusDot } from "../ui";
+import { ALWAYS_VISIBLE, SECTIONS, type SectionId } from "../../sections";
+import { Avatar, FOCUS_RING, StatusDot, useContextMenu } from "../ui";
 import ServerSwitcher from "./ServerSwitcher";
 
 const RAIL_KEY = "zenytt.rail";
@@ -46,15 +46,48 @@ export default function Sidebar({ version }: { version?: string }) {
 
   const badgeFor = (id: SectionId): { n: number; tone: "danger" | "warn" | "muted" } | null => {
     if (id === "monitoring" && badges.alerts) return { n: badges.alerts, tone: "danger" };
-    if (id === "docker" && badges.stopped) return { n: badges.stopped, tone: "warn" };
+    if (id === "docker" && badges.failed) return { n: badges.failed, tone: "warn" };
     if (id === "sites" && badges.certs) return { n: badges.certs, tone: "warn" };
     if (id === "terminal" && tabCount) return { n: tabCount, tone: "muted" };
     return null;
   };
 
+  // Onglets masqués par l'utilisateur (Réglages) ; celui qu'on regarde reste affiché.
+  const hidden = useApp((s) => s.settings.hiddenSections);
+  const shown = (id: SectionId) => ALWAYS_VISIBLE.includes(id) || id === section || !hidden?.includes(id);
+  const setSettings = useApp((s) => s.setSettings);
+  const menu = useContextMenu();
+
   const item = (id: SectionId, disabled = false) => {
     const s = SECTIONS.find((x) => x.id === id)!;
-    return <NavItem key={id} label={s.label} icon={s.icon} active={section === id} expanded={open} disabled={disabled} badge={badgeFor(id)} onClick={() => setSection(id)} />;
+    return (
+      <NavItem
+        key={id}
+        label={s.label}
+        icon={s.icon}
+        active={section === id}
+        expanded={open}
+        disabled={disabled}
+        badge={badgeFor(id)}
+        onClick={() => setSection(id)}
+        onContextMenu={
+          ALWAYS_VISIBLE.includes(id)
+            ? undefined
+            : (e) =>
+                menu.open(e, [
+                  {
+                    label: `Masquer « ${s.label} »`,
+                    icon: <EyeOff size={14} />,
+                    onClick: () => {
+                      setSettings({ hiddenSections: [...(hidden ?? []).filter((h) => h !== id), id] });
+                      if (section === id) setSection("home");
+                    },
+                  },
+                  { label: "Choisir les onglets affichés…", icon: <Settings2 size={14} />, onClick: () => navigate("settings", "general") },
+                ])
+        }
+      />
+    );
   };
 
   return (
@@ -120,14 +153,14 @@ export default function Sidebar({ version }: { version?: string }) {
 
       <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden">
         <GroupLabel expanded={open}>Poste</GroupLabel>
-        {SECTIONS.filter((s) => s.group === "poste").map((s) => item(s.id))}
+        {SECTIONS.filter((s) => s.group === "poste" && shown(s.id)).map((s) => item(s.id))}
         <GroupLabel expanded={open}>
           <span className="flex min-w-0 items-center gap-1.5">
             <StatusDot tone={server?.connected ? "ok" : "muted"} className="size-1.5!" />
             <span className="truncate">Serveur{server ? ` · ${server.name}` : ""}</span>
           </span>
         </GroupLabel>
-        {SECTIONS.filter((s) => s.group === "serveur").map((s) => item(s.id, !server))}
+        {SECTIONS.filter((s) => s.group === "serveur" && shown(s.id)).map((s) => item(s.id, !server))}
       </div>
 
       <div className={`mt-2 flex w-full flex-col gap-0.5 border-t border-line pt-2 ${open ? "" : "items-center"}`}>
@@ -139,7 +172,7 @@ export default function Sidebar({ version }: { version?: string }) {
           hint={display(shortcutOf("assistant"))}
           onClick={() => useAssistant.getState().setOpen(!assistantOpen)}
         />
-        {SECTIONS.filter((s) => s.group === "pied").map((s) => item(s.id))}
+        {SECTIONS.filter((s) => s.group === "pied" && shown(s.id)).map((s) => item(s.id))}
         {lockConfigured && <NavItem label="Verrouiller" icon={Lock} expanded={open} active={false} hint={display(shortcutOf("lock"))} onClick={() => useLock.getState().lock()} />}
         {open ? (
           <div className="flex items-center justify-between px-2.5 pt-2 text-[11px] text-faint">
@@ -152,6 +185,7 @@ export default function Sidebar({ version }: { version?: string }) {
           <NavItem label="Discord de Zenytt" icon={MessagesSquare} expanded={false} active={false} onClick={() => void openUrl("https://discord.gg/ctEWWqCj9B")} />
         )}
       </div>
+      {menu.menu}
     </nav>
   );
 }
@@ -170,12 +204,14 @@ function NavItem({
   badge,
   hint,
   disabled,
+  onContextMenu,
 }: {
   label: string;
   icon: LucideIcon;
   active: boolean;
   expanded: boolean;
   onClick: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   badge?: { n: number; tone: "danger" | "warn" | "muted" } | null;
   hint?: string;
   disabled?: boolean;
@@ -185,6 +221,7 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       aria-label={badge ? `${label} (${badge.n})` : label}
       aria-current={active ? "page" : undefined}
       title={expanded ? (disabled ? "Choisis d'abord un serveur" : undefined) : label}

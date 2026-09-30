@@ -52,6 +52,9 @@ export interface Section {
   perServer?: boolean;
 }
 
+/** Toujours dans la barre latérale : on ne peut pas se retrouver sans accueil ni réglages. */
+export const ALWAYS_VISIBLE: SectionId[] = ["home", "help", "settings"];
+
 export const SECTIONS: Section[] = [
   { id: "home", group: "poste", label: "Accueil", icon: LayoutDashboard, description: "Santé de tous tes serveurs d'un coup d'œil." },
   { id: "terminal", group: "poste", label: "Terminal", icon: SquareTerminal, description: "Sessions SSH persistantes en onglets et panneaux, snippets, diffusion." },

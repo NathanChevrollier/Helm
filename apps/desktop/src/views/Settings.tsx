@@ -33,6 +33,7 @@ import PageLayout from "../components/PageLayout";
 import { checkForUpdate } from "../lib/updater";
 import SyncSettings from "../components/SyncSettings";
 import AiSettingsPanel from "../components/AiSettings";
+import { ALWAYS_VISIBLE, SECTIONS } from "../sections";
 
 /** Nom du système, pour parler de « Windows », « macOS » ou « Linux » plutôt que d'un seul. */
 export const OS_NAME = /Windows/i.test(navigator.userAgent) ? "Windows" : /Mac/i.test(navigator.userAgent) ? "macOS" : "Linux";
@@ -212,6 +213,27 @@ function General() {
             ]}
           />
         </Setting>
+      </Group>
+      <Group title="Onglets de la barre latérale" description="Décoche ce dont tu ne te sers pas : l'onglet disparaît de la barre latérale, sans rien désactiver (la palette Ctrl+K y mène toujours). Accueil, Aide et Réglages restent affichés.">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 px-4 py-3.5">
+          {SECTIONS.filter((s) => !ALWAYS_VISIBLE.includes(s.id)).map((s) => {
+            const hidden = settings.hiddenSections ?? [];
+            const Icon = s.icon;
+            return (
+              <Checkbox
+                key={s.id}
+                checked={!hidden.includes(s.id)}
+                onChange={(on) => setSettings({ hiddenSections: on ? hidden.filter((h) => h !== s.id) : [...hidden, s.id] })}
+                label={
+                  <span className="flex items-center gap-1.5">
+                    <Icon size={14} className="text-muted" />
+                    {s.label}
+                  </span>
+                }
+              />
+            );
+          })}
+        </div>
       </Group>
       <Group title="Notifications et fichiers">
         <Toggle
