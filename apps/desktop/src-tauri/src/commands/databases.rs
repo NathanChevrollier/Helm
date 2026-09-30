@@ -2,15 +2,49 @@
 //! exploration et exécution de SQL.
 
 use tauri::State;
-use zenytt_core::db::{self, Column, Engine, Filter, Instance, KeyPart, Named, QueryResult, SortDir};
+use zenytt_core::db::{self, Column, Engine, Filter, Instance, KeyPart, Login, Named, QueryResult, SortDir};
+use zenytt_core::db_admin::{self, BackupFile};
+use zenytt_core::db_schema::{self, SchemaOp};
 use zenytt_core::docker::{self, Access};
 
 use crate::commands::{admin, track};
 use crate::sessions::Sessions;
-use crate::store::{AuditLog, Store};
+use crate::store::{secrets, AuditLog, Store};
 
 fn err(e: impl ToString) -> String {
     e.to_string()
+}
+
+/// Nom du secret (keyring) qui garde le compte d'une instance.
+fn login_key(instance_id: &str) -> String {
+    format!("db:{instance_id}")
+}
+
+/// Joint à l'instance le compte enregistré pour elle, s'il y en a un.
+fn with_login(server_id: &str, mut instance: Instance) -> Instance {
+    instance.login = secrets::get(server_id, &login_key(&instance.id)).and_then(|s| serde_json::from_str::<Login>(&s).ok());
+    instance
+}
+
+/// Utilisateur enregistré pour l'instance (jamais le mot de passe).
+#[tauri::command]
+pub fn db_login_get(server_id: String, instance_id: String) -> Option<String> {
+    secrets::get(&server_id, &login_key(&instance_id)).and_then(|s| serde_json::from_str::<Login>(&s).ok()).map(|l| l.user)
+}
+
+/// Enregistre le compte d'une instance dans le keyring ; utilisateur vide : l'oublie (retour aux
+/// identifiants du conteneur ou du socket).
+#[tauri::command]
+pub fn db_login_set(server_id: String, instance_id: String, user: String, password: String) -> Result<(), String> {
+    let key = login_key(&instance_id);
+    if user.trim().is_empty() {
+        return secrets::set(&server_id, &key, "");
+    }
+    let login = Login { user: user.trim().to_string(), password };
+    // Même validation qu'à l'usage : un compte refusé plus tard ne doit pas être enregistré.
+    db::login_prefix(Some(&login)).map_err(err)?;
+    let json = serde_json::json!({ "user": login.user, "password": login.password }).to_string();
+    secrets::set(&server_id, &key, &json)
 }
 
 /// Instances trouvées : conteneurs MySQL/MariaDB/PostgreSQL en cours, puis services installés.
@@ -53,6 +87,7 @@ pub async fn db_version(
     server_id: String,
     instance: Instance,
 ) -> Result<String, String> {
+    let instance = with_login(&server_id, instance);
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
     Ok(db::version(&conn, pw.as_deref(), &instance).await)
 }
@@ -67,12 +102,191 @@ pub async fn db_create(
     instance: Instance,
     name: String,
 ) -> Result<(), String> {
+    let instance = with_login(&server_id, instance);
     let r: Result<(), String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
         db::create_database(&conn, pw.as_deref(), &instance, &name).await.map_err(err)
     }
     .await;
     track(&audit, &store, &server_id, "db.create", &format!("{} · {name}", instance.label), r)
+}
+
+// ---------- Administration : sauvegardes, comptes, requêtes en cours ----------
+
+#[tauri::command]
+pub async fn db_backups(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<Vec<BackupFile>, String> {
+    let conn = sessions.get(&store, &server_id).await?;
+    db_admin::list_backups(&conn).await.map_err(err)
+}
+
+/// Dossier du serveur où déposer un fichier .sql importé du PC.
+#[tauri::command]
+pub async fn db_import_dir(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<String, String> {
+    let conn = sessions.get(&store, &server_id).await?;
+    db_admin::import_dir(&conn).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn db_backup(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    database: String,
+    stamp: String,
+) -> Result<BackupFile, String> {
+    let instance = with_login(&server_id, instance);
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        let stamp: String = stamp.chars().filter(|c| c.is_ascii_alphanumeric() || "-_".contains(*c)).take(32).collect();
+        db_admin::backup(&conn, pw.as_deref(), &instance, &database, &stamp).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.backup", &format!("{} · {database}", instance.label), r)
+}
+
+#[tauri::command]
+pub async fn db_restore(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    database: String,
+    file: String,
+) -> Result<String, String> {
+    let instance = with_login(&server_id, instance);
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        db_admin::restore(&conn, pw.as_deref(), &instance, &database, &file).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.restore", &format!("{} · {database} ← {file}", instance.label), r)
+}
+
+#[tauri::command]
+pub async fn db_backup_delete(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    file: String,
+) -> Result<(), String> {
+    let r = async {
+        let conn = sessions.get(&store, &server_id).await?;
+        db_admin::delete_backup(&conn, &file).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.backup_delete", &file, r)
+}
+
+#[tauri::command]
+pub async fn db_users(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+) -> Result<QueryResult, String> {
+    let instance = with_login(&server_id, instance);
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    db_admin::users(&conn, pw.as_deref(), &instance).await.map_err(err)
+}
+
+/// Crée un compte avec tous les droits sur une base. Le mot de passe n'est pas journalisé.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn db_user_create(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    user: String,
+    host: String,
+    password: String,
+    database: Option<String>,
+) -> Result<(), String> {
+    let instance = with_login(&server_id, instance);
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        db_admin::create_user(&conn, pw.as_deref(), &instance, &user, &host, &password, database.as_deref()).await.map_err(err)
+    }
+    .await;
+    let detail = format!("{} · {user}@{host}{}", instance.label, database.as_deref().map(|d| format!(" → {d}")).unwrap_or_default());
+    track(&audit, &store, &server_id, "db.user_create", &detail, r)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn db_user_password(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    user: String,
+    host: String,
+    password: String,
+) -> Result<(), String> {
+    let instance = with_login(&server_id, instance);
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        db_admin::set_password(&conn, pw.as_deref(), &instance, &user, &host, &password).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.user_password", &format!("{} · {user}@{host}", instance.label), r)
+}
+
+#[tauri::command]
+pub async fn db_user_drop(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    user: String,
+    host: String,
+) -> Result<(), String> {
+    let instance = with_login(&server_id, instance);
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        db_admin::drop_user(&conn, pw.as_deref(), &instance, &user, &host).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.user_drop", &format!("{} · {user}@{host}", instance.label), r)
+}
+
+#[tauri::command]
+pub async fn db_activity(
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+) -> Result<QueryResult, String> {
+    let instance = with_login(&server_id, instance);
+    let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+    db_admin::activity(&conn, pw.as_deref(), &instance).await.map_err(err)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn db_kill(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    server_id: String,
+    instance: Instance,
+    id: u64,
+    whole: bool,
+) -> Result<(), String> {
+    let instance = with_login(&server_id, instance);
+    let r = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        db_admin::kill(&conn, pw.as_deref(), &instance, id, whole).await.map_err(err)
+    }
+    .await;
+    track(&audit, &store, &server_id, "db.kill", &format!("{} · {id}{}", instance.label, if whole { " (connexion)" } else { "" }), r)
 }
 
 #[tauri::command]
@@ -82,6 +296,7 @@ pub async fn db_databases(
     server_id: String,
     instance: Instance,
 ) -> Result<Vec<Named>, String> {
+    let instance = with_login(&server_id, instance);
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
     db::databases(&conn, pw.as_deref(), &instance).await.map_err(err)
 }
@@ -94,6 +309,7 @@ pub async fn db_tables(
     instance: Instance,
     database: String,
 ) -> Result<Vec<Named>, String> {
+    let instance = with_login(&server_id, instance);
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
     db::tables(&conn, pw.as_deref(), &instance, &database).await.map_err(err)
 }
@@ -110,6 +326,7 @@ pub async fn db_query(
     sql: String,
     limit: Option<usize>,
 ) -> Result<QueryResult, String> {
+    let instance = with_login(&server_id, instance);
     let read_only = db::is_read_only(&sql);
     let r: Result<QueryResult, String> = async {
         let (conn, pw) = admin(&store, &sessions, &server_id).await?;
@@ -122,6 +339,19 @@ pub async fn db_query(
     let detail =
         format!("{} · {} : {}", instance.label, database.unwrap_or_default(), sql.split_whitespace().collect::<Vec<_>>().join(" "));
     track(&audit, &store, &server_id, "db.query", &detail.chars().take(500).collect::<String>(), r)
+}
+
+/// SQL d'une opération de structure (créer une table, ajouter une colonne…), montré à
+/// l'utilisateur puis exécuté par `db_query`, qui l'inscrit au journal.
+#[tauri::command]
+pub fn db_schema_sql(engine: Engine, op: SchemaOp) -> Result<String, String> {
+    db_schema::schema_sql(engine, &op).map_err(err)
+}
+
+/// Types de colonne proposés pour le moteur.
+#[tauri::command]
+pub fn db_column_types(engine: Engine) -> Vec<&'static str> {
+    db_schema::column_types(engine).to_vec()
 }
 
 /// Requête d'aperçu du contenu d'une table (identifiant vérifié côté Rust).
@@ -141,6 +371,7 @@ pub async fn db_columns(
     database: Option<String>,
     table: String,
 ) -> Result<Vec<Column>, String> {
+    let instance = with_login(&server_id, instance);
     let (conn, pw) = admin(&store, &sessions, &server_id).await?;
     db::columns(&conn, pw.as_deref(), &instance, database.as_deref(), &table).await.map_err(err)
 }

@@ -64,12 +64,67 @@ pub struct Instance {
     /// Chemin du fichier pour SQLite ; vide pour les autres moteurs.
     #[serde(default)]
     pub path: String,
+    /// Compte enregistré dans Zenytt pour cette instance (keyring), ajouté côté application juste
+    /// avant la requête : jamais reçu de l'interface ni renvoyé vers elle.
+    #[serde(skip)]
+    pub login: Option<Login>,
+}
+
+/// Identifiants d'une instance, quand ceux du conteneur (variables d'environnement) ne suffisent pas.
+#[derive(Clone, PartialEq, Deserialize)]
+pub struct Login {
+    pub user: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for Login {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Login({}, ***)", self.user)
+    }
+}
+
+/// Deux premières lignes de l'entrée du client : utilisateur et mot de passe (vides : ceux du
+/// conteneur ou du socket). Ils ne passent ainsi jamais par une ligne de commande.
+pub fn login_prefix(login: Option<&Login>) -> Result<String> {
+    match login {
+        None => Ok("\n\n".into()),
+        Some(l) => {
+            if l.user.is_empty() || l.user.len() > 80 || !l.user.chars().all(|c| c.is_ascii_alphanumeric() || "_-.@".contains(c)) {
+                return Err(Error::Other("nom d'utilisateur de base invalide".into()));
+            }
+            if l.password.contains(['\n', '\r']) {
+                return Err(Error::Other("le mot de passe ne peut pas contenir de retour à la ligne".into()));
+            }
+            Ok(format!("{}\n{}\n", l.user, l.password))
+        }
+    }
+}
+
+/// Script lancé dans un conteneur MySQL/MariaDB : lit le compte sur ses deux premières lignes
+/// d'entrée, sinon le prend dans l'environnement du conteneur (mot de passe root, sa variante
+/// `_FILE`, puis le compte applicatif `MYSQL_USER`). Le mot de passe passe par `MYSQL_PWD` : le
+/// client ne le demande jamais (une invite lirait la requête comme mot de passe).
+pub(crate) const MYSQL_CONTAINER_SCRIPT: &str = r#"C=$(command -v mysql || command -v mariadb); IFS= read -r ZU; IFS= read -r ZP
+if [ -z "$ZU" ]; then
+  ZU=root; ZP="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"; F="${MYSQL_ROOT_PASSWORD_FILE:-$MARIADB_ROOT_PASSWORD_FILE}"
+  if [ -z "$ZP" ] && [ -n "$F" ] && [ -r "$F" ]; then ZP=$(cat "$F"); fi
+  if [ -z "$ZP" ] && [ -z "$MYSQL_ALLOW_EMPTY_PASSWORD$MARIADB_ALLOW_EMPTY_ROOT_PASSWORD" ] && [ -n "$MYSQL_USER$MARIADB_USER" ]; then
+    ZU="${MYSQL_USER:-$MARIADB_USER}"; ZP="${MYSQL_PASSWORD:-$MARIADB_PASSWORD}"; F="${MYSQL_PASSWORD_FILE:-$MARIADB_PASSWORD_FILE}"
+    if [ -z "$ZP" ] && [ -n "$F" ] && [ -r "$F" ]; then ZP=$(cat "$F"); fi
+  fi
+fi
+export MYSQL_PWD="$ZP"
+"#;
+
+/// Script complet (client compris) exécuté dans un conteneur MySQL pour une base.
+pub(crate) fn mysql_container_script(database: &str) -> String {
+    format!("{MYSQL_CONTAINER_SCRIPT}exec \"$C\" --batch --raw --unbuffered -u\"$ZU\" {database}")
 }
 
 impl Instance {
     /// Instance d'un moteur serveur (conteneur Docker ou service local).
     pub fn server(id: impl Into<String>, label: impl Into<String>, engine: Engine, container: Option<String>) -> Instance {
-        Instance { id: id.into(), label: label.into(), engine, container, version: String::new(), path: String::new() }
+        Instance { id: id.into(), label: label.into(), engine, container, version: String::new(), path: String::new(), login: None }
     }
 
     /// Instance SQLite : un fichier sur le serveur, éventuellement dans un conteneur.
@@ -86,6 +141,7 @@ impl Instance {
             container,
             version: String::new(),
             path,
+            login: None,
         }
     }
 }
@@ -95,7 +151,7 @@ pub fn safe_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '$')
 }
 
-fn check(instance: &Instance, database: Option<&str>) -> Result<()> {
+pub(crate) fn check(instance: &Instance, database: Option<&str>) -> Result<()> {
     if let Some(c) = &instance.container {
         if !safe_name(c) {
             return Err(Error::Other("nom de conteneur invalide".into()));
@@ -121,30 +177,35 @@ pub fn safe_file_path(path: &str) -> bool {
 
 /// Commande shell qui lit le SQL sur son entrée standard et écrit le résultat sur stdout.
 /// MySQL sort en mode « batch » (tabulations, valeurs échappées), PostgreSQL en CSV.
-fn client_command(instance: &Instance, database: Option<&str>, limit: Option<usize>) -> Result<String> {
+pub(crate) fn client_command(instance: &Instance, database: Option<&str>, limit: Option<usize>) -> Result<String> {
     check(instance, database)?;
+    // L'entrée commence toujours par deux lignes (compte enregistré dans Zenytt, ou vides : voir
+    // `login_prefix`), lues ici avant que le client ne reçoive le SQL.
+    const SKIP_LOGIN: &str = "IFS= read -r ZU; IFS= read -r ZP;";
+    let db = database.unwrap_or("");
     let mut cmd = match (instance.engine, &instance.container) {
-        (Engine::Mysql, Some(c)) => format!(
-            "docker exec -i {c} sh -c 'C=$(command -v mysql || command -v mariadb); exec \"$C\" --batch --raw --unbuffered -uroot -p\"${{MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}}\" {}'",
-            database.unwrap_or("")
+        (Engine::Mysql, Some(c)) => format!("docker exec -i {c} sh -c {}", shell_quote(&mysql_container_script(db))),
+        // Service local : socket en root, sauf si un compte est enregistré.
+        (Engine::Mysql, None) => format!(
+            "{SKIP_LOGIN} C=$(command -v mysql || command -v mariadb); if [ -n \"$ZU\" ]; then export MYSQL_PWD=\"$ZP\"; set -- -u\"$ZU\"; fi; \"$C\" --batch --raw --unbuffered \"$@\" {db}"
         ),
-        (Engine::Mysql, None) => {
-            format!("C=$(command -v mysql || command -v mariadb); \"$C\" --batch --raw --unbuffered {}", database.unwrap_or(""))
+        (Engine::Postgres, Some(c)) => {
+            let script = format!(
+                "{SKIP_LOGIN} [ -n \"$ZU\" ] || ZU=\"${{POSTGRES_USER:-postgres}}\"; [ -n \"$ZP\" ] && export PGPASSWORD=\"$ZP\"; exec psql -U \"$ZU\" -d {} --csv -q -v ON_ERROR_STOP=1",
+                database.unwrap_or("postgres")
+            );
+            format!("docker exec -i {c} sh -c {}", shell_quote(&script))
         }
-        (Engine::Postgres, Some(c)) => format!(
-            "docker exec -i {c} sh -c 'exec psql -U \"${{POSTGRES_USER:-postgres}}\" -d {} --csv -q -v ON_ERROR_STOP=1'",
-            database.unwrap_or("postgres")
-        ),
         (Engine::Postgres, None) => {
-            format!("su -s /bin/sh postgres -c 'psql -d {} --csv -q -v ON_ERROR_STOP=1'", database.unwrap_or("postgres"))
+            let d = database.unwrap_or("postgres");
+            format!(
+                "{SKIP_LOGIN} if [ -n \"$ZU\" ]; then PGPASSWORD=\"$ZP\" psql -h 127.0.0.1 -U \"$ZU\" -d {d} --csv -q -v ON_ERROR_STOP=1; else su -s /bin/sh postgres -c 'psql -d {d} --csv -q -v ON_ERROR_STOP=1'; fi"
+            )
         }
         // SQLite n'a ni serveur ni utilisateur : le « nom de base » est le fichier lui-même.
         // `-bail` arrête au premier message d'erreur, sinon sqlite3 continue et renvoie 0.
-        (Engine::Sqlite, Some(c)) => format!(
-            "docker exec -i {c} sqlite3 -batch -bail -csv -header {}",
-            shell_quote(&instance.path)
-        ),
-        (Engine::Sqlite, None) => format!("sqlite3 -batch -bail -csv -header {}", shell_quote(&instance.path)),
+        (Engine::Sqlite, Some(c)) => format!("{SKIP_LOGIN} docker exec -i {c} sqlite3 -batch -bail -csv -header {}", shell_quote(&instance.path)),
+        (Engine::Sqlite, None) => format!("{SKIP_LOGIN} sqlite3 -batch -bail -csv -header {}", shell_quote(&instance.path)),
     };
     if let Some(n) = limit {
         // Une ligne de plus que demandé : elle signale un résultat tronqué.
@@ -154,7 +215,7 @@ fn client_command(instance: &Instance, database: Option<&str>, limit: Option<usi
 }
 
 /// Exécute du SQL sur l'instance et renvoie la sortie brute du client.
-async fn run_sql(
+pub(crate) async fn run_sql(
     conn: &Connection,
     sudo: Option<&str>,
     instance: &Instance,
@@ -163,7 +224,7 @@ async fn run_sql(
     limit: Option<usize>,
 ) -> Result<String> {
     let cmd = client_command(instance, database, limit)?;
-    let input = format!("{}\n", sql.trim_end().trim_end_matches(';'));
+    let input = format!("{}{}\n", login_prefix(instance.login.as_ref())?, sql.trim_end().trim_end_matches(';'));
     // Le service local n'est joignable qu'en root (socket) ; un conteneur passe par Docker, qui
     // peut lui aussi demander sudo.
     let out = conn.exec_sudo(&cmd, sudo, Some(input.as_bytes())).await?;
@@ -285,7 +346,7 @@ pub fn parse_csv(out: &str) -> QueryResult {
     QueryResult { columns, rows, truncated: false, duration_ms: 0 }
 }
 
-fn parse(engine: Engine, out: &str) -> QueryResult {
+pub(crate) fn parse(engine: Engine, out: &str) -> QueryResult {
     match engine {
         Engine::Mysql => parse_mysql(out),
         Engine::Postgres | Engine::Sqlite => parse_csv(out),
@@ -484,11 +545,15 @@ const MYSQL_TABLES: &str = "SELECT table_name AS nom, COALESCE(table_rows, 0) AS
 const SQLITE_TABLES: &str = "SELECT name AS nom, 0 AS lignes, 0 AS taille FROM sqlite_master \
      WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
 
-const PG_TABLES: &str = "SELECT c.relname AS nom, COALESCE(s.n_live_tup, 0) AS lignes, \
+/// Hors du schéma `public` (pg-boss, extensions…), le nom est préfixé par son schéma : sans lui,
+/// la table est introuvable (« relation does not exist »).
+const PG_TABLES: &str = "SELECT CASE WHEN n.nspname = 'public' THEN c.relname ELSE n.nspname || '.' || c.relname END AS nom, \
+     COALESCE(s.n_live_tup, 0) AS lignes, \
      pg_total_relation_size(c.oid) AS taille \
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
      LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid \
-     WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY c.relname";
+     WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%' \
+     ORDER BY n.nspname <> 'public', 1";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -580,9 +645,18 @@ pub async fn version(conn: &Connection, sudo: Option<&str>, instance: &Instance)
 }
 
 /// Instances installées directement sur le serveur (hors Docker).
-pub const LOCAL_PROBE: &str = "if pgrep -x mysqld >/dev/null 2>&1 || pgrep -x mariadbd >/dev/null 2>&1; then echo mysql; fi\n\
-     if pgrep -x postgres >/dev/null 2>&1; then echo postgres; fi\n\
-     true";
+///
+/// Les processus des conteneurs sont visibles depuis l'hôte : un `mysqld` ou un `postgres` dont le
+/// cgroup est celui d'un conteneur (docker, containerd, podman, kubernetes) n'est pas un service
+/// local. Il faut aussi de quoi s'y connecter : le client `mysql`, ou l'utilisateur `postgres`.
+pub const LOCAL_PROBE: &str = r#"host() { ! grep -qE 'docker|containerd|libpod|kubepods' "/proc/$p/cgroup" 2>/dev/null; }
+for p in $(pgrep -x mysqld; pgrep -x mariadbd); do
+  if host && { command -v mysql >/dev/null 2>&1 || command -v mariadb >/dev/null 2>&1; }; then echo mysql; break; fi
+done
+for p in $(pgrep -x postgres); do
+  if host && id postgres >/dev/null 2>&1; then echo postgres; break; fi
+done
+true"#;
 
 pub fn parse_local(out: &str) -> Vec<Instance> {
     out.lines()
@@ -615,6 +689,20 @@ const PG_COLUMNS: &str = "SELECT a.attname, format_type(a.atttypid, a.atttypmod)
        AND a.attnum = ANY(i.indkey)) THEN 'PRI' ELSE '' END \
      FROM pg_attribute a WHERE a.attrelid = ";
 
+/// Requête qui décrit les colonnes d'une table.
+pub(crate) fn columns_query(engine: Engine, table: &str) -> Result<String> {
+    Ok(match engine {
+        Engine::Mysql => format!("{MYSQL_COLUMNS}{} ORDER BY ordinal_position", quote_literal(engine, table)),
+        // `regclass` reçoit le nom cité (schéma compris) : `'"pgboss"."queue"'::regclass`.
+        Engine::Postgres => format!(
+            "{PG_COLUMNS}{}::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+            quote_literal(engine, &quote_ident(engine, table)?)
+        ),
+        // `PRAGMA table_info` ne suit pas la même disposition : cid, nom, type, notnull, défaut, pk.
+        Engine::Sqlite => format!("PRAGMA table_info({})", quote_ident(Engine::Sqlite, table)?),
+    })
+}
+
 /// Colonnes d'une table, avec le repérage de la clé primaire. C'est elle qui rend possible
 /// l'édition d'une cellule : sans clé primaire, aucune ligne n'est identifiable de façon sûre.
 pub async fn columns(
@@ -627,15 +715,7 @@ pub async fn columns(
     if !safe_name(table) {
         return Err(Error::Other("nom de table invalide".into()));
     }
-    let sql = match instance.engine {
-        Engine::Mysql => format!("{MYSQL_COLUMNS}{} ORDER BY ordinal_position", quote_literal(instance.engine, table)),
-        Engine::Postgres => format!(
-            "{PG_COLUMNS}{}::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
-            quote_literal(instance.engine, table)
-        ),
-        // `PRAGMA table_info` ne suit pas la même disposition : cid, nom, type, notnull, défaut, pk.
-        Engine::Sqlite => format!("PRAGMA table_info({})", quote_ident(Engine::Sqlite, table)?),
-    };
+    let sql = columns_query(instance.engine, table)?;
     let out = run_sql(conn, sudo, instance, database, &sql, Some(2000)).await?;
     let r = parse(instance.engine, &out);
     let get = |row: &Vec<Option<String>>, i: usize| row.get(i).cloned().flatten().unwrap_or_default();
@@ -664,14 +744,22 @@ pub async fn columns(
 
 /// Identifiant SQL cité pour le moteur. Le nom est d'abord validé : un nom refusé n'est jamais
 /// échappé « au mieux », il fait échouer l'opération.
+///
+/// `schéma.table` (tables hors du schéma par défaut, comme celles de pg-boss) donne deux
+/// identifiants cités séparément : `"pgboss"."queue"`, et non `"pgboss.queue"`.
 pub fn quote_ident(engine: Engine, name: &str) -> Result<String> {
-    if !safe_name(name) {
+    let parts: Vec<&str> = name.split('.').collect();
+    if !safe_name(name) || parts.len() > 2 || parts.iter().any(|p| p.is_empty()) {
         return Err(Error::Other(format!("nom d'objet invalide : {name}")));
     }
-    Ok(match engine {
-        Engine::Mysql => format!("`{name}`"),
-        Engine::Postgres | Engine::Sqlite => format!("\"{name}\""),
-    })
+    Ok(parts
+        .iter()
+        .map(|p| match engine {
+            Engine::Mysql => format!("`{p}`"),
+            Engine::Postgres | Engine::Sqlite => format!("\"{p}\""),
+        })
+        .collect::<Vec<_>>()
+        .join("."))
 }
 
 /// Chaîne SQL citée. MySQL traite la barre oblique inverse comme un caractère d'échappement dans
@@ -877,9 +965,81 @@ mod tests {
         assert!(cmd.ends_with("| head -n 102"));
         assert!(!cmd.contains("-p'"), "aucun mot de passe en clair dans la commande");
         let pg = client_command(&container(Engine::Postgres, "pg"), Some("app"), None).unwrap();
-        assert!(pg.contains("psql -U \"${POSTGRES_USER:-postgres}\" -d app --csv"));
+        assert!(pg.contains("ZU=\"${POSTGRES_USER:-postgres}\"") && pg.contains("psql -U \"$ZU\" -d app --csv"), "{pg}");
         assert!(client_command(&container(Engine::Mysql, "db; rm -rf /"), None, None).is_err());
         assert!(client_command(&container(Engine::Mysql, "db"), Some("app; DROP"), None).is_err());
+    }
+
+    #[test]
+    fn tables_outside_public_schema_are_qualified() {
+        // pg-boss range ses tables dans le schéma « pgboss » : `"queue"` seul n'existe pas.
+        assert!(PG_TABLES.contains("n.nspname || '.' || c.relname"));
+        assert_eq!(quote_ident(Engine::Postgres, "pgboss.queue").unwrap(), "\"pgboss\".\"queue\"");
+        assert_eq!(quote_ident(Engine::Postgres, "queue").unwrap(), "\"queue\"");
+        assert_eq!(preview_query(Engine::Postgres, "pgboss.queue", 5).unwrap(), "SELECT * FROM \"pgboss\".\"queue\" LIMIT 5");
+        assert!(columns_query(Engine::Postgres, "pgboss.queue").unwrap().contains("'\"pgboss\".\"queue\"'::regclass"));
+        assert!(quote_ident(Engine::Postgres, "a.b.c").is_err() && quote_ident(Engine::Postgres, ".a").is_err());
+    }
+
+    #[test]
+    fn local_probe_ignores_container_processes() {
+        // Les processus des conteneurs sont visibles depuis l'hôte : sans ce filtre, un conteneur
+        // postgres faisait apparaître un « PostgreSQL (serveur) » fantôme (su: user postgres does not exist).
+        assert!(LOCAL_PROBE.contains("/proc/$p/cgroup") && LOCAL_PROBE.contains("docker"));
+        assert!(LOCAL_PROBE.contains("id postgres"), "le service local suppose l'utilisateur postgres");
+        assert!(LOCAL_PROBE.contains("command -v mysql"), "et un client mysql sur l'hôte");
+    }
+
+    #[test]
+    fn mysql_never_prompts_for_a_password() {
+        // `-p""` (variable vide) fait demander le mot de passe au client, qui lit alors la première
+        // ligne de la requête : « Enter password: … Access denied ».
+        let cmd = client_command(&container(Engine::Mysql, "nexus-mysql"), Some("app"), None).unwrap();
+        assert!(!cmd.contains(" -p"), "{cmd}");
+        assert!(cmd.contains("MYSQL_PWD") && cmd.contains("MYSQL_ROOT_PASSWORD_FILE") && cmd.contains("MYSQL_USER"));
+        let local = client_command(&Instance::server("local:mysql", "m", Engine::Mysql, None), Some("app"), None).unwrap();
+        assert!(!local.contains(" -p") && local.contains("MYSQL_PWD"));
+    }
+
+    #[test]
+    fn login_goes_first_on_stdin() {
+        assert_eq!(login_prefix(None).unwrap(), "\n\n");
+        let l = Login { user: "app".into(), password: "s3cret".into() };
+        assert_eq!(login_prefix(Some(&l)).unwrap(), "app\ns3cret\n");
+        assert!(login_prefix(Some(&Login { user: "app".into(), password: "a\nb".into() })).is_err());
+        assert!(login_prefix(Some(&Login { user: "a b".into(), password: "x".into() })).is_err());
+    }
+
+    /// Le script exécuté dans le conteneur choisit bien le compte, avec un faux client `mysql`.
+    #[cfg(unix)]
+    #[test]
+    fn mysql_container_script_picks_credentials() {
+        let dir = std::env::temp_dir().join(format!("zenytt-mysql-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("mysql");
+        std::fs::write(&fake, "#!/bin/sh\necho \"PWD=$MYSQL_PWD ARGS=$*\"\n").unwrap();
+        std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+        let pwfile = dir.join("rootpw");
+        std::fs::write(&pwfile, "depuis-fichier").unwrap();
+        let run = |env: &[(&str, &str)], stdin: &str| {
+            use std::io::Write;
+            let mut cmd = std::process::Command::new("sh");
+            cmd.arg("-c").arg(mysql_container_script("app")).env_clear().env("PATH", format!("{}:/usr/bin:/bin", dir.display()));
+            for (k, v) in env {
+                cmd.env(k, v);
+            }
+            let mut child = cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+            child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+            String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+        };
+        assert!(run(&[("MYSQL_ROOT_PASSWORD", "r00t")], "\n\n").contains("PWD=r00t ARGS=--batch --raw --unbuffered -uroot app"));
+        let f = pwfile.display().to_string();
+        assert!(run(&[("MYSQL_ROOT_PASSWORD_FILE", &f)], "\n\n").contains("PWD=depuis-fichier"));
+        let u = run(&[("MYSQL_USER", "nexus"), ("MYSQL_PASSWORD", "np")], "\n\n");
+        assert!(u.contains("PWD=np") && u.contains("-unexus"), "{u}");
+        let saved = run(&[("MYSQL_ROOT_PASSWORD", "r00t")], "admin\nenregistre\n");
+        assert!(saved.contains("PWD=enregistre") && saved.contains("-uadmin"), "identifiants de Zenytt prioritaires : {saved}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

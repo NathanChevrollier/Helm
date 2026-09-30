@@ -7,6 +7,8 @@ pub mod archive;
 pub mod backup;
 pub mod catalog;
 pub mod db;
+pub mod db_admin;
+pub mod db_schema;
 pub mod deploy;
 pub mod diagnose;
 pub mod docker;

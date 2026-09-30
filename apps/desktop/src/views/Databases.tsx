@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { ChevronDown, Database, Download, FileSearch, History, Play, Plus, RefreshCw, Rows3, Search, Table2, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, Columns3, Database, Download, Eraser, FileSearch, History, KeyRound, MoreHorizontal, Pencil, Play, Plus, RefreshCw, Rows3, Search, Table2, Trash2, TriangleAlert, X } from "lucide-react";
 import {
   api,
   errorMessage,
@@ -17,8 +17,10 @@ import { useTabIntent } from "../lib/shell";
 import { useCachedState } from "../lib/cache";
 import { useAutoRefresh } from "../lib/refresh";
 import { useMonacoTheme } from "../lib/theme";
-import { Badge, Button, Drawer, EmptyState, ErrorState, Eyebrow, Field, FOCUS_RING, IconButton, Input, Loading, MenuButton, Modal, Select, ToolbarSep } from "../components/ui";
+import { Badge, Button, Drawer, EmptyState, ErrorState, Eyebrow, Field, FOCUS_RING, IconButton, Input, Loading, MenuButton, Modal, Select, ToolbarSep, useContextMenu, type MenuItem } from "../components/ui";
 import { isReadOnly } from "../lib/sql";
+import { isAuthError } from "./databases/auth";
+import { CreateTableDialog, StructureDrawer, useSchemaApply } from "./databases/Schema";
 import PageLayout from "../components/PageLayout";
 import ServerGate, { ServerContext } from "../components/ServerGate";
 import DataGrid, { type Sort } from "../components/DataGrid";
@@ -27,6 +29,8 @@ import DataGrid, { type Sort } from "../components/DataGrid";
 const SqlEditor = lazy(() => import("../components/SqlEditor"));
 // La console Redis n'est chargée que si l'onglet Redis est ouvert.
 const RedisPanel = lazy(() => import("../components/RedisPanel"));
+const DbAdmin = lazy(() => import("./databases/DbAdmin"));
+const DbLoginDialog = lazy(() => import("./databases/DbLoginDialog"));
 
 const LIMITS = [100, 500, 1000, 5000];
 
@@ -102,7 +106,7 @@ interface TableView {
 function Databases({ serverId }: { serverId: string }) {
   const { notify, ask } = useAppPick("notify", "ask");
   const server = useApp((s) => s.servers.find((x) => x.id === serverId));
-  const [tab, setTab] = useTabIntent<"sql" | "redis">("databases", "sql");
+  const [tab, setTab] = useTabIntent<"sql" | "admin" | "redis">("databases", "sql");
   const [history, setHistory] = useState(() => readHistory(serverId));
   const [editorHeight, startEditorResize] = useEditorHeight();
   const monacoTheme = useMonacoTheme();
@@ -146,6 +150,9 @@ function Databases({ serverId }: { serverId: string }) {
   const [rowDetail, setRowDetail] = useState<{ columns: string[]; values: (string | null)[] } | null>(null);
   /** Incrémenté pour relire bases et tables après une création. */
   const [refreshKey, setRefreshKey] = useState(0);
+  /** La lecture des bases de l'instance a échoué (identifiants refusés, client absent…). */
+  const [dbsFailed, setDbsFailed] = useState(false);
+  const [loginFor, setLoginFor] = useState<DbInstance | null>(null);
   useEffect(() => {
     if (!instanceKey || !instance || versions[instanceKey] !== undefined) return;
     let cancelled = false;
@@ -199,8 +206,15 @@ function Databases({ serverId }: { serverId: string }) {
         setDatabases(list);
         setDatabase((d) => (list.some((x) => x.name === d) ? d : (list.find((x) => !SYSTEM_DBS.includes(x.name))?.name ?? list[0]?.name ?? null)));
       },
-      (e) => !cancelled && setError(errorMessage(e)),
+      (e) => {
+        if (cancelled) return;
+        // Liste vide plutôt que « Lecture des bases… » sans fin ; l'explication s'affiche à droite.
+        setDatabases([]);
+        setDbsFailed(true);
+        setError(errorMessage(e));
+      },
     );
+    setDbsFailed(false);
     return () => {
       cancelled = true;
     };
@@ -305,6 +319,8 @@ function Databases({ serverId }: { serverId: string }) {
         setError(null);
         setResult(await api.dbQuery(serverId, instance, database, q, limit));
       } catch (e) {
+        // Pas de lignes de la table précédente sous l'erreur : elles prêteraient à confusion.
+        setResult(null);
         setError(errorMessage(e));
       } finally {
         setRunning(false);
@@ -400,6 +416,64 @@ function Databases({ serverId }: { serverId: string }) {
     }
   };
 
+  // Structure sans SQL : nouvelle table, structure d'une table, actions sur tables et bases.
+  const [creatingTable, setCreatingTable] = useState(false);
+  const [structureOf, setStructureOf] = useState<string | null>(null);
+  const afterSchema = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const applySchema = useSchemaApply(serverId, instance ?? undefined, database, afterSchema);
+  const schemaMenu = useContextMenu();
+  const tableItems = (t: string): MenuItem[] => [
+    { label: "Ouvrir", icon: <Table2 size={14} />, onClick: () => void openTable(t) },
+    { label: "Structure (colonnes)…", icon: <Columns3 size={14} />, onClick: () => setStructureOf(t) },
+    "separator",
+    {
+      label: "Renommer…",
+      icon: <Pencil size={14} />,
+      onClick: async () => {
+        const to = await ask({ title: `Renommer la table « ${t} »`, input: { label: "Nouveau nom", initial: t }, confirmLabel: "Continuer" });
+        if (typeof to !== "string" || !to.trim() || to.trim() === t) return;
+        if (await applySchema({ op: "renameTable", table: t, to: to.trim() }, `Renommer « ${t} » en « ${to.trim()} » ?`, "Les applications qui utilisent l'ancien nom devront être adaptées.") && view?.table === t) setView(null);
+      },
+    },
+    {
+      label: "Vider (supprimer toutes les lignes)…",
+      icon: <Eraser size={14} />,
+      danger: true,
+      onClick: async () => {
+        if (await applySchema({ op: "truncateTable", table: t }, `Vider la table « ${t} » ?`, "Toutes ses lignes sont supprimées définitivement ; la structure est conservée.") && view?.table === t) await runTable(view);
+      },
+    },
+    {
+      label: "Supprimer la table…",
+      icon: <Trash2 size={14} />,
+      danger: true,
+      onClick: async () => {
+        if (await applySchema({ op: "dropTable", table: t }, `Supprimer la table « ${t} » ?`, "La table et toutes ses données sont supprimées définitivement. Pense à faire une sauvegarde (onglet Administration) avant.") && view?.table === t) {
+          setView(null);
+          setResult(null);
+        }
+      },
+    },
+  ];
+  const databaseItems = (d: string): MenuItem[] => [
+    ...(instance?.engine === "sqlite" ? [] : [{ label: "Nouvelle table…", icon: <Plus size={14} />, onClick: () => { setDatabase(d); setCreatingTable(true); } }]),
+    ...(instance?.engine === "sqlite" || SYSTEM_DBS.includes(d)
+      ? []
+      : [
+          "separator" as const,
+          {
+            label: "Supprimer la base…",
+            icon: <Trash2 size={14} />,
+            danger: true,
+            onClick: async () => {
+              const typed = await ask({ title: `Supprimer la base « ${d} » ?`, body: "Toutes ses tables et données sont supprimées définitivement. Pour confirmer, tape son nom.", input: { label: "Nom de la base" }, confirmLabel: "Continuer", danger: true });
+              if (typed !== d) return;
+              if (await applySchema({ op: "dropDatabase", database: d }, `Dernière confirmation : supprimer « ${d} » ?`, "Il n'y a pas d'annulation.") && database === d) setDatabase(null);
+            },
+          },
+        ]),
+  ];
+
   const shownTables = useMemo(() => (tables ?? []).filter((t) => !filter || t.name.toLowerCase().includes(filter.toLowerCase())), [tables, filter]);
 
   const layout = (children: React.ReactNode) => (
@@ -411,6 +485,7 @@ function Databases({ serverId }: { serverId: string }) {
       scroll={false}
       tabs={[
         { id: "sql", label: "SQL", count: instances?.filter((i) => i.engine !== "sqlite").length || undefined },
+        { id: "admin", label: "Administration" },
         { id: "redis", label: "Redis / Valkey" },
       ]}
       activeTab={tab}
@@ -451,6 +526,15 @@ function Databases({ serverId }: { serverId: string }) {
     return layout(
       <Suspense fallback={<Loading />}>
         <RedisPanel serverId={serverId} />
+      </Suspense>,
+    );
+  }
+
+  if (tab === "admin" && !instances) return layout(<Loading rows={4} />);
+  if (tab === "admin" && instances && instances.length > 0) {
+    return layout(
+      <Suspense fallback={<Loading />}>
+        <DbAdmin serverId={serverId} instances={instances} instanceId={instanceId} onInstance={setInstanceId} databases={databases} />
       </Suspense>,
     );
   }
@@ -510,10 +594,35 @@ function Databases({ serverId }: { serverId: string }) {
                       <span className="block truncate text-[13px] font-medium">{i.label}</span>
                       {v && <span className="block truncate text-[10.5px] text-faint">{v}</span>}
                     </span>
+                    {current && i.engine !== "sqlite" && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title="Identifiants de connexion à cette instance"
+                        className="shrink-0 rounded p-1 text-faint hover:bg-hover-strong hover:text-fg"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLoginFor(i);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.stopPropagation();
+                            setLoginFor(i);
+                          }
+                        }}
+                      >
+                        <KeyRound size={12} />
+                      </span>
+                    )}
                   </button>
                   {current && (
                     <div className="mt-0.5 ml-4 border-l border-border pl-1.5">
                       {databases === null && <p className="px-2 py-1 text-xs text-faint">Lecture des bases…</p>}
+                      {dbsFailed && (
+                        <button type="button" className="flex items-center gap-1.5 px-2 py-1 text-left text-xs text-danger hover:underline" onClick={() => setLoginFor(i)}>
+                          <KeyRound size={12} /> Lecture impossible : identifiants…
+                        </button>
+                      )}
                       {(databases ?? []).map((d) => {
                         const on = d.name === database;
                         return (
@@ -521,6 +630,7 @@ function Databases({ serverId }: { serverId: string }) {
                             <button
                               type="button"
                               onClick={() => setDatabase(d.name)}
+                              onContextMenu={(e) => databaseItems(d.name).length > 0 && schemaMenu.open(e, databaseItems(d.name))}
                               className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px] ${FOCUS_RING} ${on ? "font-medium text-fg" : "text-muted hover:bg-hover hover:text-fg"} ${SYSTEM_DBS.includes(d.name) ? "opacity-70" : ""}`}
                             >
                               <ChevronDown size={12} className={`shrink-0 text-faint transition-transform ${on ? "" : "-rotate-90"}`} />
@@ -533,6 +643,11 @@ function Databases({ serverId }: { serverId: string }) {
                                   <Search size={12} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
                                   <Input size_="sm" className="pl-6" placeholder="Filtrer les tables" value={filter} onChange={(e) => setFilter(e.target.value)} />
                                 </label>
+                                {instance?.engine !== "sqlite" && (
+                                  <button type="button" className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-[3px] text-left text-[12px] text-accent hover:bg-hover ${FOCUS_RING}`} onClick={() => setCreatingTable(true)}>
+                                    <Plus size={12} /> Nouvelle table
+                                  </button>
+                                )}
                                 {tables === null ? (
                                   <p className="px-2 py-1 text-xs text-faint">Lecture des tables…</p>
                                 ) : shownTables.length === 0 ? (
@@ -542,15 +657,28 @@ function Databases({ serverId }: { serverId: string }) {
                                     <button
                                       key={t.name}
                                       type="button"
-                                      className={`flex w-full items-center gap-2 rounded-md px-2 py-[3px] text-left text-[12.5px] ${FOCUS_RING} ${
+                                      className={`group/t flex w-full items-center gap-2 rounded-md px-2 py-[3px] text-left text-[12.5px] ${FOCUS_RING} ${
                                         view?.table === t.name ? "bg-accent/12 text-fg" : "text-fg/85 hover:bg-hover"
                                       }`}
                                       title={`${t.count.toLocaleString("fr-FR")} lignes (estimation) · ${formatBytes(t.size)}`}
                                       onClick={() => void openTable(t.name)}
+                                      onContextMenu={(e) => schemaMenu.open(e, tableItems(t.name))}
                                     >
                                       <Table2 size={12} className="shrink-0 text-faint" />
                                       <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                                      <span className="text-[10.5px] text-faint tabular-nums">{t.count > 0 ? t.count.toLocaleString("fr-FR") : ""}</span>
+                                      <span className="text-[10.5px] text-faint tabular-nums group-hover/t:hidden">{t.count > 0 ? t.count.toLocaleString("fr-FR") : ""}</span>
+                                      <span
+                                        role="button"
+                                        tabIndex={0}
+                                        title="Structure, renommer, vider, supprimer"
+                                        className="hidden shrink-0 rounded px-0.5 text-faint group-hover/t:block hover:text-fg"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          schemaMenu.open(e, tableItems(t.name));
+                                        }}
+                                      >
+                                        <MoreHorizontal size={13} />
+                                      </span>
                                     </button>
                                   ))
                                 )}
@@ -638,7 +766,13 @@ function Databases({ serverId }: { serverId: string }) {
           <div className="min-h-0 flex-1 overflow-auto">
             {error && (
               <div className="m-4">
-                <ErrorState message={<pre className="font-mono text-xs whitespace-pre-wrap">{error}</pre>} />
+                <ErrorState message={<pre className="font-mono text-xs whitespace-pre-wrap">{error}</pre>}>
+                  {instance && instance.engine !== "sqlite" && isAuthError(error) && (
+                    <Button size="sm" variant="outline" className="shrink-0" icon={<KeyRound size={13} />} onClick={() => setLoginFor(instance)}>
+                      Renseigner les identifiants
+                    </Button>
+                  )}
+                </ErrorState>
               </div>
             )}
             {!result && !error && !running && (
@@ -675,6 +809,34 @@ function Databases({ serverId }: { serverId: string }) {
         </div>
       </div>
 
+      {schemaMenu.menu}
+      {creatingTable && instance && database && <CreateTableDialog instance={instance} database={database} apply={applySchema} onClose={() => setCreatingTable(false)} />}
+      {structureOf && instance && (
+        <StructureDrawer
+          serverId={serverId}
+          instance={instance}
+          database={database}
+          table={structureOf}
+          apply={applySchema}
+          onClose={() => {
+            setStructureOf(null);
+            if (view?.table === structureOf) void openTable(structureOf);
+          }}
+        />
+      )}
+      {loginFor && (
+        <Suspense fallback={null}>
+          <DbLoginDialog
+            serverId={serverId}
+            instance={loginFor}
+            onClose={() => setLoginFor(null)}
+            onSaved={() => {
+              setError(null);
+              setRefreshKey((k) => k + 1);
+            }}
+          />
+        </Suspense>
+      )}
       {rowDetail && (
         <Drawer title="Fiche de la ligne" subtitle={view ? `Table ${view.table}` : "Résultat de requête"} width={560} modal={false} onClose={() => setRowDetail(null)}>
           <dl className="flex flex-col divide-y divide-line rounded-xl border border-border">
