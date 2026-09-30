@@ -113,7 +113,7 @@ export default function SqlEditor({
       language="sql"
       theme={theme}
       options={{
-        fontSize: 13,
+        automaticLayout: true, fontSize: 13,
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         lineNumbers: "off",

@@ -25,8 +25,8 @@ const QUALITES = [
 ] as const;
 type QualiteId = (typeof QUALITES)[number]["id"];
 
-export default function VncSession() {
-  const { desktop, vnc, state, setState, close } = useRdp();
+export default function VncSession({ hidden = false }: { hidden?: boolean }) {
+  const { desktop, vnc, vm, state, setState, close } = useRdp();
   const hote = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const [plein, setPlein] = useState(false);
@@ -107,9 +107,24 @@ export default function VncSession() {
         /* déjà fermée */
       }
       rfbRef.current = null;
-      conteneur.replaceChildren();
+      try {
+        conteneur.replaceChildren();
+      } catch {
+        /* conteneur déjà retiré */
+      }
     };
   }, [vnc, setState]);
+
+  // Écran masqué (l'utilisateur est passé à une autre section) : le clavier ne part plus vers la VM.
+  useEffect(() => {
+    if (!hidden) return;
+    try {
+      rfbRef.current?.blur();
+    } catch {
+      /* session déjà fermée */
+    }
+    setPlein(false);
+  }, [hidden]);
 
   // Échap quitte le plein écran ; le reste du clavier appartient à la machine distante.
   useEffect(() => {
@@ -213,7 +228,13 @@ export default function VncSession() {
             {(state.kind === "erreur" || state.kind === "ferme") && (
               <>
                 <p className={`max-w-xl text-sm leading-relaxed ${state.kind === "erreur" ? "text-danger" : "text-muted"}`}>{state.message}</p>
-                {state.kind === "erreur" && (
+                {state.kind === "erreur" && vm && (
+                  <p className="max-w-xl text-xs leading-relaxed text-muted">
+                    Vérifie que la VM tourne toujours et que son écran est en VNC (virsh dumpxml, balise &lt;graphics type=&apos;vnc&apos;&gt;). Si rien ne s&apos;affiche, la console série reste
+                    disponible depuis la liste des machines virtuelles.
+                  </p>
+                )}
+                {state.kind === "erreur" && !vm && (
                   <p className="max-w-xl text-xs leading-relaxed text-muted">
                     Vérifie qu'un serveur VNC tourne sur la machine (x11vnc, TigerVNC, wayvnc, Partage d'écran de macOS…), qu'il écoute sur le port{" "}
                     {desktop.port} et — si tu passes par un serveur — que celui-ci joint bien {desktop.host}:{desktop.port}.

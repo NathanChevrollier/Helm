@@ -19,7 +19,7 @@ export interface DialogRequest {
 
 export interface Toast {
   id: number;
-  kind: "info" | "error" | "success";
+  kind: "info" | "warn" | "error" | "success";
   message: string;
 }
 
@@ -92,6 +92,8 @@ export interface Settings {
   closeAction: CloseAction;
   /** Avant de quitter, avertir s'il reste des tunnels, transferts ou terminaux ouverts. */
   confirmQuit: boolean;
+  /** Onglets masqués dans la barre latérale (toujours joignables par la palette). */
+  hiddenSections?: SectionId[];
 }
 
 export type CloseAction = "ask" | "tray" | "quit";
@@ -291,7 +293,7 @@ export const useApp = create<State>((set, get) => ({
       notifications: [{ id, kind, message, at: Date.now(), serverId: s.activeServerId }, ...s.notifications].slice(0, MAX_NOTIFICATIONS),
       unreadNotifications: s.unreadNotifications + 1,
     }));
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" ? 8000 : 4000);
+    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === "error" || kind === "warn" ? 8000 : 4000);
   },
 
   settings: { persistentSessions: true, tmuxDeclined: {}, lockMinutes: 0, terminalFontSize: 14, alertNotifications: true, theme: "dark", terminalRightClick: "menu", terminalStatusBar: true, autoRefreshSecs: 15, showHiddenFiles: false, closeAction: "ask", confirmQuit: true },

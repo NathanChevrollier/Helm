@@ -190,6 +190,7 @@ export function DialogHost() {
 
 const TOAST_ICONS = {
   info: <Info size={16} className="text-accent" />,
+  warn: <TriangleAlert size={16} className="text-warn" />,
   error: <CircleAlert size={16} className="text-danger" />,
   success: <CircleCheck size={16} className="text-ok" />,
 };

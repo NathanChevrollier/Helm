@@ -265,7 +265,7 @@ export default function FileEditor({ serverId, path, line, onClose }: { serverId
                 language={languageFor(path)}
                 theme={monacoTheme}
                 onMount={onViewMount}
-                options={{ readOnly: true, fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace' }}
+                options={{ automaticLayout: true, readOnly: true, fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace' }}
               />
             </div>
           </div>
@@ -281,7 +281,7 @@ export default function FileEditor({ serverId, path, line, onClose }: { serverId
                 modified={diffText}
                 language={languageFor(path)}
                 theme={monacoTheme}
-                options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: 13 }}
+                options={{ automaticLayout: true, readOnly: true, renderSideBySide: true, minimap: { enabled: false }, fontSize: 13 }}
               />
             )}
             {/* Éditeur non contrôlé et gardé monté pendant l'aperçu : le texte n'est copié qu'à
@@ -292,7 +292,7 @@ export default function FileEditor({ serverId, path, line, onClose }: { serverId
                 language={languageFor(path)}
                 theme={monacoTheme}
                 onMount={onMount}
-                options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace' }}
+                options={{ automaticLayout: true, fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace' }}
               />
             </div>
           </>

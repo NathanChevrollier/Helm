@@ -25,6 +25,18 @@ interface ShellState {
   requestNewServer: (v: boolean) => void;
   /** Onglet à ouvrir à l'arrivée sur une section (lien « Installer l'agent » → onglet Agent…). */
   intent: { section: SectionId; tab: string } | null;
+  /** Tiroir « Machines » à droite (retenu d'une session à l'autre). */
+  machinesOpen: boolean;
+  setMachinesOpen: (v: boolean) => void;
+}
+
+const MACHINES_KEY = "zenytt.machines";
+function readMachinesOpen(): boolean {
+  try {
+    return localStorage.getItem(MACHINES_KEY) === "open";
+  } catch {
+    return false;
+  }
 }
 
 export const useShell = create<ShellState>((set) => ({
@@ -43,6 +55,15 @@ export const useShell = create<ShellState>((set) => ({
   newServerRequested: false,
   requestNewServer: (newServerRequested) => set({ newServerRequested }),
   intent: null,
+  machinesOpen: readMachinesOpen(),
+  setMachinesOpen: (machinesOpen) => {
+    try {
+      localStorage.setItem(MACHINES_KEY, machinesOpen ? "open" : "closed");
+    } catch {
+      /* préférence non retenue */
+    }
+    set({ machinesOpen });
+  },
 }));
 
 /** Va à une section, en ouvrant directement l'un de ses onglets. */

@@ -100,6 +100,35 @@ pub struct OccasionalContainer {
     pub key: String,
 }
 
+/// Réglage d'un point de montage pour la supervision : ignoré dans les alertes, ou taille réelle
+/// saisie à la main (hébergement mutualisé : `df` voit un système de fichiers qui n'est pas le
+/// vrai espace de l'abonnement).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskRule {
+    pub server_id: String,
+    pub mount: String,
+    /// Ne compte pas dans l'alerte « Disque » ni dans les jauges.
+    #[serde(default)]
+    pub ignore: bool,
+    /// Capacité réelle (octets), à la place de celle lue par `df`.
+    #[serde(default)]
+    pub total: Option<u64>,
+    /// Espace réellement utilisé (octets), à la place de celui lu par `df`.
+    #[serde(default)]
+    pub used: Option<u64>,
+}
+
+/// Étiquette posée sur une adresse IP (fail2ban) : « mon bureau », « scanner connu »…
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpLabel {
+    pub ip: String,
+    pub label: String,
+    #[serde(default)]
+    pub note: String,
+}
+
 /// Réseau privé WireGuard entre serveurs (section Réseau privé). Propre à ce PC : la vérité est
 /// sur les serveurs (`/etc/wireguard/zenytt.conf`), ceci sert à les orchestrer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -305,6 +334,16 @@ pub struct Data {
     pub ignored_findings: Vec<IgnoredFinding>,
     #[serde(default)]
     pub occasional_containers: Vec<OccasionalContainer>,
+    /// Conteneurs arrêtés volontairement (depuis Zenytt, ou marqués comme tels) : leur arrêt n'est
+    /// pas une panne. Retirés dès que le conteneur est relancé.
+    #[serde(default)]
+    pub stopped_on_purpose: Vec<OccasionalContainer>,
+    /// Réglages des points de montage (supervision).
+    #[serde(default)]
+    pub disk_rules: Vec<DiskRule>,
+    /// Étiquettes des adresses IP (fail2ban), communes à tous les serveurs.
+    #[serde(default)]
+    pub ip_labels: Vec<IpLabel>,
     /// Réseaux privés entre serveurs.
     #[serde(default)]
     pub meshes: Vec<MeshNetwork>,

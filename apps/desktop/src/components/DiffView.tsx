@@ -22,7 +22,7 @@ export default function DiffView({
       modified={modified}
       language={language}
       theme={theme}
-      options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12 }}
+      options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, fontSize: 12 }}
     />
   );
 }

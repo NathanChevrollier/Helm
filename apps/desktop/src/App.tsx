@@ -7,6 +7,7 @@ import type { SectionId } from "./sections";
 import { DialogHost, EmptyState, Toasts } from "./components/ui";
 import LockScreen from "./components/LockScreen";
 import ConnectionDoctor from "./components/ConnectionDoctor";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./components/shell/Sidebar";
 import Topbar from "./components/shell/Topbar";
 import StatusBar from "./components/shell/StatusBar";
@@ -27,6 +28,7 @@ import { usePolling } from "./lib/poll";
 // Fenêtres et panneaux ouverts à la demande : chargés à leur première ouverture, pas au démarrage.
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
 const AssistantPanel = lazy(() => import("./components/AssistantPanel"));
+const MachinesDrawer = lazy(() => import("./components/shell/MachinesDrawer"));
 const GuideDialog = lazy(() => import("./components/GuideDialog"));
 const ShortcutsHelp = lazy(() => import("./components/shell/ShortcutsHelp"));
 const HomeView = lazy(() => import("./views/Home"));
@@ -72,6 +74,15 @@ export default function App() {
   const shortcutsOpen = useShell((s) => s.shortcutsOpen);
   const rdpOuvert = useRdp((s) => s.desktop !== null);
   const rdpVnc = useRdp((s) => s.desktop?.protocol === "vnc");
+  const rdpId = useRdp((s) => s.desktop?.id);
+  // L'écran distant ne recouvre que la section d'où il a été ouvert : les autres restent accessibles.
+  const rdpShown = useRdp((s) => s.origin === null || s.origin === section);
+  useEffect(() => {
+    // Session en échec ou terminée, et l'utilisateur est passé ailleurs : on la referme pour de bon.
+    const { desktop, state, close } = useRdp.getState();
+    if (desktop && !rdpShown && (state.kind === "erreur" || state.kind === "ferme")) close();
+  }, [rdpShown]);
+  const goHome = () => useApp.getState().setSection("home");
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => setVersion(undefined));
@@ -152,6 +163,7 @@ export default function App() {
   usePolling(() => (activeServerId ? fetchHealth(activeServerId, 30_000) : undefined), 60_000, [activeServerId], activeConnected);
 
   const assistantOpen = useAssistant((s) => s.open);
+  const machinesOpen = useShell((s) => s.machinesOpen);
   const themeSetting = useApp((s) => s.settings.theme);
   useEffect(() => applyTheme(themeSetting), [themeSetting]);
 
@@ -180,6 +192,9 @@ export default function App() {
       } else if (matches(e, "shortcutsHelp")) {
         e.preventDefault();
         shell.setShortcutsOpen(!shell.shortcutsOpen);
+      } else if (matches(e, "machines")) {
+        e.preventDefault();
+        shell.setMachinesOpen(!shell.machinesOpen);
       } else if (matches(e, "assistant")) {
         e.preventDefault();
         const assistant = useAssistant.getState();
@@ -206,37 +221,56 @@ export default function App() {
                 {/* Le terminal reste monté pour ne pas couper les sessions quand on change de section. */}
                 {terminalMounted && (
                   <div className={`absolute inset-0 ${section === "terminal" ? "" : "invisible"}`}>
-                    <Suspense fallback={null}>
-                      <TerminalView visible={section === "terminal"} />
-                    </Suspense>
+                    <ErrorBoundary label="le terminal" onClose={goHome}>
+                      <Suspense fallback={null}>
+                        <TerminalView visible={section === "terminal"} />
+                      </Suspense>
+                    </ErrorBoundary>
                   </div>
                 )}
                 {section === "home" && (
                   <div className="absolute inset-0 bg-bg">
-                    <Suspense fallback={null}>
-                      <HomeView visible />
-                    </Suspense>
+                    <ErrorBoundary label="l'accueil">
+                      <Suspense fallback={null}>
+                        <HomeView visible />
+                      </Suspense>
+                    </ErrorBoundary>
                   </div>
                 )}
                 {View && (
                   <div className="absolute inset-0 bg-bg">
-                    <Suspense fallback={<EmptyState icon={<ShipWheel className="animate-spin" />} title="Chargement…" />}>
-                      <View />
-                    </Suspense>
+                    {/* Une page qui plante reste confinée à sa zone ; changer de section repart de zéro. */}
+                    <ErrorBoundary resetKey={section} label="cette page" onClose={goHome}>
+                      <Suspense fallback={<EmptyState icon={<ShipWheel className="animate-spin" />} title="Chargement…" />}>
+                        <View />
+                      </Suspense>
+                    </ErrorBoundary>
                   </div>
                 )}
               </>
             )}
           </div>
+          {machinesOpen && (
+            <ErrorBoundary label="le tiroir des machines" compact onClose={() => useShell.getState().setMachinesOpen(false)} closeLabel="Fermer le tiroir">
+              <Suspense fallback={null}>
+                <MachinesDrawer />
+              </Suspense>
+            </ErrorBoundary>
+          )}
           {assistantOpen && (
-            <Suspense fallback={null}>
-              <AssistantPanel />
-            </Suspense>
+            <ErrorBoundary label="l'assistant" compact onClose={() => useAssistant.getState().setOpen(false)} closeLabel="Fermer l'assistant">
+              <Suspense fallback={null}>
+                <AssistantPanel />
+              </Suspense>
+            </ErrorBoundary>
           )}
           {rdpOuvert && (
-            <Suspense fallback={null}>
-              {rdpVnc ? <VncSession /> : <RemoteDesktopSession />}
-            </Suspense>
+            // Masqué (mais toujours connecté) quand on navigue ailleurs ; « invisible » coupe aussi la souris.
+            <div className={`absolute inset-0 z-20 ${rdpShown ? "" : "invisible"}`} aria-hidden={!rdpShown}>
+              <ErrorBoundary resetKey={rdpId} label="l'écran distant" onClose={() => useRdp.getState().close()} closeLabel="Fermer l'écran">
+                <Suspense fallback={null}>{rdpVnc ? <VncSession hidden={!rdpShown} /> : <RemoteDesktopSession hidden={!rdpShown} />}</Suspense>
+              </ErrorBoundary>
+            </div>
           )}
         </main>
         <StatusBar />

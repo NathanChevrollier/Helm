@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import { api, type DesktopView, type RdpSessionInfo, type VncSessionInfo } from "./api";
 import { useApp } from "./store";
+import type { SectionId } from "../sections";
 
 /** VM dont l'écran est affiché (le bureau affiché porte alors l'identifiant `vm-<uuid>`). */
 export interface VmTarget {
@@ -25,6 +26,8 @@ interface RdpStore {
   vnc: VncSessionInfo | null;
   state: RdpState;
   vm: VmTarget | null;
+  /** Section d'où la session a été ouverte : l'écran ne recouvre qu'elle, les autres restent accessibles. */
+  origin: SectionId | null;
   open: (desktop: DesktopView) => Promise<void>;
   /** Écran d'une VM : même client VNC, fermé comme un bureau (clé `vm-<uuid>`). */
   openVm: (serverId: string, vm: { uuid: string; name: string }) => Promise<void>;
@@ -38,6 +41,7 @@ export const useRdp = create<RdpStore>((set, get) => ({
   vnc: null,
   state: { kind: "ouverture" },
   vm: null,
+  origin: null,
 
   open: async (desktop) => {
     // « Réessayer » sur l'écran d'une VM : on rouvre la VM, pas un bureau enregistré.
@@ -46,7 +50,7 @@ export const useRdp = create<RdpStore>((set, get) => ({
     // Une seule session à la fois : la précédente est refermée proprement (pont et tunnel).
     const ouvert = get().desktop;
     if (ouvert) await api.desktopSessionClose(ouvert.id).catch(() => {});
-    set({ desktop, session: null, vnc: null, vm: null, state: { kind: "ouverture" } });
+    set({ desktop, session: null, vnc: null, vm: null, origin: useApp.getState().section, state: { kind: "ouverture" } });
     try {
       if (desktop.protocol === "vnc") {
         set({ vnc: await api.vncSessionOpen(desktop.id), state: { kind: "connexion" } });
@@ -77,15 +81,15 @@ export const useRdp = create<RdpStore>((set, get) => ({
       redirectDrives: false,
       hasPassword: false,
     };
-    set({ desktop, session: null, vnc: null, vm: { serverId, uuid: vm.uuid, name: vm.name }, state: { kind: "ouverture" } });
+    set({ desktop, session: null, vnc: null, vm: { serverId, uuid: vm.uuid, name: vm.name }, origin: useApp.getState().section, state: { kind: "ouverture" } });
     try {
       const { session, warning } = await api.vmConsoleOpen(serverId, vm.uuid, vm.name);
-      if (warning) useApp.getState().notify(warning, "error");
+      if (warning) useApp.getState().notify(warning, "warn");
       set({ vnc: session, state: { kind: "connexion" } });
     } catch (e) {
       // VM sans écran VNC (SPICE, aucun, éteinte) : l'écran se referme et l'explication, qui
       // propose la console série, s'affiche seule. Les conseils d'un bureau VNC n'ont pas de sens ici.
-      set({ desktop: null, session: null, vnc: null, vm: null, state: { kind: "ouverture" } });
+      set({ desktop: null, session: null, vnc: null, vm: null, origin: null, state: { kind: "ouverture" } });
       useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
     }
   },
@@ -95,6 +99,6 @@ export const useRdp = create<RdpStore>((set, get) => ({
   close: () => {
     const ouvert = get().desktop;
     if (ouvert) void api.desktopSessionClose(ouvert.id).catch(() => {});
-    set({ desktop: null, session: null, vnc: null, vm: null, state: { kind: "ouverture" } });
+    set({ desktop: null, session: null, vnc: null, vm: null, origin: null, state: { kind: "ouverture" } });
   },
 }));

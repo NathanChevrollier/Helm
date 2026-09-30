@@ -145,7 +145,7 @@ export default function NewComposeProject({
                 }}
                 language="yaml"
                 theme={monacoTheme}
-                options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false }}
+                options={{ automaticLayout: true, fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false }}
               />
             </Suspense>
           </div>

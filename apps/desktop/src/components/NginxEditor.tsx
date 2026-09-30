@@ -130,14 +130,14 @@ export default function NginxEditor({
           ) : original === null ? (
             <p className="text-sm text-muted">Chargement…</p>
           ) : view === "diff" ? (
-            <DiffEditor keepCurrentOriginalModel keepCurrentModifiedModel original={original} modified={value} language={language} theme={monacoTheme} options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13 }} />
+            <DiffEditor keepCurrentOriginalModel keepCurrentModifiedModel original={original} modified={value} language={language} theme={monacoTheme} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, fontSize: 13 }} />
           ) : (
             <Editor
               value={value}
               onChange={(v) => setValue(v ?? "")}
               language={language}
               theme={monacoTheme}
-              options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false }}
+              options={{ automaticLayout: true, fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false }}
             />
           )}
         </div>

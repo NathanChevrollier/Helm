@@ -1,7 +1,7 @@
 // Barre du haut : où l'on est (fil d'Ariane), la barre de commande, et les outils globaux
 // (actualiser, notifications, assistant).
 import { useEffect, useRef, useState } from "react";
-import { Bell, CheckCheck, CircleAlert, CircleCheck, Info, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
+import { Bell, CheckCheck, CircleAlert, CircleCheck, Info, PanelRight, RefreshCw, Search, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { useApp, type NotificationEntry } from "../../lib/store";
 import { useShell } from "../../lib/shell";
 import { refreshAll, useRefresh } from "../../lib/refresh";
@@ -57,6 +57,7 @@ export default function Topbar() {
       <div className="flex min-w-fit flex-1 basis-0 items-center justify-end gap-1">
         <RefreshButton />
         <NotificationsButton />
+        <MachinesButton />
         <AssistantButton />
       </div>
     </header>
@@ -80,6 +81,16 @@ function RefreshButton() {
   );
 }
 
+/** Tiroir des machines : prendre la main sur un serveur, une VM ou un bureau distant. */
+function MachinesButton() {
+  const open = useShell((s) => s.machinesOpen);
+  return (
+    <IconButton title={`Machines : changer de machine (${display(shortcutOf("machines"))})`} aria-pressed={open} className={open ? "text-accent" : ""} onClick={() => useShell.getState().setMachinesOpen(!open)}>
+      <PanelRight size={16} />
+    </IconButton>
+  );
+}
+
 function AssistantButton() {
   const open = useAssistant((s) => s.open);
   return (
@@ -98,6 +109,7 @@ function AssistantButton() {
 
 const ICONS = {
   info: <Info size={15} className="text-accent" />,
+  warn: <TriangleAlert size={15} className="text-warn" />,
   error: <CircleAlert size={15} className="text-danger" />,
   success: <CircleCheck size={15} className="text-ok" />,
 };

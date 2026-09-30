@@ -82,7 +82,7 @@ async function enregistrer(dossier: string, nom: string, blob: Blob): Promise<st
   });
 }
 
-export default function RemoteDesktopSession() {
+export default function RemoteDesktopSession({ hidden = false }: { hidden?: boolean }) {
   const { desktop, session, state, setState, close } = useRdp();
   const hote = useRef<HTMLDivElement>(null);
   const uiRef = useRef<UserInteraction | null>(null);
@@ -183,13 +183,23 @@ export default function RemoteDesktopSession() {
 
     return () => {
       annule = true;
-      transfertRef.current?.dispose();
+      // Fermeture : le client WebAssembly peut lever une erreur s'il est déjà arrêté (session
+      // coupée, erreur de connexion). Elle ne doit jamais remonter jusqu'à React, qui démonterait
+      // alors toute l'interface au lieu de refermer l'écran.
+      const sansErreur = (f: () => void) => {
+        try {
+          f();
+        } catch (e) {
+          console.warn("[RDP] fermeture", e);
+        }
+      };
+      sansErreur(() => transfertRef.current?.dispose());
       transfertRef.current = null;
       setFichiersDistants(null);
       setProgression(null);
-      uiRef.current?.shutdown?.();
+      sansErreur(() => void Promise.resolve(uiRef.current?.shutdown?.()).catch((e) => console.warn("[RDP] fermeture", e)));
       uiRef.current = null;
-      conteneur.replaceChildren();
+      sansErreur(() => conteneur.replaceChildren());
     };
   }, [session, setState]);
 
@@ -283,6 +293,15 @@ export default function RemoteDesktopSession() {
       observer.disconnect();
     };
   }, [state.kind]);
+
+  // Écran masqué (l'utilisateur est passé à une autre section) : le clavier ne doit plus partir vers
+  // la machine distante.
+  useEffect(() => {
+    if (!hidden) return;
+    const actif = document.activeElement;
+    if (actif instanceof HTMLElement && hote.current?.parentElement?.contains(actif)) actif.blur();
+    setPlein(false);
+  }, [hidden]);
 
   // Échap quitte le plein écran ; le reste du clavier appartient à la machine distante.
   useEffect(() => {

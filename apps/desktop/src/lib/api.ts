@@ -99,7 +99,7 @@ export interface VmOverview {
   vms: Vm[];
 }
 
-export type VmGraphics = { kind: "vnc"; port: number | null; listen: string; public: boolean; password: boolean } | { kind: "spice" } | { kind: "none" };
+export type VmGraphics = { kind: "vnc"; port: number | null; listen: string; public: boolean; password: boolean } | { kind: "vncSocket" } | { kind: "spice" } | { kind: "none" };
 
 export interface VmDetail {
   /** `shared` : en lecture seule ou partagé avec d'autres VM, jamais supprimé avec la VM. */
@@ -230,6 +230,41 @@ export interface F2bJail {
   findtime: number;
   maxretry: number;
   ignoreip: string[];
+}
+
+/** Durée d'un bannissement manuel : celle du jail, ou une jail Zenytt (7 j, 30 j, définitif). */
+export type BanDuration = "jail" | "week" | "month" | "forever";
+
+/** Jails créées par Zenytt pour les bannissements manuels. */
+export const MANUAL_JAILS: Record<string, string> = { "zenytt-7j": "Bannissement manuel · 7 jours", "zenytt-30j": "Bannissement manuel · 30 jours", "zenytt-definitif": "Bannissement manuel · définitif" };
+
+/** Événement du journal de fail2ban. */
+export interface F2bEvent {
+  /** Heure du serveur, « 2026-09-30 14:02:11 ». */
+  time: string;
+  jail: string;
+  kind: "found" | "ban" | "unban" | "restore" | "ignore";
+  ip: string;
+}
+
+export interface IpLabel {
+  ip: string;
+  label: string;
+  note: string;
+}
+
+export interface GeoStatus {
+  installed: boolean;
+  updatedAt: number | null;
+  stale: boolean;
+}
+
+export interface GeoInfo {
+  countryCode: string | null;
+  country: string | null;
+  asn: number | null;
+  /** Opérateur du réseau (hébergeur, FAI…). */
+  org: string | null;
 }
 
 export interface F2bState {
@@ -369,6 +404,30 @@ export interface Disk {
   device: string;
   total: number;
   used: number;
+  /** Lecture seule (ou image figée) : pleine par nature, hors alerte. */
+  readOnly?: boolean;
+  /** Écarté par l'utilisateur : affiché, sans alerte. */
+  ignored?: boolean;
+}
+
+/** Compte dans l'alerte « Disque » et la jauge principale. */
+export const diskCounts = (d: Disk) => !d.readOnly && !d.ignored;
+
+/** Disque à montrer en jauge principale : `/` s'il compte, sinon le plus gros qui compte. */
+export function mainDisk(disks: Disk[] | undefined): Disk | undefined {
+  if (!disks?.length) return undefined;
+  const counting = disks.filter(diskCounts);
+  return counting.find((d) => d.mount === "/") ?? [...counting].sort((a, b) => b.total - a.total)[0] ?? disks.find((d) => d.mount === "/") ?? disks[0];
+}
+
+/** Réglage d'un point de montage (supervision). */
+export interface DiskRule {
+  serverId: string;
+  mount: string;
+  ignore: boolean;
+  /** Octets ; null : valeur lue par df. */
+  total: number | null;
+  used: number | null;
 }
 
 export interface Metrics {
@@ -481,7 +540,16 @@ export interface Container {
   createdAt: string;
   composeProject: string | null;
   composeService: string | null;
+  exitCode: number | null;
+  health: string | null;
+  oomKilled: boolean;
+  condition: ContainerCondition;
 }
+
+/** Pourquoi un conteneur n'est pas (ou pas bien) en marche. */
+export type ContainerCondition = "ok" | "unhealthy" | "crashLoop" | "crashed" | "outOfMemory" | "stopped" | "finished" | "created" | "paused";
+
+export const isFailure = (c: ContainerCondition) => c === "unhealthy" || c === "crashLoop" || c === "crashed" || c === "outOfMemory";
 
 export interface ComposeProject {
   name: string;
@@ -518,6 +586,8 @@ export interface DockerOverview {
   projects: ComposeProject[];
   /** Conteneurs ponctuels du serveur (clés `projet/service` ou nom) : leur arrêt n'est pas signalé. */
   occasional: string[];
+  /** Conteneurs arrêtés volontairement (depuis Zenytt, ou marqués) : leur arrêt n'est pas une panne. */
+  onPurpose: string[];
 }
 
 /** Membre d'un réseau privé WireGuard. */
@@ -811,8 +881,13 @@ export interface DashboardSummary {
   alerts: ActiveAlert[];
   docker: boolean;
   containersRunning: number;
+  /** Arrêtés sans erreur, ni ponctuels ni arrêtés volontairement. */
   containersStopped: number;
   stoppedNames: string[];
+  /** Clés (`projet/service` ou nom) de tous les conteneurs arrêtés ci-dessus. */
+  stoppedKeys: string[];
+  /** En panne : planté, manque de mémoire, redémarrage en boucle, healthcheck en échec. */
+  failed: { name: string; condition: ContainerCondition; status: string }[];
   certificates: { domains: string[]; notAfter: number }[];
 }
 
@@ -906,6 +981,39 @@ export interface DbNamed {
   name: string;
   size: number;
   count: number;
+}
+
+/** Colonne décrite dans l'éditeur de structure. */
+export interface DbColumnDef {
+  name: string;
+  dataType: string;
+  /** « 255 », « 10,2 », ou vide. */
+  length: string;
+  nullable: boolean;
+  /** Vide : aucune ; nombre ou mot-clé (CURRENT_TIMESTAMP, NULL…) tel quel, sinon texte. */
+  default: string;
+  primary: boolean;
+  autoIncrement: boolean;
+}
+
+/** Opération de structure : le SQL est construit côté Rust, montré, puis exécuté. */
+export type DbSchemaOp =
+  | { op: "createTable"; table: string; columns: DbColumnDef[] }
+  | { op: "dropTable"; table: string }
+  | { op: "truncateTable"; table: string }
+  | { op: "renameTable"; table: string; to: string }
+  | { op: "addColumn"; table: string; column: DbColumnDef }
+  | { op: "dropColumn"; table: string; column: string }
+  | { op: "renameColumn"; table: string; column: string; to: string }
+  | { op: "dropDatabase"; database: string };
+
+/** Sauvegarde SQL d'une base, dans ~/zenytt-sauvegardes-bdd sur le serveur. */
+export interface DbBackupFile {
+  name: string;
+  path: string;
+  size: number;
+  /** Secondes Unix. */
+  modified: number;
 }
 
 export interface DbQueryResult {
@@ -1142,6 +1250,15 @@ export const api = {
   f2bState: (serverId: string) => invoke<F2bState>("f2b_state", { serverId }),
   f2bUnban: (serverId: string, jail: string, ip: string) => invoke<void>("f2b_unban", { serverId, jail, ip }),
   f2bSetIgnore: (serverId: string, addresses: string[]) => invoke<string>("f2b_set_ignore", { serverId, addresses }),
+  f2bBan: (serverId: string, jail: string, ip: string, duration: BanDuration) => invoke<void>("f2b_ban", { serverId, jail, ip, duration }),
+  f2bEvents: (serverId: string, ip: string | null, limit = 500) => invoke<F2bEvent[]>("f2b_events", { serverId, ip, limit }),
+  f2bAttempts: (serverId: string, ip: string) => invoke<string[]>("f2b_attempts", { serverId, ip }),
+  ipLabels: () => invoke<IpLabel[]>("ip_labels_list"),
+  /** Étiquette et note vides : l'étiquette est retirée. */
+  ipLabelSet: (ip: string, label: string, note: string) => invoke<void>("ip_label_set", { ip, label, note }),
+  geoStatus: () => invoke<GeoStatus>("geo_status"),
+  geoInstall: () => invoke<GeoStatus>("geo_install"),
+  geoLookup: (ips: string[]) => invoke<Record<string, GeoInfo>>("geo_lookup", { ips }),
   myPublicIp: () => invoke<string | null>("my_public_ip"),
   fwState: (serverId: string) => invoke<FwState>("fw_state", { serverId }),
   fwAllow: (serverId: string, port: number, proto: string) => invoke<string>("fw_allow", { serverId, port, proto }),
@@ -1204,6 +1321,8 @@ export const api = {
   vmDelete: (serverId: string, vm: Vm, withStorage: boolean) => invoke<string[]>("vm_delete", { serverId, uuid: vm.uuid, name: vm.name, withStorage }),
   vmConsoleOpen: (serverId: string, uuid: string, name: string) => invoke<VmConsole>("vm_console_open", { serverId, uuid, name }),
   vmSerialCommand: (serverId: string, uuid: string) => invoke<string>("vm_serial_command", { serverId, uuid }),
+  /** Écran VNC limité à 127.0.0.1, au prochain démarrage de la VM. */
+  vmVncRestrict: (serverId: string, vm: Vm) => invoke<void>("vm_vnc_restrict", { serverId, uuid: vm.uuid, name: vm.name }),
   /** `password` : `undefined` = inchangé, `""` = supprimé. */
   desktopSave: (desktop: RemoteDesktop, password?: string) => invoke<string>("desktop_save", { desktop, password }),
   desktopDelete: (id: string) => invoke<void>("desktop_delete", { id }),
@@ -1225,6 +1344,25 @@ export const api = {
     invoke<string>("db_update_cell_sql", { engine, table, column, value, key }),
   dbDeleteRowSql: (engine: DbEngine, table: string, key: DbKeyPart[]) => invoke<string>("db_delete_row_sql", { engine, table, key }),
   dbInsertRowSql: (engine: DbEngine, table: string, values: [string, string | null][]) => invoke<string>("db_insert_row_sql", { engine, table, values }),
+  dbSchemaSql: (engine: DbEngine, op: DbSchemaOp) => invoke<string>("db_schema_sql", { engine, op }),
+  dbColumnTypes: (engine: DbEngine) => invoke<string[]>("db_column_types", { engine }),
+  /** Utilisateur enregistré pour l'instance (jamais le mot de passe), ou null. */
+  dbLoginGet: (serverId: string, instanceId: string) => invoke<string | null>("db_login_get", { serverId, instanceId }),
+  /** Utilisateur vide : oublie le compte. */
+  dbLoginSet: (serverId: string, instanceId: string, user: string, password: string) => invoke<void>("db_login_set", { serverId, instanceId, user, password }),
+  dbBackups: (serverId: string) => invoke<DbBackupFile[]>("db_backups", { serverId }),
+  dbImportDir: (serverId: string) => invoke<string>("db_import_dir", { serverId }),
+  dbBackup: (serverId: string, instance: DbInstance, database: string, stamp: string) => invoke<DbBackupFile>("db_backup", { serverId, instance, database, stamp }),
+  /** Renvoie les avertissements du client (vide si tout s'est bien passé). */
+  dbRestore: (serverId: string, instance: DbInstance, database: string, file: string) => invoke<string>("db_restore", { serverId, instance, database, file }),
+  dbBackupDelete: (serverId: string, file: string) => invoke<void>("db_backup_delete", { serverId, file }),
+  dbUsers: (serverId: string, instance: DbInstance) => invoke<DbQueryResult>("db_users", { serverId, instance }),
+  dbUserCreate: (serverId: string, instance: DbInstance, user: string, host: string, password: string, database: string | null) =>
+    invoke<void>("db_user_create", { serverId, instance, user, host, password, database }),
+  dbUserPassword: (serverId: string, instance: DbInstance, user: string, host: string, password: string) => invoke<void>("db_user_password", { serverId, instance, user, host, password }),
+  dbUserDrop: (serverId: string, instance: DbInstance, user: string, host: string) => invoke<void>("db_user_drop", { serverId, instance, user, host }),
+  dbActivity: (serverId: string, instance: DbInstance) => invoke<DbQueryResult>("db_activity", { serverId, instance }),
+  dbKill: (serverId: string, instance: DbInstance, id: number, whole: boolean) => invoke<void>("db_kill", { serverId, instance, id, whole }),
   dbSqliteFiles: (serverId: string) => invoke<DbInstance[]>("db_sqlite_files", { serverId }),
   dbSqliteInstance: (path: string, container: string | null = null) => invoke<DbInstance>("db_sqlite_instance", { path, container }),
 
@@ -1390,6 +1528,10 @@ export const api = {
   composeLaunch: (serverId: string, file: string, name: string, build: boolean, replace: string | null) =>
     invoke<string>("docker_compose_launch", { serverId, file, name, build, replace }),
   /** Marque un conteneur comme ponctuel (tâche qui s'arrête normalement) ou le démarque. */
+  dockerOnPurposeSet: (serverId: string, keys: string[], on: boolean) => invoke<void>("docker_on_purpose_set", { serverId, keys, on }),
+  diskRules: (serverId: string) => invoke<DiskRule[]>("disk_rules_list", { serverId }),
+  /** `true` : la configuration de l'agent a suivi (montages ignorés). */
+  diskRuleSave: (rule: DiskRule) => invoke<boolean>("disk_rule_save", { rule }),
   dockerOccasionalSet: (serverId: string, key: string, occasional: boolean) => invoke<void>("docker_occasional_set", { serverId, key, occasional }),
   meshList: () => invoke<MeshNetwork[]>("mesh_list"),
   /** `takeover` : retire d'abord les serveurs encore configurés pour un réseau inconnu de ce PC. */
