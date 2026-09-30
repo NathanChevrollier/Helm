@@ -5,7 +5,7 @@ import {
   Activity, ChevronDown, Container, Database, Download, FolderInput, FolderPlus, FolderTree, Globe, Pencil, Plug, Plus, Search, Server, Share2, ShieldCheck,
   SquareTerminal, Stethoscope, Trash2, Unplug,
 } from "lucide-react";
-import { api, errorMessage, formatDuration, type ServerView } from "../lib/api";
+import { api, mainDisk, errorMessage, formatDuration, type ServerView } from "../lib/api";
 import { ensureConnected, useApp, useAppPick } from "../lib/store";
 import { navigate, useShell, useTabIntent } from "../lib/shell";
 import { fetchHealth, useHealth } from "../lib/health";
@@ -353,7 +353,7 @@ function ServerDetail({ server, onEdit, moveItems }: { server: ServerView; onEdi
 
   const m = summary?.connected ? summary.metrics : null;
   const mem = m && m.memTotal ? (m.memUsed / m.memTotal) * 100 : null;
-  const root = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
+  const root = mainDisk(m?.disks);
   const disk = root && root.total ? (root.used / root.total) * 100 : null;
   const go = (section: SectionId) => navigate(section, undefined, server.id);
 

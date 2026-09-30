@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, OctagonAlert } from "lucide-react";
-import { api, errorMessage, formatBytes, formatDuration, type AgentInfo, type HistoryPoint, type Metrics } from "../../lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, OctagonAlert, SlidersHorizontal } from "lucide-react";
+import { api, diskCounts, errorMessage, formatBytes, formatDuration, mainDisk, type AgentInfo, type Disk, type DiskRule, type HistoryPoint, type Metrics } from "../../lib/api";
 import TimeChart, { SERIES_COLORS } from "../../components/TimeChart";
-import { Button, Card, ErrorState, Meter, StatTile, meterTone } from "../../components/ui";
+import { Badge, Button, Card, ErrorState, IconButton, Meter, StatTile, meterTone } from "../../components/ui";
+import DiskRuleDialog from "./DiskRuleDialog";
 import { usePolling } from "../../lib/poll";
 import { useCachedState } from "../../lib/cache";
 
@@ -60,6 +61,10 @@ export default function Overview({
   const [live, setLive] = useCachedState<Metrics[]>(`live:${serverId}`, []);
   const [history, setHistory] = useState<HistoryPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [diskRules, setDiskRules] = useState<DiskRule[]>([]);
+  const [editingDisk, setEditingDisk] = useState<Disk | null>(null);
+  const loadDiskRules = useCallback(() => void api.diskRules(serverId).then(setDiskRules, () => setDiskRules([])), [serverId]);
+  useEffect(loadDiskRules, [loadDiskRules]);
   const serverRef = useRef(serverId);
   serverRef.current = serverId;
   const agentOk = !!agent?.running;
@@ -110,7 +115,7 @@ export default function Overview({
       t: m.timestamp,
       cpu: m.cpuPercent,
       mem: m.memTotal ? (m.memUsed / m.memTotal) * 100 : 0,
-      disk: Math.max(0, ...m.disks.map((d) => (d.total ? (d.used / d.total) * 100 : 0))),
+      disk: Math.max(0, ...m.disks.filter(diskCounts).map((d) => (d.total ? (d.used / d.total) * 100 : 0))),
       load: m.load[0],
       rx: m.netRxRate,
       tx: m.netTxRate,
@@ -132,7 +137,7 @@ export default function Overview({
   const m = live[live.length - 1];
   const prevOk = live.length > 1;
   const memPct = m && m.memTotal ? (m.memUsed / m.memTotal) * 100 : 0;
-  const rootDisk = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
+  const rootDisk = mainDisk(m?.disks);
   const diskPct = rootDisk && rootDisk.total ? (rootDisk.used / rootDisk.total) * 100 : 0;
 
   // Tendance des tuiles : les 40 derniers relevés directs.
@@ -197,21 +202,38 @@ export default function Overview({
               {m.disks.map((d) => {
                 const p = d.total ? (d.used / d.total) * 100 : 0;
                 return (
-                  <div key={d.mount} className="grid grid-cols-[minmax(90px,140px)_minmax(0,110px)_minmax(0,1fr)_120px] items-center gap-3 text-[13px]">
-                    <span className="truncate font-mono text-xs">{d.mount}</span>
+                  <div key={d.mount} className={`grid grid-cols-[minmax(90px,140px)_minmax(0,110px)_minmax(0,1fr)_120px_28px] items-center gap-3 text-[13px] ${diskCounts(d) ? "" : "opacity-60"}`}>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate font-mono text-xs" title={d.mount}>
+                        {d.mount}
+                      </span>
+                      {(d.readOnly || d.ignored || diskRules.some((r) => r.mount === d.mount && (r.total != null || r.used != null))) && (
+                        <span className="flex flex-wrap gap-1">
+                          {d.readOnly && <Badge tone="muted" title="Lecture seule : plein par nature, hors alerte">lecture seule</Badge>}
+                          {d.ignored && <Badge tone="muted" title="Écarté des alertes (réglage)">ignoré</Badge>}
+                          {diskRules.some((r) => r.mount === d.mount && (r.total != null || r.used != null)) && <Badge tone="accent" title="Taille saisie à la main">manuel</Badge>}
+                        </span>
+                      )}
+                    </span>
                     <span className="truncate font-mono text-[11px] text-faint">{d.device}</span>
                     <div className="flex items-center gap-2">
-                      <Meter value={p} className="flex-1" height={6} />
+                      <Meter value={p} className="flex-1" height={6} tone={diskCounts(d) ? undefined : "muted"} />
                       <span className="w-10 text-right text-xs tabular-nums">{pct(p)}</span>
                     </div>
                     <span className="text-right text-xs text-muted tabular-nums">
                       {formatBytes(d.used)} / {formatBytes(d.total)}
                     </span>
+                    <IconButton size="sm" title="Régler ce point de montage (ignorer dans les alertes, taille réelle)" onClick={() => setEditingDisk(d)}>
+                      <SlidersHorizontal size={13} />
+                    </IconButton>
                   </div>
                 );
               })}
             </div>
           </Panel>
+        )}
+        {editingDisk && (
+          <DiskRuleDialog serverId={serverId} disk={editingDisk} rule={diskRules.find((r) => r.mount === editingDisk.mount)} onClose={() => setEditingDisk(null)} onSaved={loadDiskRules} />
         )}
         <Panel title={agent?.status?.activeAlerts.length ? "Alertes en cours" : "Alertes"}>
           {!agent?.running ? (

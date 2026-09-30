@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Cpu, HardDrive, MemoryStick, Timer } from "lucide-react";
-import { api, formatBytes, formatDuration, type Metrics } from "../lib/api";
+import { api, mainDisk, formatBytes, formatDuration, type Metrics } from "../lib/api";
 import { useApp } from "../lib/store";
 import { usePolling } from "../lib/poll";
 import { CRIT_AT, WARN_AT } from "./ui";
@@ -38,7 +38,7 @@ export default function TerminalStatusBar({ serverId, visible }: { serverId: str
   );
 
   const live = server?.connected && m && !failed;
-  const root = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
+  const root = mainDisk(m?.disks);
   const cpu = m?.cpuPercent ?? 0;
   const mem = m ? pct(m.memUsed, m.memTotal) : 0;
   const disk = root ? pct(root.used, root.total) : 0;

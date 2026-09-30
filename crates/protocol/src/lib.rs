@@ -56,9 +56,10 @@ impl Metrics {
         percent(self.mem_used, self.mem_total)
     }
 
-    /// Taux d'occupation du disque le plus rempli (généralement `/`).
+    /// Taux d'occupation du disque le plus rempli (généralement `/`), hors montages en lecture
+    /// seule ou écartés par l'utilisateur.
     pub fn disk_percent(&self) -> f32 {
-        self.disks.iter().map(|d| percent(d.used, d.total)).fold(0.0, f32::max)
+        self.disks.iter().filter(|d| d.counts()).map(|d| percent(d.used, d.total)).fold(0.0, f32::max)
     }
 }
 
@@ -238,6 +239,9 @@ pub struct AgentConfig {
     pub http_check_interval_secs: u64,
     #[serde(default)]
     pub notifiers: Notifiers,
+    /// Points de montage exclus de l'alerte « Disque » (ex. racine d'un hébergement mutualisé).
+    #[serde(default)]
+    pub disk_ignore: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -263,6 +267,7 @@ impl Default for AgentConfig {
             http_checks: Vec::new(),
             http_check_interval_secs: default_http_interval(),
             notifiers: Notifiers::default(),
+            disk_ignore: Vec::new(),
         }
     }
 }

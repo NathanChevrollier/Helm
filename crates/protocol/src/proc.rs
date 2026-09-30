@@ -44,6 +44,51 @@ pub struct Disk {
     pub device: String,
     pub total: u64,
     pub used: u64,
+    /// Monté en lecture seule (ou image figée : squashfs, iso9660…). Toujours « plein » par
+    /// construction, il ne compte ni dans les alertes ni dans le taux d'occupation global.
+    #[serde(default)]
+    pub read_only: bool,
+    /// Écarté par l'utilisateur (réglage du point de montage) : affiché, mais sans alerte.
+    #[serde(default)]
+    pub ignored: bool,
+}
+
+impl Disk {
+    /// Compte dans l'alerte « Disque » et dans le taux d'occupation global.
+    pub fn counts(&self) -> bool {
+        !self.read_only && !self.ignored
+    }
+}
+
+/// Systèmes de fichiers figés : pleins à 100 % par nature.
+const FROZEN_FS: &[&str] = &["squashfs", "iso9660", "erofs", "cramfs", "udf"];
+
+/// Chemin de `/proc/mounts`, où espaces et tabulations sont encodés en octal (`\040`).
+fn unescape_mount(s: &str) -> String {
+    s.replace("\\040", " ").replace("\\011", "\t").replace("\\134", "\\")
+}
+
+/// Marque les disques montés en lecture seule, d'après `/proc/mounts`.
+pub fn mark_read_only(disks: &mut [Disk], mounts: &str) {
+    for line in mounts.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 4 {
+            continue;
+        }
+        let (mount, fstype, options) = (unescape_mount(cols[1]), cols[2], cols[3]);
+        let ro = options.split(',').any(|o| o == "ro") || FROZEN_FS.contains(&fstype);
+        // Le dernier montage d'un même point l'emporte (montages empilés).
+        for d in disks.iter_mut().filter(|d| d.mount == mount) {
+            d.read_only = ro;
+        }
+    }
+}
+
+/// Applique la liste des points de montage à ignorer (réglage de l'utilisateur).
+pub fn mark_ignored(disks: &mut [Disk], ignore: &[String]) {
+    for d in disks.iter_mut() {
+        d.ignored = ignore.iter().any(|m| m == &d.mount);
+    }
 }
 
 /// Première ligne de `/proc/stat` (`cpu  user nice system idle iowait irq softirq steal …`).
@@ -136,13 +181,13 @@ pub fn parse_df(text: &str) -> Vec<Disk> {
         if total == 0 || disks.iter().any(|d: &Disk| d.device == device) {
             continue;
         }
-        disks.push(Disk { mount, device: device.to_string(), total, used });
+        disks.push(Disk { mount, device: device.to_string(), total, used, ..Default::default() });
     }
     if disks.is_empty() {
         // Conteneur ou VPS dont la racine est un overlay : on garde au moins `/`.
         if let Some(cols) = text.lines().skip(1).map(|l| l.split_whitespace().collect::<Vec<_>>()).find(|c| c.len() >= 6 && c[5] == "/") {
             if let (Ok(total), Ok(used)) = (cols[1].parse(), cols[2].parse()) {
-                disks.push(Disk { mount: "/".into(), device: cols[0].into(), total, used });
+                disks.push(Disk { mount: "/".into(), device: cols[0].into(), total, used, ..Default::default() });
             }
         }
     }
@@ -152,11 +197,12 @@ pub fn parse_df(text: &str) -> Vec<Disk> {
 /// Commande shell qui produit toutes les sections nécessaires à un relevé, en un seul aller-retour SSH.
 pub const COLLECT_SCRIPT: &str = "echo @@stat; cat /proc/stat; echo @@mem; cat /proc/meminfo; \
 echo @@load; cat /proc/loadavg; echo @@uptime; cat /proc/uptime; echo @@net; cat /proc/net/dev; \
-echo @@df; df -P -B1 2>/dev/null";
+echo @@df; df -P -B1 2>/dev/null; echo @@mounts; cat /proc/mounts 2>/dev/null";
 
 /// Analyse la sortie de [`COLLECT_SCRIPT`].
 pub fn parse_collect(output: &str, timestamp: i64) -> RawSample {
     let mut sample = RawSample { timestamp, ..Default::default() };
+    let mut mounts = "";
     for section in output.split("@@").skip(1) {
         let (name, body) = section.split_once('\n').unwrap_or((section, ""));
         match name.trim() {
@@ -166,9 +212,11 @@ pub fn parse_collect(output: &str, timestamp: i64) -> RawSample {
             "uptime" => sample.uptime_secs = parse_uptime(body),
             "net" => (sample.net_rx_bytes, sample.net_tx_bytes) = parse_net_dev(body),
             "df" => sample.disks = parse_df(body),
+            "mounts" => mounts = body,
             _ => {}
         }
     }
+    mark_read_only(&mut sample.disks, mounts);
     sample
 }
 
@@ -214,6 +262,20 @@ mod tests {
         let d = parse_df("h\noverlay 1000 400 600 40% /\ntmpfs 10 0 10 0% /dev\n");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].device, "overlay");
+    }
+
+    #[test]
+    fn read_only_mounts_are_marked() {
+        // Hébergement mutualisé : la racine est une image en lecture seule, pleine par nature.
+        let mut d = parse_df("h\n/dev/loop3 1395864371 1395864371 0 100% /\n/dev/sda2 500000000000 2000000 499998000000 1% /home/client\n");
+        mark_read_only(&mut d, "/dev/loop3 / squashfs ro,relatime 0 0\n/dev/sda2 /home/client ext4 rw,relatime 0 0\n");
+        assert!(d[0].read_only && !d[0].counts());
+        assert!(!d[1].read_only && d[1].counts());
+        let mut d = parse_df("h\n/dev/sdb1 100 50 50 50% /mnt/mon disque\n");
+        mark_read_only(&mut d, "/dev/sdb1 /mnt/mon\\040disque ext4 ro 0 0\n");
+        assert!(d[0].read_only, "chemin avec espace décodé");
+        mark_ignored(&mut d, &["/mnt/mon disque".to_string()]);
+        assert!(d[0].ignored);
     }
 
     #[test]

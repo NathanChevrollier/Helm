@@ -28,7 +28,11 @@ pub fn sample() -> RawSample {
         uptime_secs: p::parse_uptime(&read("/proc/uptime")),
         net_rx_bytes,
         net_tx_bytes,
-        disks: p::parse_df(&df),
+        disks: {
+            let mut disks = p::parse_df(&df);
+            p::mark_read_only(&mut disks, &read("/proc/mounts"));
+            disks
+        },
     }
 }
 

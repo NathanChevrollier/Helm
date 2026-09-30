@@ -176,7 +176,9 @@ pub fn start(paths: Paths) -> Result<(), String> {
         let transitions = {
             let mut s = state.lock().unwrap();
             s.reload_config(&paths.config);
-            let metrics = zenytt_protocol::compute(prev.as_ref(), &raw);
+            let mut metrics = zenytt_protocol::compute(prev.as_ref(), &raw);
+            // Points de montage écartés par l'utilisateur : visibles, mais hors alerte « Disque ».
+            zenytt_protocol::proc::mark_ignored(&mut metrics.disks, &s.config.disk_ignore);
             // Le premier relevé n'a pas de CPU calculable : on ne l'enregistre pas.
             if prev.is_some() {
                 s.history.push(metrics.clone());

@@ -15,6 +15,7 @@ use crate::commands::{admin, track};
 use crate::sessions::Sessions;
 use crate::store::AuditLog;
 use crate::store::Store;
+use zenytt_profiles::DiskRule;
 
 /// Binaires de l'agent embarqués à la compilation (vides s'ils n'ont pas été construits).
 const AGENT_X86_64: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/zenyttd-x86_64"));
@@ -34,6 +35,23 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
+/// Réglages des points de montage d'un serveur : ignorés, ou taille réelle saisie à la main.
+pub(crate) fn apply_disk_rules(store: &Store, server_id: &str, metrics: &mut Metrics) {
+    let rules: Vec<DiskRule> = store.read(|d| d.disk_rules.iter().filter(|r| r.server_id == server_id).cloned().collect());
+    for disk in metrics.disks.iter_mut() {
+        let Some(rule) = rules.iter().find(|r| r.mount == disk.mount) else { continue };
+        disk.ignored = rule.ignore;
+        if let Some(total) = rule.total.filter(|t| *t > 0) {
+            disk.total = total;
+            // Taille saisie à la main : c'est le vrai espace de l'abonnement, il compte.
+            disk.read_only = false;
+        }
+        if let Some(used) = rule.used {
+            disk.used = used.min(disk.total);
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn mon_metrics(
     store: State<'_, Store>,
@@ -45,9 +63,51 @@ pub async fn mon_metrics(
     let out = conn.run(COLLECT_SCRIPT).await.map_err(err)?;
     let raw = parse_collect(&out, now_ms());
     let mut prev = monitor.prev.lock().await;
-    let metrics = zenytt_protocol::compute(prev.get(&server_id), &raw);
-    prev.insert(server_id, raw);
+    let mut metrics = zenytt_protocol::compute(prev.get(&server_id), &raw);
+    prev.insert(server_id.clone(), raw);
+    apply_disk_rules(&store, &server_id, &mut metrics);
     Ok(metrics)
+}
+
+#[tauri::command]
+pub fn disk_rules_list(store: State<'_, Store>, server_id: String) -> Vec<DiskRule> {
+    store.read(|d| d.disk_rules.iter().filter(|r| r.server_id == server_id).cloned().collect())
+}
+
+/// Enregistre le réglage d'un point de montage. Si l'agent tourne, sa liste de montages ignorés
+/// suit : l'alerte « Disque » est levée sur le serveur même quand Zenytt est fermé.
+/// Renvoie `true` si la configuration de l'agent a été mise à jour.
+#[tauri::command]
+pub async fn disk_rule_save(
+    audit: State<'_, AuditLog>,
+    store: State<'_, Store>,
+    sessions: State<'_, Sessions>,
+    rule: DiskRule,
+) -> Result<bool, String> {
+    let server_id = rule.server_id.clone();
+    let detail = format!("{}{}", rule.mount, if rule.ignore { " (ignoré)" } else { "" });
+    let empty = !rule.ignore && rule.total.is_none() && rule.used.is_none();
+    store.write(|d| {
+        d.disk_rules.retain(|r| !(r.server_id == rule.server_id && r.mount == rule.mount));
+        if !empty {
+            d.disk_rules.push(rule);
+        }
+    })?;
+    let ignored: Vec<String> =
+        store.read(|d| d.disk_rules.iter().filter(|r| r.server_id == server_id && r.ignore).map(|r| r.mount.clone()).collect());
+    let r: Result<bool, String> = async {
+        let (conn, pw) = admin(&store, &sessions, &server_id).await?;
+        let info = agent::info_privileged(&conn, pw.as_deref()).await.map_err(err)?;
+        let Some(mut config) = info.status.filter(|_| info.running).map(|s| s.config) else { return Ok(false) };
+        if config.disk_ignore == ignored {
+            return Ok(false);
+        }
+        config.disk_ignore = ignored;
+        agent::save_config(&conn, &config, pw.as_deref()).await.map_err(err)?;
+        Ok(true)
+    }
+    .await;
+    track(&audit, &store, &server_id, "monitoring.disk_rule", &detail, r)
 }
 
 #[tauri::command]
@@ -117,7 +177,11 @@ pub async fn mon_service_logs(
 #[tauri::command]
 pub async fn agent_info(store: State<'_, Store>, sessions: State<'_, Sessions>, server_id: String) -> Result<AgentInfo, String> {
     let (conn, sudo) = admin(&store, &sessions, &server_id).await?;
-    agent::info_privileged(&conn, sudo.as_deref()).await.map_err(err)
+    let mut info = agent::info_privileged(&conn, sudo.as_deref()).await.map_err(err)?;
+    if let Some(m) = info.status.as_mut().and_then(|s| s.latest.as_mut()) {
+        apply_disk_rules(&store, &server_id, m);
+    }
+    Ok(info)
 }
 
 #[tauri::command]
