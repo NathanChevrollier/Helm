@@ -5,6 +5,7 @@ import { Cable, Eye, EyeOff, Lock, Pause, Play, RotateCw, ScrollText, Square, Sq
 import { api, errorMessage, type ComposeProject, type Container, type ContainerStats } from "../../lib/api";
 import { Badge, Button, Checkbox, CodeBlock, Drawer, ErrorState, KeyValue, Loading } from "../../components/ui";
 import { stateTone } from "./shared";
+import ConditionBadge from "./ConditionBadge";
 
 type Tab = "summary" | "env" | "mounts" | "inspect";
 
@@ -34,6 +35,8 @@ export default function ContainerDrawer({
   onRestrict,
   occasional,
   onOccasional,
+  onPurpose = false,
+  onOnPurpose,
 }: {
   serverId: string;
   container: Container;
@@ -48,6 +51,9 @@ export default function ContainerDrawer({
   /** Conteneur ponctuel : son arrêt n'est signalé nulle part. */
   occasional: boolean;
   onOccasional: (occasional: boolean) => void;
+  /** Arrêté volontairement : cet arrêt n'est pas une panne. */
+  onPurpose?: boolean;
+  onOnPurpose?: (on: boolean) => void;
 }) {
   const [tab, setTab] = useState<Tab>("summary");
   const [raw, setRaw] = useState<string | null>(null);
@@ -165,12 +171,26 @@ export default function ContainerDrawer({
             label="Conteneur ponctuel"
             hint="Une tâche qui s'arrête normalement une fois son travail fait (migration, sauvegarde, cron…) : son arrêt n'est plus signalé, ni dans l'accueil ni dans les compteurs du projet."
           />
+          {!running && onOnPurpose && (
+            <Checkbox
+              checked={onPurpose}
+              onChange={onOnPurpose}
+              label="Arrêté volontairement"
+              hint="Ce service est à l'arrêt parce que tu l'as voulu (posé automatiquement quand tu l'arrêtes depuis Zenytt). Retiré dès qu'il redémarre, et une vraie panne reste signalée."
+            />
+          )}
           <KeyValue
             labelWidth={120}
             items={[
               ["Image", <span className="font-mono text-xs">{c.image}</span>],
               ...(c.composeProject ? ([["Projet", `${c.composeProject} · service ${c.composeService ?? "?"}`]] as [React.ReactNode, React.ReactNode][]) : []),
-              ["État", <Badge tone={stateTone(c.state)}>{c.state}</Badge>],
+              [
+                "État",
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <Badge tone={stateTone(c.state)}>{c.state}</Badge>
+                  <ConditionBadge c={c} onPurpose={onPurpose} occasional={occasional} />
+                </span>,
+              ],
               ...(health ? ([["Santé", <Badge tone={health === "healthy" ? "ok" : health === "starting" ? "warn" : "danger"}>{health}</Badge>]] as [React.ReactNode, React.ReactNode][]) : []),
               ["Créé", info?.Created ? new Date(info.Created).toLocaleString("fr-FR") : c.createdAt],
               ["Redémarrages", info ? `${info.RestartCount ?? 0} · politique ${info.HostConfig?.RestartPolicy?.Name || "no"}` : "…"],

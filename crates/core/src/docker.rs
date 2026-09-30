@@ -124,9 +124,84 @@ pub struct Container {
     pub created_at: String,
     pub compose_project: Option<String>,
     pub compose_service: Option<String>,
+    /// Code de sortie (« Exited (137) … », « Restarting (1) … »).
+    pub exit_code: Option<i32>,
+    /// État du healthcheck : `healthy`, `unhealthy`, `starting`.
+    pub health: Option<String>,
+    /// Tué par le noyau faute de mémoire (lu seulement pour les conteneurs sortis en 137).
+    pub oom_killed: bool,
+    /// Synthèse des champs ci-dessus (voir [`Container::condition`]), pour l'interface.
+    pub condition: Condition,
+}
+
+/// Pourquoi un conteneur n'est pas (ou pas bien) en marche.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Condition {
+    /// En marche et en bonne santé (ou sans healthcheck).
+    Ok,
+    /// En marche, mais son healthcheck échoue.
+    Unhealthy,
+    /// Redémarre en boucle.
+    CrashLoop,
+    /// Sorti avec une erreur (code ≠ 0, hors arrêt par signal).
+    Crashed,
+    /// Tué faute de mémoire.
+    OutOfMemory,
+    /// Arrêté par un signal (`docker stop`, `kill`) : le plus souvent un arrêt manuel.
+    Stopped,
+    /// Terminé normalement (code 0) : tâche finie ou arrêt propre.
+    Finished,
+    /// Créé mais jamais démarré.
+    Created,
+    /// En pause (`docker pause`).
+    Paused,
+}
+
+impl Condition {
+    /// Panne à signaler, quel que soit le réglage du conteneur.
+    pub fn is_failure(self) -> bool {
+        matches!(self, Self::Unhealthy | Self::CrashLoop | Self::Crashed | Self::OutOfMemory)
+    }
+}
+
+/// `Exited (137) 3 hours ago` / `Restarting (1) 5 seconds ago` → le code entre parenthèses.
+pub fn exit_code_of(status: &str) -> Option<i32> {
+    let s = status.trim();
+    let rest = s.strip_prefix("Exited (").or_else(|| s.strip_prefix("Restarting ("))?;
+    rest.split(')').next()?.trim().parse().ok()
+}
+
+/// `Up 2 hours (unhealthy)` / `Up 3 minutes (health: starting)` → état du healthcheck.
+pub fn health_of(status: &str) -> Option<String> {
+    let inner = status.rsplit_once('(')?.1.strip_suffix(')')?.trim();
+    match inner {
+        "healthy" | "unhealthy" => Some(inner.to_string()),
+        "health: starting" => Some("starting".into()),
+        _ => None,
+    }
 }
 
 impl Container {
+    pub fn condition(&self) -> Condition {
+        match self.state.as_str() {
+            "running" if self.health.as_deref() == Some("unhealthy") => Condition::Unhealthy,
+            "running" => Condition::Ok,
+            "paused" => Condition::Paused,
+            "restarting" => Condition::CrashLoop,
+            "created" => Condition::Created,
+            "dead" => Condition::Crashed,
+            _ if self.oom_killed => Condition::OutOfMemory,
+            _ => match self.exit_code {
+                Some(0) => Condition::Finished,
+                // SIGTERM (143) / SIGKILL (137, aussi en fin de délai de `docker stop`) / SIGINT (130).
+                Some(130 | 137 | 143) => Condition::Stopped,
+                Some(_) => Condition::Crashed,
+                None => Condition::Stopped,
+            },
+        }
+    }
+
     /// Identifiant stable du conteneur : `projet/service` pour un conteneur compose (le nom change
     /// quand il est recréé sous docker-compose v1), sinon son nom.
     pub fn key(&self) -> String {
@@ -190,6 +265,10 @@ pub async fn containers(conn: &Connection, access: Access, sudo: Option<&str>) -
                 name: c.names.split(',').next().unwrap_or("").to_string(),
                 image: c.image,
                 state: c.state,
+                exit_code: exit_code_of(&c.status),
+                health: health_of(&c.status),
+                oom_killed: false,
+                condition: Condition::Ok,
                 status: c.status,
                 ports: parse_ports(&c.ports),
                 ports_raw: c.ports,
@@ -199,6 +278,26 @@ pub async fn containers(conn: &Connection, access: Access, sudo: Option<&str>) -
             }
         })
         .collect();
+    // Sortie en 137 : arrêt manuel (fin du délai de `docker stop`) ou manque de mémoire. Seul
+    // `inspect` fait la différence, et seulement pour ces conteneurs-là.
+    let killed: Vec<String> = list.iter().filter(|c| c.state == "exited" && c.exit_code == Some(137)).map(|c| c.id.clone()).collect();
+    if !killed.is_empty() {
+        let ids: Vec<String> = killed.iter().map(|i| shell_quote(i)).collect();
+        if let Ok(out) =
+            run_ok(conn, access, sudo, &format!("inspect --format '{{{{.Id}}}} {{{{.State.OOMKilled}}}}' {}", ids.join(" "))).await
+        {
+            for line in out.lines() {
+                if let Some((id, "true")) = line.trim().split_once(' ') {
+                    if let Some(c) = list.iter_mut().find(|c| id.starts_with(&c.id)) {
+                        c.oom_killed = true;
+                    }
+                }
+            }
+        }
+    }
+    for c in &mut list {
+        c.condition = c.condition();
+    }
     list.sort_by(|a, b| (a.state != "running").cmp(&(b.state != "running")).then(a.name.cmp(&b.name)));
     Ok(list)
 }
@@ -862,10 +961,55 @@ mod tests {
             created_at: String::new(),
             compose_project: Some("infra".into()),
             compose_service: Some("migrator".into()),
+            exit_code: Some(0),
+            health: None,
+            oom_killed: false,
+            condition: Condition::Finished,
         };
         assert_eq!(c.key(), "infra/migrator", "stable quand le conteneur est recréé");
         c.compose_project = None;
         assert_eq!(c.key(), "infra_migrator_1");
+    }
+
+    #[test]
+    fn container_conditions() {
+        assert_eq!(exit_code_of("Exited (137) 3 hours ago"), Some(137));
+        assert_eq!(exit_code_of("Restarting (1) 5 seconds ago"), Some(1));
+        assert_eq!(exit_code_of("Up 2 hours"), None);
+        assert_eq!(health_of("Up 2 hours (unhealthy)").as_deref(), Some("unhealthy"));
+        assert_eq!(health_of("Up 3 minutes (health: starting)").as_deref(), Some("starting"));
+        assert_eq!(health_of("Exited (1) 2 minutes ago"), None, "un code de sortie n'est pas un état de santé");
+
+        let c = |state: &str, status: &str, oom: bool| {
+            let mut c = Container {
+                id: "a".into(),
+                name: "n".into(),
+                image: "x".into(),
+                state: state.into(),
+                status: status.into(),
+                ports: vec![],
+                ports_raw: String::new(),
+                created_at: String::new(),
+                compose_project: None,
+                compose_service: None,
+                exit_code: exit_code_of(status),
+                health: health_of(status),
+                oom_killed: oom,
+                condition: Condition::Ok,
+            };
+            c.condition = c.condition();
+            c.condition
+        };
+        assert_eq!(c("running", "Up 2 hours", false), Condition::Ok);
+        assert_eq!(c("running", "Up 2 hours (unhealthy)", false), Condition::Unhealthy);
+        assert_eq!(c("restarting", "Restarting (1) 5 seconds ago", false), Condition::CrashLoop);
+        assert_eq!(c("exited", "Exited (1) 2 minutes ago", false), Condition::Crashed);
+        assert_eq!(c("exited", "Exited (0) 2 minutes ago", false), Condition::Finished);
+        assert_eq!(c("exited", "Exited (143) 2 minutes ago", false), Condition::Stopped);
+        assert_eq!(c("exited", "Exited (137) 2 minutes ago", false), Condition::Stopped);
+        assert_eq!(c("exited", "Exited (137) 2 minutes ago", true), Condition::OutOfMemory);
+        assert_eq!(c("created", "Created", false), Condition::Created);
+        assert!(Condition::Crashed.is_failure() && !Condition::Stopped.is_failure() && !Condition::Finished.is_failure());
     }
 
     #[test]

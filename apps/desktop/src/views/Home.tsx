@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Activity, ArrowRight, ChevronRight, LayoutDashboard, LayoutGrid, List, Plus, RotateCw, SquareTerminal, TriangleAlert } from "lucide-react";
 import { useDoctor } from "../components/ConnectionDoctor";
-import { api, errorMessage, formatBytes, formatDuration, type AuditEntry, type DashboardSummary, type ServerView } from "../lib/api";
+import { api, mainDisk, errorMessage, formatBytes, formatDuration, type AuditEntry, type ContainerCondition, type DashboardSummary, type ServerView } from "../lib/api";
 import { ensureConnected, useAppPick } from "../lib/store";
 import { navigate, useShell } from "../lib/shell";
 import { fetchHealth, useHealth } from "../lib/health";
@@ -21,6 +21,14 @@ const REFRESH_MS = 30_000;
 const CERT_WARN_DAYS = 21;
 const DAY = 86_400;
 const VIEW_KEY = "zenytt.home.view";
+
+/** Libellé d'une panne de conteneur. */
+const CONDITION_LABEL: Partial<Record<ContainerCondition, string>> = {
+  unhealthy: "healthcheck en échec",
+  crashLoop: "redémarre en boucle",
+  crashed: "planté",
+  outOfMemory: "manque de mémoire",
+};
 
 /** Point qui demande une action, affiché dans la colonne « À traiter ». */
 interface Todo {
@@ -122,12 +130,13 @@ export default function HomeView({ visible }: { visible: boolean }) {
   const online = known.filter((x) => x.r?.connected);
   const nRunning = online.reduce((n, x) => n + x.r!.containersRunning, 0);
   const nStopped = online.reduce((n, x) => n + x.r!.containersStopped, 0);
+  const nFailed = online.reduce((n, x) => n + (x.r!.failed?.length ?? 0), 0);
   const nAlerts = online.reduce((n, x) => n + x.r!.alerts.length, 0);
   // Tendance enregistrée seulement quand tous les serveurs ont répondu : sinon la courbe partirait de 0.
   if (pending.size === 0 && known.every((x) => x.r)) {
     pushTrend("online", online.length);
     pushTrend("running", nRunning);
-    pushTrend("stopped", nStopped);
+    pushTrend("stopped", nFailed);
     pushTrend("alerts", nAlerts);
   }
   const now = Date.now() / 1000;
@@ -164,15 +173,43 @@ export default function HomeView({ visible }: { visible: boolean }) {
     for (const a of r.alerts) {
       todos.push({ key: `alert:${s.id}:${a.key}`, level: "critique", title: `${s.name} : ${a.title}`, detail: a.message, actions: [{ label: "Supervision", primary: true, run: () => go(s, "monitoring") }] });
     }
+    const failed = r.failed ?? [];
+    if (failed.length > 0) {
+      todos.push({
+        key: `failed:${s.id}`,
+        level: "attention",
+        title: `${failed.length} conteneur${failed.length > 1 ? "s" : ""} en panne sur ${s.name}`,
+        detail: failed.map((f) => `${f.name} (${CONDITION_LABEL[f.condition] ?? f.condition})`).join(" · "),
+        mono: true,
+        actions: [
+          { label: "Relancer", primary: true, run: () => restartStopped(s, failed.map((f) => f.name)) },
+          { label: "Docker", run: () => go(s, "docker") },
+        ],
+      });
+    }
+    // Arrêt sans erreur (code 0, docker stop fait ailleurs…) : peut-être voulu, on demande sans alarmer.
     if (r.containersStopped > 0) {
       todos.push({
         key: `stopped:${s.id}`,
-        level: "attention",
-        title: `${r.containersStopped} conteneur${r.containersStopped > 1 ? "s" : ""} arrêté${r.containersStopped > 1 ? "s" : ""} sur ${s.name}`,
+        level: "suggestion",
+        title: `${r.containersStopped} conteneur${r.containersStopped > 1 ? "s" : ""} arrêté${r.containersStopped > 1 ? "s" : ""} sans erreur sur ${s.name}`,
         detail: r.stoppedNames.join(" · "),
         mono: true,
         actions: [
-          { label: "Relancer", primary: true, run: () => restartStopped(s, r.stoppedNames) },
+          {
+            label: "C'est voulu",
+            primary: true,
+            run: async () => {
+              try {
+                await api.dockerOnPurposeSet(s.id, r.stoppedKeys ?? [], true);
+                notify("Ces conteneurs ne seront plus signalés tant qu'ils restent arrêtés.", "success");
+              } catch (e) {
+                notify(errorMessage(e), "error");
+              }
+              await fetchHealth(s.id, 0);
+            },
+          },
+          { label: "Relancer", run: () => restartStopped(s, r.stoppedNames) },
           { label: "Docker", run: () => go(s, "docker") },
         ],
       });
@@ -197,13 +234,13 @@ export default function HomeView({ visible }: { visible: boolean }) {
       actions: [{ label: "Installer l'agent", primary: true, run: () => go(s, "monitoring", "agent") }],
     });
   }
-  const stoppedTargets = online.filter((x) => x.r!.containersStopped > 0);
+  const failedTargets = online.filter((x) => (x.r!.failed?.length ?? 0) > 0);
 
   const shown = folder ? known.filter((x) => (x.server.group ?? "") === folder) : known;
   const healthOf = (r: DashboardSummary | undefined) => {
     const m = r?.metrics;
     const mem = m && m.memTotal ? (m.memUsed / m.memTotal) * 100 : null;
-    const root = m?.disks.find((d) => d.mount === "/") ?? m?.disks[0];
+    const root = mainDisk(m?.disks);
     const disk = root && root.total ? (root.used / root.total) * 100 : null;
     return { m, mem, root, disk };
   };
@@ -259,11 +296,11 @@ export default function HomeView({ visible }: { visible: boolean }) {
             <StatTile label="Serveurs en ligne" value={`${online.length} / ${servers.length}`} tone="ok" trend={trends.online} hint={servers.length - online.length ? `${servers.length - online.length} hors ligne` : "Tous joignables"} />
             <StatTile label="Conteneurs actifs" value={nRunning} tone="accent" trend={trends.running} hint={`Sur ${online.filter((x) => x.r!.docker).length} serveur(s) Docker`} />
             <StatTile
-              label="Conteneurs arrêtés"
-              value={nStopped}
-              tone={nStopped ? "warn" : "muted"}
+              label="Conteneurs en panne"
+              value={nFailed}
+              tone={nFailed ? "warn" : "muted"}
               trend={trends.stopped}
-              hint={nStopped ? stoppedTargets.map((x) => x.server.name).join(", ") : "Aucun"}
+              hint={nFailed ? failedTargets.map((x) => x.server.name).join(", ") : nStopped ? `${nStopped} arrêté${nStopped > 1 ? "s" : ""} sans erreur` : "Aucun"}
             />
             <StatTile label="Alertes actives" value={nAlerts} tone={nAlerts ? "danger" : "muted"} trend={trends.alerts} hint={nAlerts ? "Voir « À traiter »" : "Aucune alerte"} />
           </div>
@@ -303,7 +340,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
                             {r.docker ? (
                               <button type="button" className="text-fg hover:text-accent" onClick={() => go(s, "docker")}>
                                 {r.containersRunning} conteneur{r.containersRunning > 1 ? "s" : ""}
-                                {r.containersStopped > 0 && <span className="text-warn"> · {r.containersStopped} arrêté{r.containersStopped > 1 ? "s" : ""}</span>}
+                                {(r.failed?.length ?? 0) > 0 && <span className="text-warn"> · {r.failed.length} en panne</span>}
+                                {r.containersStopped > 0 && <span className="text-muted"> · {r.containersStopped} arrêté{r.containersStopped > 1 ? "s" : ""}</span>}
                               </button>
                             ) : (
                               <span>Pas de Docker</span>
@@ -390,7 +428,8 @@ export default function HomeView({ visible }: { visible: boolean }) {
                         x.r?.connected && x.r.docker ? (
                           <span className="tabular-nums">
                             {x.r.containersRunning}
-                            {x.r.containersStopped > 0 && <span className="text-warn"> · {x.r.containersStopped} arrêté(s)</span>}
+                            {(x.r.failed?.length ?? 0) > 0 && <span className="text-warn"> · {x.r.failed.length} en panne</span>}
+                            {x.r.containersStopped > 0 && <span className="text-muted"> · {x.r.containersStopped} arrêté(s)</span>}
                           </span>
                         ) : (
                           <span className="text-faint">—</span>
@@ -415,9 +454,9 @@ export default function HomeView({ visible }: { visible: boolean }) {
             <h2 className="text-sm font-semibold">
               À traiter <span className="font-normal text-faint">· {todos.length}</span>
             </h2>
-            {stoppedTargets.length > 0 && (
-              <Button size="sm" variant="ghost" className="text-accent" onClick={() => void Promise.all(stoppedTargets.map((x) => restartStopped(x.server, x.r!.stoppedNames)))}>
-                Tout relancer
+            {failedTargets.length > 0 && (
+              <Button size="sm" variant="ghost" className="text-accent" title="Relance les conteneurs en panne (pas ceux arrêtés sans erreur)" onClick={() => void Promise.all(failedTargets.map((x) => restartStopped(x.server, x.r!.failed.map((f) => f.name))))}>
+                Relancer les pannes
               </Button>
             )}
           </div>

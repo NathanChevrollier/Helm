@@ -60,11 +60,47 @@ pub struct Overview {
     projects: Vec<ComposeProject>,
     /// Clés des conteneurs ponctuels de ce serveur (voir `Container::key`).
     occasional: Vec<String>,
+    /// Clés des conteneurs arrêtés volontairement.
+    on_purpose: Vec<String>,
 }
 
 /// Conteneurs ponctuels d'un serveur.
 pub(crate) fn occasional_keys(store: &Store, server_id: &str) -> Vec<String> {
     store.read(|d| d.occasional_containers.iter().filter(|o| o.server_id == server_id).map(|o| o.key.clone()).collect())
+}
+
+/// Conteneurs arrêtés volontairement sur un serveur.
+pub(crate) fn on_purpose_keys(store: &Store, server_id: &str) -> Vec<String> {
+    store.read(|d| d.stopped_on_purpose.iter().filter(|o| o.server_id == server_id).map(|o| o.key.clone()).collect())
+}
+
+fn set_on_purpose(store: &Store, server_id: &str, keys: &[String], on: bool) {
+    if keys.is_empty() {
+        return;
+    }
+    let _ = store.write(|d| {
+        d.stopped_on_purpose.retain(|o| !(o.server_id == server_id && keys.contains(&o.key)));
+        if on {
+            d.stopped_on_purpose
+                .extend(keys.iter().map(|key| zenytt_profiles::OccasionalContainer { server_id: server_id.to_string(), key: key.clone() }));
+        }
+    });
+}
+
+/// Après une action lancée depuis Zenytt : un arrêt est voulu, un démarrage lève la marque.
+fn purpose_of(action: &str) -> Option<bool> {
+    match action {
+        "stop" | "kill" | "pause" => Some(true),
+        "start" | "restart" | "unpause" | "up" | "update" | "rebuild" | "deploy" => Some(false),
+        _ => None,
+    }
+}
+
+/// Marque (ou non) un conteneur comme arrêté volontairement : son arrêt n'est plus signalé.
+#[tauri::command]
+pub fn docker_on_purpose_set(store: State<'_, Store>, server_id: String, keys: Vec<String>, on: bool) -> Result<(), String> {
+    set_on_purpose(&store, &server_id, &keys, on);
+    Ok(())
 }
 
 /// Marque (ou non) un conteneur comme ponctuel : une tâche qui s'arrête normalement.
@@ -102,14 +138,19 @@ pub async fn docker_overview(
     cache.0.lock().await.insert(server_id.clone(), access);
     let engine = if version.starts_with("podman") { "podman" } else { "docker" }.to_string();
     if access == Access::Unavailable {
-        return Ok(Overview { access, version, engine, containers: vec![], projects: vec![], occasional: vec![] });
+        return Ok(Overview { access, version, engine, containers: vec![], projects: vec![], occasional: vec![], on_purpose: vec![] });
     }
     let (containers, projects) = match lists {
         Some((a, lists)) if a == access => lists.map_err(err)?,
         _ => tokio::try_join!(docker::containers(&conn, access, s), docker::compose_projects(&conn, access, s)).map_err(err)?,
     };
     let occasional = occasional_keys(&store, &server_id);
-    Ok(Overview { access, version, engine, containers, projects, occasional })
+    // Un conteneur marqué « arrêté volontairement » mais relancé ailleurs (CLI, redémarrage du
+    // serveur) n'est plus à l'arrêt : la marque tombe d'elle-même.
+    let running: Vec<String> = containers.iter().filter(|c| c.state == "running").map(Container::key).collect();
+    set_on_purpose(&store, &server_id, &running, false);
+    let on_purpose = on_purpose_keys(&store, &server_id);
+    Ok(Overview { access, version, engine, containers, projects, occasional, on_purpose })
 }
 
 #[tauri::command]
@@ -136,7 +177,16 @@ pub async fn docker_container_action(
     let detail = format!("{action} {id}");
     let r: Result<(), String> = async {
         let c = ctx(&store, &sessions, &cache, &server_id).await?;
-        docker::container_action(&c.conn, c.access, c.sudo.as_deref(), &id, &action).await.map_err(err)
+        docker::container_action(&c.conn, c.access, c.sudo.as_deref(), &id, &action).await.map_err(err)?;
+        if let Some(on) = purpose_of(&action) {
+            // La marque suit la clé stable du conteneur (projet/service), pas son identifiant.
+            if let Ok(list) = docker::containers(&c.conn, c.access, c.sudo.as_deref()).await {
+                let keys: Vec<String> =
+                    list.iter().filter(|x| x.name == id || x.id.starts_with(&id) || id.starts_with(&x.id)).map(Container::key).collect();
+                set_on_purpose(&store, &server_id, &keys, on);
+            }
+        }
+        Ok(())
     }
     .await;
     track(&audit, &store, &server_id, "docker.container", &detail, r)
@@ -180,7 +230,15 @@ pub async fn docker_compose_action(
     let detail = format!("{action} {}", project.name);
     let r: Result<String, String> = async {
         let c = ctx(&store, &sessions, &cache, &server_id).await?;
-        docker::compose_action(&c.conn, c.access, c.sudo.as_deref(), &project, &action).await.map_err(err)
+        let out = docker::compose_action(&c.conn, c.access, c.sudo.as_deref(), &project, &action).await.map_err(err)?;
+        if let Some(on) = purpose_of(&action) {
+            if let Ok(list) = docker::containers(&c.conn, c.access, c.sudo.as_deref()).await {
+                let keys: Vec<String> =
+                    list.iter().filter(|x| x.compose_project.as_deref() == Some(project.name.as_str())).map(Container::key).collect();
+                set_on_purpose(&store, &server_id, &keys, on);
+            }
+        }
+        Ok(out)
     }
     .await;
     track(&audit, &store, &server_id, "docker.compose", &detail, r)

@@ -60,7 +60,7 @@ export default function ServerSwitcher({ onClose }: { onClose: () => void }) {
     if (!s.connected) return sum && !sum.connected && sum.error ? { text: "injoignable", tone: "text-danger" } : { text: "hors ligne", tone: "text-faint" };
     const b = badgesOf(sum);
     if (b.alerts) return { text: `${b.alerts} alerte${b.alerts > 1 ? "s" : ""}`, tone: "text-danger" };
-    if (b.stopped) return { text: `${b.stopped} arrêté${b.stopped > 1 ? "s" : ""}`, tone: "text-warn" };
+    if (b.failed) return { text: `${b.failed} en panne`, tone: "text-warn" };
     return null;
   };
 

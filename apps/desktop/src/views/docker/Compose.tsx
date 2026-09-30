@@ -5,6 +5,7 @@ import { useAppPick } from "../../lib/store";
 import { Badge, Button, EmptyState, IconButton, MenuButton, Modal, StatusDot, useContextMenu, type MenuItem } from "../../components/ui";
 import { deployProject, GithubDeployDialog, RestrictPortDialog, tunnelTo } from "../../components/DockerExtras";
 import ContainerDrawer from "./ContainerDrawer";
+import ConditionBadge from "./ConditionBadge";
 import PortChips, { isExposed } from "./PortChips";
 import { stateTone, useContainerActions, useContainerStats } from "./shared";
 import { containerKey, projectCounts } from "../../lib/compose";
@@ -13,7 +14,9 @@ const FileEditor = lazy(() => import("../../components/FileEditor"));
 const ComposeFileDialog = lazy(() => import("../../components/ComposeFileDialog"));
 
 /** Colonnes d'une ligne de service : nom et état, image, ports, CPU, mémoire, actions. */
-const SERVICE_GRID = "grid grid-cols-[minmax(140px,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_64px_72px_96px] items-center gap-3";
+const STOP_WARNING = "Tous les conteneurs du projet seront arrêtés, sans être supprimés : « Démarrer » les relance. Cet arrêt étant voulu, ils ne seront pas signalés comme tombés.";
+
+const SERVICE_GRID ="grid grid-cols-[minmax(140px,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_64px_72px_96px] items-center gap-3";
 
 export default function Compose({ serverId, data, docker, reload, onNew, onCatalog }: { serverId: string; data: DockerOverview; docker: string; reload: () => Promise<void>; onNew: () => void; onCatalog: () => void }) {
   const { ask, notify, openTab } = useAppPick("ask", "notify", "openTab");
@@ -98,6 +101,16 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
   const projectItems = (p: ComposeProject, file: string, stopped: boolean): MenuItem[] => [
     { label: "Mettre à jour (pull + up)", icon: <UploadCloud size={14} />, onClick: () => void act(p, "update", "Mettre à jour (pull + up)") },
     ...(stopped ? [] : [{ label: "Démarrer les services manquants (up -d)", icon: <Play size={14} />, onClick: () => void act(p, "up", "Démarrer (up -d)") }]),
+    ...(stopped
+      ? []
+      : [
+          {
+            label: "Arrêter tous les services (stop)",
+            hint: "conteneurs conservés",
+            icon: <Square size={14} />,
+            onClick: () => void act(p, "stop", "Arrêter", STOP_WARNING),
+          },
+        ]),
     {
       label: "Reconstruire complètement…",
       hint: "down + build + up",
@@ -126,6 +139,15 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
 
   const selected = data.containers.find((c) => c.id === selectedId);
   const occasional = new Set(data.occasional);
+  const onPurpose = new Set(data.onPurpose ?? []);
+  const setOnPurpose = async (c: Container, value: boolean) => {
+    try {
+      await api.dockerOnPurposeSet(serverId, [containerKey(c)], value);
+      await reload();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
   const setOccasional = async (c: Container, value: boolean) => {
     try {
       await api.dockerOccasionalSet(serverId, containerKey(c), value);
@@ -198,9 +220,16 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                     Démarrer
                   </Button>
                 ) : (
-                  <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>
-                    Redémarrer
-                  </Button>
+                  <>
+                    <Button size="sm" icon={<RotateCw size={12} />} loading={b("restart")} onClick={() => void act(p, "restart", "Redémarrer")}>
+                      Redémarrer
+                    </Button>
+                    {enMarche > 0 && (
+                      <Button size="sm" icon={<Square size={12} />} loading={b("stop")} title="Arrête tous les conteneurs du projet, sans les supprimer" onClick={() => void act(p, "stop", "Arrêter", STOP_WARNING)}>
+                        Arrêter
+                      </Button>
+                    )}
+                  </>
                 )}
                 <Button
                   size="sm"
@@ -246,6 +275,7 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                               <span className="flex min-w-0 items-center gap-1.5">
                                 <span className="truncate font-medium">{c.composeService ?? c.name}</span>
                                 {occasional.has(containerKey(c)) && <Badge tone="muted">ponctuel</Badge>}
+              <ConditionBadge c={c} onPurpose={onPurpose.has(containerKey(c))} occasional={occasional.has(containerKey(c))} />
                               </span>
                               <span className="block truncate text-[11.5px] text-muted">{c.status}</span>
                             </span>
@@ -278,6 +308,9 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
                                 </IconButton>
                                 <IconButton size="sm" title="Redémarrer ce service" disabled={!!containerActions.busy} onClick={() => void containerActions.act(c, "restart")}>
                                   <RotateCw size={14} className={containerActions.busy === c.id ? "animate-spin" : ""} />
+                                </IconButton>
+                                <IconButton size="sm" title="Arrêter ce service" disabled={!!containerActions.busy} onClick={() => void containerActions.act(c, "stop")}>
+                                  <Square size={13} />
                                 </IconButton>
                               </>
                             ) : (
@@ -329,6 +362,8 @@ export default function Compose({ serverId, data, docker, reload, onNew, onCatal
           }}
           occasional={occasional.has(containerKey(selected))}
           onOccasional={(v) => void setOccasional(selected, v)}
+          onPurpose={onPurpose.has(containerKey(selected))}
+          onOnPurpose={(v) => void setOnPurpose(selected, v)}
         />
       )}
       {restrict && (

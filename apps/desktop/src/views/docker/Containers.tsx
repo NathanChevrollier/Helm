@@ -8,6 +8,7 @@ import { askFolderName, toggleCollapsed } from "../../components/Folders";
 import { tunnelTo, RestrictPortDialog } from "../../components/DockerExtras";
 import { Badge, DataTable, IconButton, Input, MenuButton, Segmented, Select, StatusDot, useContextMenu, type Column, type MenuItem } from "../../components/ui";
 import ContainerDrawer from "./ContainerDrawer";
+import ConditionBadge from "./ConditionBadge";
 import { useContainerActions, useContainerFolders, useContainerStats } from "./shared";
 import PortChips, { isExposed } from "./PortChips";
 
@@ -18,6 +19,15 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
   const stats = useContainerStats(serverId);
   const { busy, act: runAction, shell, logs } = useContainerActions(serverId, docker, reload);
   const occasional = new Set(data.occasional);
+  const onPurpose = new Set(data.onPurpose ?? []);
+  const setOnPurpose = async (c: Container, value: boolean) => {
+    try {
+      await api.dockerOnPurposeSet(serverId, [containerKey(c)], value);
+      await reload();
+    } catch (e) {
+      useApp.getState().notify(errorMessage(e), "error");
+    }
+  };
   const setOccasional = async (c: Container, value: boolean) => {
     try {
       await api.dockerOccasionalSet(serverId, containerKey(c), value);
@@ -121,6 +131,7 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-medium">{c.name}</span>
               {occasional.has(containerKey(c)) && <Badge tone="muted">ponctuel</Badge>}
+              <ConditionBadge c={c} onPurpose={onPurpose.has(containerKey(c))} occasional={occasional.has(containerKey(c))} />
             </span>
             <span className="block truncate text-[11.5px] text-muted">{c.status}</span>
           </span>
@@ -323,6 +334,8 @@ export default function Containers({ serverId, data, docker, reload }: { serverI
           }}
           occasional={occasional.has(containerKey(selected))}
           onOccasional={(v) => void setOccasional(selected, v)}
+          onPurpose={onPurpose.has(containerKey(selected))}
+          onOnPurpose={(v) => void setOnPurpose(selected, v)}
         />
       )}
       {restrict && (

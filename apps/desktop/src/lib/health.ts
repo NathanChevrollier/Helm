@@ -51,11 +51,13 @@ export function fetchHealth(serverId: string, maxAgeMs = 10_000): Promise<Dashbo
 }
 
 /** Nombres affichés en badge dans la barre latérale pour un serveur. */
-export function badgesOf(s: DashboardSummary | undefined): { alerts: number; stopped: number; certs: number } {
-  if (!s?.connected) return { alerts: 0, stopped: 0, certs: 0 };
+export function badgesOf(s: DashboardSummary | undefined): { alerts: number; failed: number; stopped: number; certs: number } {
+  if (!s?.connected) return { alerts: 0, failed: 0, stopped: 0, certs: 0 };
   const soon = Date.now() / 1000 + 21 * 86_400;
   return {
     alerts: s.alerts?.length ?? 0,
+    /** Conteneurs en panne : c'est eux que signalent les pastilles (un arrêt propre n'est pas une panne). */
+    failed: s.failed?.length ?? 0,
     stopped: s.containersStopped ?? 0,
     certs: (s.certificates ?? []).filter((c) => c.notAfter < soon).length,
   };

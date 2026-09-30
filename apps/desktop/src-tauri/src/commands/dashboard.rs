@@ -39,9 +39,24 @@ pub struct Summary {
     alerts: Vec<ActiveAlert>,
     docker: bool,
     containers_running: usize,
+    /// Arrêtés sans erreur (code 0, arrêt par signal, jamais démarrés), ni ponctuels ni arrêtés
+    /// volontairement : à vérifier, sans urgence.
     containers_stopped: usize,
     stopped_names: Vec<String>,
+    /// Clés stables (`projet/service` ou nom) de tous ces conteneurs arrêtés, pour les marquer
+    /// « arrêtés volontairement » d'un clic.
+    stopped_keys: Vec<String>,
+    /// En panne : planté, tué faute de mémoire, redémarre en boucle, healthcheck en échec.
+    failed: Vec<FailedContainer>,
     certificates: Vec<CertSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedContainer {
+    name: String,
+    condition: docker::Condition,
+    status: String,
 }
 
 fn now_ms() -> i64 {
@@ -106,13 +121,30 @@ pub async fn dashboard_summary(
         };
         let ((agent, metrics, alerts), (docker, list), certificates) = tokio::join!(health, containers, certificates);
 
+        let mut metrics = metrics;
+        if let Some(m) = metrics.as_mut() {
+            crate::commands::monitoring::apply_disk_rules(&store, &server_id, m);
+        }
         let mut out = Summary { connected: true, agent, metrics, alerts, docker, certificates, ..Default::default() };
         if let Some(list) = list {
             out.containers_running = list.iter().filter(|c| c.state == "running").count();
             let occasional = crate::commands::docker::occasional_keys(&store, &server_id);
-            let stopped: Vec<_> = list.iter().filter(|c| c.state != "running" && !occasional.contains(&c.key())).collect();
+            let on_purpose = crate::commands::docker::on_purpose_keys(&store, &server_id);
+            // Une panne se signale toujours, même pour un conteneur ponctuel (une migration qui
+            // échoue n'est pas « normale »), sauf s'il a été arrêté volontairement depuis Zenytt.
+            out.failed = list
+                .iter()
+                .filter(|c| c.condition.is_failure() && !(c.state != "running" && on_purpose.contains(&c.key())))
+                .map(|c| FailedContainer { name: c.name.clone(), condition: c.condition, status: c.status.clone() })
+                .collect();
+            let stopped: Vec<_> = list
+                .iter()
+                .filter(|c| c.state != "running" && !c.condition.is_failure())
+                .filter(|c| !occasional.contains(&c.key()) && !on_purpose.contains(&c.key()))
+                .collect();
             out.containers_stopped = stopped.len();
             out.stopped_names = stopped.iter().take(5).map(|c| c.name.clone()).collect();
+            out.stopped_keys = stopped.iter().map(|c| c.key()).collect();
         }
         out
     };
